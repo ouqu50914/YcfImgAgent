@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  # 数据库服务
+  mysql:
+    image: mysql:8.0
+    container_name: ycf_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root  # 开发环境密码，生产环境请修改
+      MYSQL_DATABASE: ai_image_tool
+      MYSQL_USER: user
+      MYSQL_PASSWORD: user123
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql # 数据持久化到本地 data 目录
+    command: --default-authentication-plugin=mysql_native_password
+
+  # 缓存与队列服务
+  redis:
+    image: redis:7
+    container_name: ycf_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data

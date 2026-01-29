@@ -1,0 +1,50 @@
+### Node / TypeScript 通用 ###
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+
+### 输出目录（构建产物） ###
+dist/
+build/
+coverage/
+
+# Backend 构建产物
+Backend/dist/
+Backend/coverage/
+
+# Frontend 构建产物（Vite / React）
+Frontend/dist/
+Frontend/node_modules/
+Frontend/.vite/
+
+### 环境变量文件 ###
+.env
+.env.*.local
+Backend/.env
+Frontend/.env
+Frontend/.env.*
+
+### IDE / 编辑器 ###
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+Thumbs.db
+
+### 日志文件 ###
+logs/
+*.log
+*.log.*
+
+### Docker / 数据文件（本地开发数据库数据，不进版本库） ###
+data/mysql/
+data/redis/
+
+### 上传的用户文件 ###
+Backend/uploads/
+
