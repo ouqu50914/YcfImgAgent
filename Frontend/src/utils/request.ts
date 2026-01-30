@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus';
 // 创建 axios 实例
 const service = axios.create({
   baseURL: '/api', // 走 vite 代理，指向 http://localhost:3000/api
-  timeout: 10000,
+  timeout: 120000, // 图片生成可能需要较长时间，设置为120秒
 });
 
 // 请求拦截器：每次请求自动带 Token

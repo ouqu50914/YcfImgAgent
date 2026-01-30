@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import Login from '../views/Login.vue';
-import Home from '../views/Home.vue';
+import Login from '@/views/Login.vue';
+import Home from '@/views/Home.vue';
+import Workflow from '@/views/Workflow.vue';
 
 const routes = [
   {
@@ -13,6 +14,11 @@ const routes = [
     name: 'Home',
     component: Home,
     meta: { requiresAuth: true } // 标记需要登录
+  },
+  {
+    path: '/workflow',
+    name: 'Workflow',
+    component: Workflow
   }
 ];
 

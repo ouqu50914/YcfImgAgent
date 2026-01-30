@@ -9,9 +9,15 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/uuid": "^11.0.0",
+    "@volcengine/openapi": "^1.35.0",
+    "aws4": "^1.13.2",
+    "axios": "^1.13.4",
     "bcrypt": "^6.0.0",
     "bull": "^4.16.5",
     "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
@@ -21,9 +27,11 @@
     "multer": "^2.0.2",
     "mysql2": "^3.16.2",
     "reflect-metadata": "^0.2.2",
-    "typeorm": "^0.3.28"
+    "typeorm": "^0.3.28",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@types/aws4": "^1.11.6",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

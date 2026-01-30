@@ -7,6 +7,8 @@ import path from "path";
 
 import { AppDataSource } from "./data-source";
 import authRoutes from "./routes/auth.routes";
+import imageRoutes from "./routes/image.routes";
+
 
 dotenv.config();
 
@@ -16,9 +18,9 @@ app.use(express.json());
 
 // 挂载路由
 app.use("/api/auth", authRoutes);
-
+app.use("/api/image", imageRoutes);
 // 静态资源托管 (用于前端访问生成的图片)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 
 // 启动服务
