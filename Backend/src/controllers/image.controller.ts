@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
 import { ImageService } from "../services/image.service";
+import { LogService } from "../services/log.service";
 
 const imageService = new ImageService();
+const logService = new LogService();
 
 export const generateImage = async (req: Request, res: Response) => {
     try {
@@ -16,6 +18,26 @@ export const generateImage = async (req: Request, res: Response) => {
         const result = await imageService.generate(userId, apiType || 'dream', {
             prompt, width, height, style
         });
+
+        // 记录生图日志
+        const ipAddressRaw = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const logOptions: {
+            apiType?: string;
+            details?: any;
+            ipAddress?: string;
+        } = {
+            apiType: apiType || 'dream',
+            details: { prompt, width, height, style, imageId: result.id }
+        };
+        
+        if (ipAddressRaw) {
+            const ipAddress = Array.isArray(ipAddressRaw) ? ipAddressRaw[0] : ipAddressRaw;
+            if (ipAddress && typeof ipAddress === 'string') {
+                logOptions.ipAddress = ipAddress;
+            }
+        }
+        
+        await logService.logOperation(userId, 'generate', logOptions);
 
         return res.status(200).json({
             message: "任务提交成功",

@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import { User } from "./entities/User";
 import { ApiConfig } from "./entities/ApiConfig";
 import { ImageResult } from "./entities/ImageResult";
+import { OperationLog } from "./entities/OperationLog";
+import { UserDailyQuota } from "./entities/UserDailyQuota";
 
 dotenv.config();
 
@@ -17,7 +19,7 @@ export const AppDataSource = new DataSource({
     synchronize: true,
     logging: false,
     // 这里显式引入实体类，比用字符串路径更稳定，且避免打包后的路径问题
-    entities: [User, ApiConfig, ImageResult], 
+    entities: [User, ApiConfig, ImageResult, OperationLog, UserDailyQuota], 
     subscribers: [],
     migrations: [],
 });
