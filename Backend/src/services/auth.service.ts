@@ -82,21 +82,98 @@ export class AuthService {
         await redis.del(`login_fail:${username}`);
         await redis.del(lockKey);
 
-        // 3. 生成 JWT Token
-        const token = jwt.sign(
-            { userId: user.id, username: user.username, role: user.role_id },
+        // 4. 生成 Access Token (短期有效，7天)
+        const accessToken = jwt.sign(
+            { userId: user.id, username: user.username, role: user.role_id, type: 'access' },
             process.env.JWT_SECRET || "default_secret",
-            { expiresIn: "7d" } // 7天过期
+            { expiresIn: "7d" }
         );
 
+        // 5. 生成 Refresh Token (长期有效，30天)
+        const refreshToken = jwt.sign(
+            { userId: user.id, username: user.username, role: user.role_id, type: 'refresh' },
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET || "default_secret",
+            { expiresIn: "30d" }
+        );
+
+        // 6. 将 refresh token 存储到 Redis (用于撤销和验证)
+        const refreshKey = `refresh_token:${user.id}`;
+        await redis.setex(refreshKey, 30 * 24 * 60 * 60, refreshToken); // 30天过期
+
         return {
-            token,
+            token: accessToken,
+            refreshToken: refreshToken,
             userInfo: {
                 id: user.id,
                 username: user.username,
                 role: user.role_id
             }
         };
+    }
+
+    /**
+     * 刷新 Token
+     */
+    async refreshToken(refreshToken: string) {
+        try {
+            // 1. 验证 refresh token
+            const decoded: any = jwt.verify(
+                refreshToken,
+                process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET || "default_secret"
+            );
+
+            if (decoded.type !== 'refresh') {
+                throw new Error("无效的 refresh token");
+            }
+
+            // 2. 检查 refresh token 是否在 Redis 中（验证是否被撤销）
+            const refreshKey = `refresh_token:${decoded.userId}`;
+            const storedToken = await redis.get(refreshKey);
+            
+            if (!storedToken || storedToken !== refreshToken) {
+                throw new Error("Refresh token 已失效或已被撤销");
+            }
+
+            // 3. 查找用户
+            const user = await this.userRepository.findOne({
+                where: { id: decoded.userId },
+                select: ["id", "username", "role_id", "status"]
+            });
+
+            if (!user || user.status === 0) {
+                throw new Error("用户不存在或已被禁用");
+            }
+
+            // 4. 生成新的 access token
+            const newAccessToken = jwt.sign(
+                { userId: user.id, username: user.username, role: user.role_id, type: 'access' },
+                process.env.JWT_SECRET || "default_secret",
+                { expiresIn: "7d" }
+            );
+
+            return {
+                token: newAccessToken,
+                userInfo: {
+                    id: user.id,
+                    username: user.username,
+                    role: user.role_id
+                }
+            };
+        } catch (error: any) {
+            if (error.name === 'TokenExpiredError') {
+                throw new Error("Refresh token 已过期，请重新登录");
+            }
+            throw new Error(`Token 刷新失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 登出（撤销 refresh token）
+     */
+    async logout(userId: number) {
+        const refreshKey = `refresh_token:${userId}`;
+        await redis.del(refreshKey);
+        return { message: "登出成功" };
     }
 
     /**

@@ -1,9 +1,21 @@
 <template>
   <div class="profile-container">
+    <div class="header-section">
+      <el-button 
+        text 
+        :icon="ArrowLeft" 
+        @click="router.push('/')"
+        class="back-button"
+      >
+        返回
+      </el-button>
+      <h1 class="page-title">个人中心</h1>
+    </div>
+    
     <el-card>
       <template #header>
         <div class="card-header">
-          <h2>个人中心</h2>
+          <h2>个人信息</h2>
         </div>
       </template>
 
@@ -61,10 +73,14 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
+import { useRouter } from 'vue-router';
 import { useUserStore } from '@/store/user';
 import { ElMessage } from 'element-plus';
+import { ArrowLeft } from '@element-plus/icons-vue';
 import type { FormInstance } from 'element-plus';
 import request from '@/utils/request';
+
+const router = useRouter();
 
 const userStore = useUserStore();
 const formRef = ref<FormInstance>();
@@ -136,9 +152,39 @@ const handleSubmit = async () => {
 
 <style scoped>
 .profile-container {
+  height: 100vh;
+  width: 100vw;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.header-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+}
+
+.back-button {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #606266;
+  transition: color 0.2s;
+}
+
+.back-button:hover {
+  color: #409eff;
 }
 
 .card-header h2 {

@@ -28,10 +28,6 @@
             </el-button>
           </el-form-item>
         </el-form>
-        
-        <div class="tips">
-          <p>默认超管账号：admin / password123</p>
-        </div>
       </el-card>
     </div>
   </template>

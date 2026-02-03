@@ -2,6 +2,9 @@ import { AppDataSource } from "./data-source";
 import { ApiConfig } from "./entities/ApiConfig";
 import { User } from "./entities/User";
 import bcrypt from "bcrypt";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const seed = async () => {
     await AppDataSource.initialize();

@@ -47,4 +47,5 @@ data/redis/
 
 ### 上传的用户文件 ###
 Backend/uploads/
+Backend/temp/
 

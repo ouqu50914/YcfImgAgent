@@ -1,5 +1,17 @@
 <template>
   <div class="admin-container">
+    <div class="header-section">
+      <el-button 
+        text 
+        :icon="ArrowLeft" 
+        @click="router.push('/')"
+        class="back-button"
+      >
+        返回
+      </el-button>
+      <h1 class="page-title">管理后台</h1>
+    </div>
+    
     <el-tabs v-model="activeTab" type="border-card">
       <!-- 用户管理 -->
       <el-tab-pane label="用户管理" name="users">
@@ -202,7 +214,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowLeft } from '@element-plus/icons-vue';
 import type { FormInstance } from 'element-plus';
 import {
   getUserList,
@@ -215,6 +229,8 @@ import {
   getApiConfigs,
   updateApiConfig
 } from '@/api/admin';
+
+const router = useRouter();
 
 const activeTab = ref('users');
 
@@ -394,7 +410,37 @@ onMounted(() => {
 
 <style scoped>
 .admin-container {
+  height: 100vh;
+  width: 100vw;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
+  box-sizing: border-box;
+}
+
+.header-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+}
+
+.back-button {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #606266;
+  transition: color 0.2s;
+}
+
+.back-button:hover {
+  color: #409eff;
 }
 
 .toolbar {

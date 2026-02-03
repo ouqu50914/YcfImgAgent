@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: ycf_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ai_image_tool
+      MYSQL_USER: ${MYSQL_USER:-user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user123}
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - ycf_network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ycf_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - ycf_network
+
+  # 后端服务
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: ycf_backend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: ${MYSQL_USER:-user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-user123}
+      DB_DATABASE: ai_image_tool
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-${JWT_SECRET:-your-secret-key-change-in-production}}
+      SEED_ARK_API_KEY: ${SEED_ARK_API_KEY}
+      SEED_ARK_MODEL_ID: ${SEED_ARK_MODEL_ID}
+      CHATGPT_API_KEY: ${CHATGPT_API_KEY}
+      CHATGPT_API_URL: ${CHATGPT_API_URL}
+      CHATGPT_MODEL: ${CHATGPT_MODEL:-gpt-3.5-turbo}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      NANO_API_KEY: ${NANO_API_KEY}
+      NANO_API_URL: ${NANO_API_URL}
+    volumes:
+      - ./Backend/uploads:/app/uploads
+      - ./Backend/temp:/app/temp
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - ycf_network
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    container_name: ycf_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - ycf_network
+
+networks:
+  ycf_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:

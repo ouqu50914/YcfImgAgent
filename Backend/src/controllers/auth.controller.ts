@@ -76,3 +76,34 @@ export const changePassword = async (req: Request, res: Response) => {
         return res.status(400).json({ message: error.message });
     }
 };
+
+export const refreshToken = async (req: Request, res: Response) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ message: "Refresh token 不能为空" });
+        }
+
+        const result = await authService.refreshToken(refreshToken);
+        return res.status(200).json({
+            message: "Token 刷新成功",
+            data: result
+        });
+    } catch (error: any) {
+        return res.status(401).json({ message: error.message });
+    }
+};
+
+export const logout = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录" });
+        }
+
+        const result = await authService.logout(userId);
+        return res.status(200).json(result);
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};

@@ -5,6 +5,7 @@ import Home from '@/views/Home.vue';
 import Workflow from '@/views/Workflow.vue';
 import Profile from '@/views/Profile.vue';
 import Admin from '@/views/Admin.vue';
+import WorkflowPlaza from '@/views/WorkflowPlaza.vue';
 
 const routes = [
   {
@@ -35,6 +36,12 @@ const routes = [
     name: 'Admin',
     component: Admin,
     meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/workflow-plaza',
+    name: 'WorkflowPlaza',
+    component: WorkflowPlaza,
+    meta: { requiresAuth: true }
   }
 ];
 
