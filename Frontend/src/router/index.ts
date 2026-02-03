@@ -51,7 +51,7 @@ const router = createRouter({
 });
 
 // 路由守卫：防止未登录访问首页
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token');
   const userInfo = JSON.parse(localStorage.getItem('userInfo') || '{}');
   

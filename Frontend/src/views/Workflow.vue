@@ -128,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, markRaw, onMounted, onUnmounted } from 'vue';
+import { ref, markRaw, onMounted, onUnmounted, h } from 'vue';
 import { useRouter } from 'vue-router';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
@@ -201,8 +201,9 @@ const getLastImageFromWorkflow = (): string => {
             return b.position.y - a.position.y;
         });
     
-    if (imageNodes.length > 0) {
-        const lastImageUrl = imageNodes[0].data.imageUrl;
+    if (imageNodes.length > 0 && imageNodes[0]) {
+        const lastImageUrl = imageNodes[0].data?.imageUrl;
+        if (!lastImageUrl) return '';
         // 转换为完整URL
         if (lastImageUrl.startsWith('http')) {
             return lastImageUrl;

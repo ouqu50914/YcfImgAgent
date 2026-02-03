@@ -4,7 +4,7 @@ import request from '@/utils/request';
 export const useUserStore = defineStore('user', {
   state: () => ({
     token: localStorage.getItem('token') || '',
-    refreshToken: localStorage.getItem('refreshToken') || '',
+    refreshTokenValue: localStorage.getItem('refreshToken') || '',
     userInfo: JSON.parse(localStorage.getItem('userInfo') || '{}'),
     isRefreshing: false, // 防止并发刷新
   }),
@@ -20,7 +20,7 @@ export const useUserStore = defineStore('user', {
 
         // 保存状态
         this.token = token;
-        this.refreshToken = refreshToken || '';
+        this.refreshTokenValue = refreshToken || '';
         this.userInfo = userInfo;
         
         // 持久化到 LocalStorage
@@ -36,10 +36,10 @@ export const useUserStore = defineStore('user', {
       }
     },
     // 刷新 Token
-    async refreshToken() {
+    async refreshToken(): Promise<string> {
       if (this.isRefreshing) {
         // 如果正在刷新，等待刷新完成
-        return new Promise((resolve) => {
+        return new Promise<string>((resolve) => {
           const checkInterval = setInterval(() => {
             if (!this.isRefreshing) {
               clearInterval(checkInterval);
@@ -49,7 +49,7 @@ export const useUserStore = defineStore('user', {
         });
       }
 
-      if (!this.refreshToken) {
+      if (!this.refreshTokenValue) {
         throw new Error('没有 refresh token');
       }
 
@@ -57,7 +57,7 @@ export const useUserStore = defineStore('user', {
 
       try {
         const res: any = await request.post('/auth/refresh-token', {
-          refreshToken: this.refreshToken
+          refreshToken: this.refreshTokenValue
         });
 
         const { token, userInfo } = res.data;
@@ -88,7 +88,7 @@ export const useUserStore = defineStore('user', {
         // 忽略错误
       } finally {
         this.token = '';
-        this.refreshToken = '';
+        this.refreshTokenValue = '';
         this.userInfo = {};
         localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
