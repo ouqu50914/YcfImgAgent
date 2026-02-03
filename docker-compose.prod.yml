@@ -7,12 +7,13 @@ services:
     container_name: ycf_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # 这里设置数据库 root 密码，请确保与后端 .env 一致
+      MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: ai_image_tool
-      MYSQL_USER: ${MYSQL_USER:-user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-user123}
+      MYSQL_USER: user
+      MYSQL_PASSWORD: user123
     ports:
-      - "3306:3306"
+      - "3307:3306"  # 【关键修改】宿主机用 3307，容器内部依然是 3306
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -44,29 +45,21 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      # 【关键配置】Docker内部连接走服务名，不用改 IP
       DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USERNAME: ${MYSQL_USER:-user}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-user123}
+      DB_PORT: 3306 
+      DB_USERNAME: user
+      DB_PASSWORD: user123
       DB_DATABASE: ai_image_tool
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-${JWT_SECRET:-your-secret-key-change-in-production}}
-      SEED_ARK_API_KEY: ${SEED_ARK_API_KEY}
-      SEED_ARK_MODEL_ID: ${SEED_ARK_MODEL_ID}
-      CHATGPT_API_KEY: ${CHATGPT_API_KEY}
-      CHATGPT_API_URL: ${CHATGPT_API_URL}
-      CHATGPT_MODEL: ${CHATGPT_MODEL:-gpt-3.5-turbo}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      DEEPSEEK_API_URL: ${DEEPSEEK_API_URL}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
-      NANO_API_KEY: ${NANO_API_KEY}
-      NANO_API_URL: ${NANO_API_URL}
+      # 下面是你的 API Key 等配置，请确保这里有值或通过 .env 文件传入
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://ouqu.top}
     volumes:
       - ./Backend/uploads:/app/uploads
       - ./Backend/temp:/app/temp
+      - ./Backend/.env:/app/.env
     depends_on:
       - mysql
       - redis
@@ -90,7 +83,3 @@ services:
 networks:
   ycf_network:
     driver: bridge
-
-volumes:
-  mysql_data:
-  redis_data:

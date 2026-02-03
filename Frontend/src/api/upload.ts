@@ -1,5 +1,4 @@
 import request from '@/utils/request.ts';
-import type { UploadFile } from 'element-plus';
 
 // 上传单张图片
 export const uploadImage = (file: File) => {

@@ -832,7 +832,6 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     // 根据图片数量动态调整节点尺寸和间距
     const isMultipleImages = fullUrls.length > 1;
     const nodeSpacing = isMultipleImages ? 180 : 280; // 多图时缩小间距
-    const nodeWidthForImage = isMultipleImages ? 180 : 240; // 多图时缩小节点宽度
 
     fullUrls.forEach((fullUrl, index) => {
         const nodeId = `image_node_${Date.now()}_${index}`;

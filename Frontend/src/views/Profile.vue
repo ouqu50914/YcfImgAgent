@@ -92,7 +92,7 @@ const form = reactive({
   confirmPassword: ''
 });
 
-const validatePassword = (rule: any, value: any, callback: any) => {
+const validatePassword = (_rule: any, value: any, callback: any) => {
   if (!value) {
     callback(new Error('请输入新密码'));
   } else if (value.length < 6) {
@@ -104,7 +104,7 @@ const validatePassword = (rule: any, value: any, callback: any) => {
   }
 };
 
-const validateConfirmPassword = (rule: any, value: any, callback: any) => {
+const validateConfirmPassword = (_rule: any, value: any, callback: any) => {
   if (!value) {
     callback(new Error('请再次输入新密码'));
   } else if (value !== form.newPassword) {
