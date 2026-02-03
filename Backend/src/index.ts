@@ -23,6 +23,7 @@ const app = express();
 app.use(helmet());
 
 // CORS 配置
+// ALLOWED_ORIGINS 环境变量格式：用逗号分隔的域名列表，例如：https://ouqu.top,http://localhost:5173
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
 app.use(cors({
     origin: (origin, callback) => {
