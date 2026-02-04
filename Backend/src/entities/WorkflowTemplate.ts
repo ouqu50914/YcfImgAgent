@@ -28,6 +28,10 @@ export class WorkflowTemplate {
     @Column({ type: 'varchar', length: 500, nullable: true, comment: '封面图片URL' })
     cover_image?: string;
 
+    @Column({ type: 'varchar', length: 50, nullable: true, comment: '分类标识' })
+    @Index()
+    category?: string;
+
     @CreateDateColumn()
     created_at!: Date;
 

@@ -8,7 +8,7 @@ export class WorkflowService {
     /**
      * 保存工作流模板
      */
-    async saveTemplate(userId: number, name: string, workflowData: any, description?: string, isPublic: boolean = false, coverImage?: string) {
+    async saveTemplate(userId: number, name: string, workflowData: any, description?: string, isPublic: boolean = false, coverImage?: string, category?: string) {
         const template = new WorkflowTemplate();
         template.user_id = userId;
         template.name = name;
@@ -20,6 +20,9 @@ export class WorkflowService {
         template.usage_count = 0;
         if (coverImage !== undefined) {
             template.cover_image = coverImage;
+        }
+        if (category !== undefined) {
+            template.category = category;
         }
 
         await this.templateRepo.save(template);
@@ -93,6 +96,7 @@ export class WorkflowService {
         description?: string;
         workflow_data?: any;
         is_public?: boolean;
+        category?: string;
     }) {
         const template = await this.templateRepo.findOne({
             where: { id: templateId, user_id: userId }
@@ -106,6 +110,7 @@ export class WorkflowService {
         if (updates.description !== undefined) template.description = updates.description;
         if (updates.workflow_data) template.workflow_data = JSON.stringify(updates.workflow_data);
         if (updates.is_public !== undefined) template.is_public = updates.is_public ? 1 : 0;
+        if (updates.category !== undefined) template.category = updates.category;
 
         await this.templateRepo.save(template);
         return template;
@@ -116,6 +121,7 @@ export class WorkflowService {
      */
     async getPublicTemplates(params: {
         keyword?: string;
+        category?: string;
         sortBy?: 'time' | 'usage';
         page?: number;
         pageSize?: number;
@@ -130,6 +136,11 @@ export class WorkflowService {
                 '(template.name LIKE :keyword OR user.username LIKE :keyword)',
                 { keyword: `%${params.keyword}%` }
             );
+        }
+
+        // 分类筛选
+        if (params.category) {
+            query.andWhere('template.category = :category', { category: params.category });
         }
 
         // 排序

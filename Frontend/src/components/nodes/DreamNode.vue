@@ -127,9 +127,10 @@
                 <!-- 模型选择 -->
                 <div class="param-item">
                     <div class="param-label">模型</div>
-                    <el-select v-model="apiType" placeholder="选择模型" size="small" class="param-select model-select" :disabled="isExecuted">
+                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select" :disabled="isExecuted">
                         <el-option label="Seedream" value="dream" />
-                        <el-option label="Nano" value="nano" />
+                        <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
+                        <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
                     </el-select>
                 </div>
 
@@ -328,9 +329,26 @@ const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 
 const prompt = ref(props.data?.prompt || '');
 const size = ref('2048x2048'); // 默认使用推荐的1:1尺寸
-const apiType = ref<'dream' | 'nano'>('dream');
+// 统一的模型选择：dream 或 nano:model-name 格式
+const selectedModel = ref<string>(props.data?.apiType === 'nano' 
+    ? 'nano:gemini-2.5-flash-image' 
+    : (props.data?.apiType || 'dream'));
 const quality = ref('2K');
 const numImages = ref(1);
+
+// 计算属性：从 selectedModel 中提取 apiType
+const apiType = computed<'dream' | 'nano'>(() => {
+    return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
+});
+
+// 计算属性：从 selectedModel 中提取 nano 模型名称
+const nanoModel = computed<'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview' | undefined>(() => {
+    if (selectedModel.value.startsWith('nano:')) {
+        const model = selectedModel.value.split(':')[1];
+        return model as 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+    }
+    return undefined;
+});
 const loading = ref(false);
 const polishing = ref(false);
 const imageUrl = ref(props.data?.imageUrl || '');
@@ -364,9 +382,20 @@ if (props.data?.isVariation) {
     // 只有在真正执行完成后才标记为已执行
 }
 
+// 如果从外部传入图片URL（如从首页快速启动），将其添加到上传图片列表中以便显示
+if (props.data?.imageUrl && !props.data?.isVariation && uploadedImages.value.length === 0) {
+    // 将图片URL添加到上传图片列表中（用于显示，但不包含File对象）
+    uploadedImages.value.push({
+        url: props.data.imageUrl,
+        file: new File([], 'uploaded-image.jpg') // 创建一个空的File对象作为占位符
+    });
+}
+
 // 如果节点已有执行结果，标记为已执行
 // 注意：变体节点的 imageUrl 是参考图片，不是执行结果，所以需要排除变体节点
-if (!props.data?.isVariation && (props.data?.imageUrl || (props.data?.imageUrls && props.data.imageUrls.length > 0))) {
+// 从首页快速启动传入的图片也是参考图片，不应该标记为已执行
+// 只有当 imageUrl 是执行结果时（通常会有 imageUrls 数组），才标记为已执行
+if (!props.data?.isVariation && props.data?.imageUrls && Array.isArray(props.data.imageUrls) && props.data.imageUrls.length > 0) {
     isExecuted.value = true;
 }
 
@@ -660,10 +689,13 @@ const handleGenerate = async () => {
         // 6. 处理参考图片：优先使用上传的图片，否则使用上游节点的图片
         let referenceImageUrl = '';
         let referenceImageUrls: string[] = [];
-        const hasMultipleReferenceImages = uploadedImages.value.length > 1;
         
-        // 如果没有上传图片，但上游节点有图片，使用上游图片
-        if (uploadedImages.value.length === 0) {
+        // 过滤出有效的上传图片（有file对象的）
+        const validUploadedImages = uploadedImages.value.filter(img => img.file && img.file.size > 0);
+        const hasMultipleReferenceImages = validUploadedImages.length > 1;
+        
+        // 如果没有有效上传图片，但上游节点有图片，使用上游图片
+        if (validUploadedImages.length === 0) {
             if (upstreamImageUrls.length > 1) {
                 // 多个上游节点或多个图片，使用多图模式
                 referenceImageUrls = upstreamImageUrls;
@@ -673,19 +705,22 @@ const handleGenerate = async () => {
                 referenceImageUrl = upstreamImageUrls[0];
                 console.log('使用上游单图作为参考:', referenceImageUrl);
             } else if (imageUrl.value) {
-                // 变体节点可能已经有图片URL
-                referenceImageUrl = imageUrl.value;
+                // 从首页传入的图片URL或变体节点的图片URL
+                referenceImageUrl = imageUrl.value.startsWith('http') 
+                    ? imageUrl.value 
+                    : `${window.location.origin}${imageUrl.value}`;
                 console.log('使用节点已有图片作为参考:', referenceImageUrl);
             }
         }
         
-        if (uploadedImages.value.length > 0) {
+        // 如果有有效上传图片，上传它们
+        if (validUploadedImages.length > 0) {
             try {
-                console.log(`开始上传参考图片... (${uploadedImages.value.length}张)`);
+                console.log(`开始上传参考图片... (${validUploadedImages.length}张)`);
                 
                 if (hasMultipleReferenceImages) {
                     // 多图上传
-                    const uploadPromises = uploadedImages.value.map(img => uploadImage(img.file));
+                    const uploadPromises = validUploadedImages.map(img => uploadImage(img.file));
                     const uploadResults = await Promise.all(uploadPromises);
                     
                     referenceImageUrls = uploadResults
@@ -696,9 +731,9 @@ const handleGenerate = async () => {
                         );
                     
                     console.log(`参考图片上传成功: ${referenceImageUrls.length}张`, referenceImageUrls);
-                } else if (uploadedImages.value[0]) {
+                } else if (validUploadedImages[0]) {
                     // 单图上传
-                    const uploadRes: any = await uploadImage(uploadedImages.value[0].file);
+                    const uploadRes: any = await uploadImage(validUploadedImages[0].file);
                     if (uploadRes.data && uploadRes.data.url) {
                         referenceImageUrl = uploadRes.data.url.startsWith('http')
                             ? uploadRes.data.url
@@ -729,6 +764,11 @@ const handleGenerate = async () => {
             imageUrl: hasMultipleReferenceImages ? undefined : (referenceImageUrl || undefined),
             imageUrls: hasMultipleReferenceImages && referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
         };
+
+        // 如果使用 Nano 模型，添加子模型参数
+        if (apiType.value === 'nano') {
+            requestParams.model = nanoModel.value;
+        }
 
         // 根据模式决定传递哪些参数
         if (useQualityMode) {

@@ -9,7 +9,7 @@ export const generateImage = async (req: Request, res: Response) => {
     try {
         // 从 JWT 中解析出的 userId (在 middleware 中赋值，稍后补充)
         const userId = (req as any).user?.userId; 
-        const { apiType, prompt, width, height, style, imageUrl, imageUrls, numImages, quality } = req.body;
+        const { apiType, prompt, width, height, style, imageUrl, imageUrls, numImages, quality, model } = req.body;
 
         // 图生图时提示词可以为空，但必须有参考图片
         const hasImage = !!imageUrl || (imageUrls && imageUrls.length > 0);
@@ -25,7 +25,8 @@ export const generateImage = async (req: Request, res: Response) => {
             num_images: numImages || 1,
             imageUrl,
             imageUrls,
-            quality
+            quality,
+            model // 传递 Nano 子模型参数
         });
 
         // 记录生图日志

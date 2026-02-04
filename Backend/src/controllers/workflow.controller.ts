@@ -8,10 +8,14 @@ const historyService = new WorkflowHistoryService();
 export const saveTemplate = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { name, workflowData, description, isPublic, coverImage } = req.body;
+        const { name, workflowData, description, isPublic, coverImage, category } = req.body;
 
         if (!name || !workflowData) {
             return res.status(400).json({ message: "模板名称和工作流数据不能为空" });
+        }
+
+        if (!category) {
+            return res.status(400).json({ message: "分类不能为空" });
         }
 
         const template = await workflowService.saveTemplate(
@@ -20,7 +24,8 @@ export const saveTemplate = async (req: Request, res: Response) => {
             workflowData,
             description,
             isPublic || false,
-            coverImage
+            coverImage,
+            category
         );
 
         return res.status(200).json({
@@ -91,13 +96,14 @@ export const updateTemplate = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "无效的模板ID" });
         }
         const templateId = parseInt(idParam);
-        const { name, description, workflowData, isPublic } = req.body;
+        const { name, description, workflowData, isPublic, category } = req.body;
 
         const template = await workflowService.updateTemplate(templateId, userId, {
             name,
             description,
             workflow_data: workflowData,
-            is_public: isPublic
+            is_public: isPublic,
+            category
         });
 
         return res.status(200).json({
@@ -187,12 +193,14 @@ export const deleteHistory = async (req: Request, res: Response) => {
 export const getPublicTemplates = async (req: Request, res: Response) => {
     try {
         const keywordParam = req.query.keyword as string | undefined;
+        const categoryParam = req.query.category as string | undefined;
         const sortBy = (req.query.sortBy as 'time' | 'usage') || 'time';
         const page = parseInt(req.query.page as string) || 1;
         const pageSize = parseInt(req.query.pageSize as string) || 12;
 
         const params: {
             keyword?: string;
+            category?: string;
             sortBy?: 'time' | 'usage';
             page?: number;
             pageSize?: number;
@@ -204,6 +212,10 @@ export const getPublicTemplates = async (req: Request, res: Response) => {
 
         if (keywordParam !== undefined) {
             params.keyword = keywordParam;
+        }
+
+        if (categoryParam !== undefined) {
+            params.category = categoryParam;
         }
 
         const result = await workflowService.getPublicTemplates(params);

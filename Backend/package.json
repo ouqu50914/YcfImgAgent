@@ -10,6 +10,7 @@
     "seed": "ts-node src/seed.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.39.0",
     "@types/crypto-js": "^4.2.2",
     "@types/uuid": "^11.0.0",
     "@volcengine/openapi": "^1.35.0",
@@ -29,6 +30,7 @@
     "mysql2": "^3.16.2",
     "reflect-metadata": "^0.2.2",
     "typeorm": "^0.3.28",
+    "undici": "^7.20.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

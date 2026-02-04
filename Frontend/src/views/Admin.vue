@@ -144,6 +144,35 @@
         />
       </el-tab-pane>
 
+      <!-- 分类管理 -->
+      <el-tab-pane label="分类管理" name="categories">
+        <div class="toolbar">
+          <el-button type="primary" @click="showCreateCategoryDialog = true">新增分类</el-button>
+          <el-button @click="loadCategories" style="margin-left: 10px">刷新</el-button>
+        </div>
+
+        <el-table :data="categoryList" border style="margin-top: 20px">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="name" label="分类名称" />
+          <el-table-column prop="code" label="分类标识" />
+          <el-table-column prop="description" label="描述" />
+          <el-table-column prop="sort_order" label="排序" width="100" />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'">
+                {{ row.status === 1 ? '启用' : '禁用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="editCategory(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="deleteCategoryHandler(row.id)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- API配置 -->
       <el-tab-pane label="API配置" name="configs">
         <el-table :data="apiConfigs" border>
@@ -197,6 +226,36 @@
       </template>
     </el-dialog>
 
+    <!-- 创建/编辑分类对话框 -->
+    <el-dialog 
+      v-model="showCreateCategoryDialog" 
+      :title="editingCategory ? '编辑分类' : '新增分类'" 
+      width="500px"
+      @close="() => { editingCategory = null; categoryForm.name = ''; categoryForm.code = ''; categoryForm.description = ''; categoryForm.sort_order = 0; categoryForm.status = 1; }"
+    >
+      <el-form :model="categoryForm" :rules="categoryRules" ref="categoryFormRef" label-width="100px">
+        <el-form-item label="分类名称" prop="name">
+          <el-input v-model="categoryForm.name" placeholder="请输入分类名称" />
+        </el-form-item>
+        <el-form-item label="分类标识" prop="code">
+          <el-input v-model="categoryForm.code" placeholder="请输入分类标识（英文，如：brand）" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="categoryForm.description" type="textarea" :rows="3" placeholder="请输入分类描述（可选）" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="categoryForm.sort_order" :min="0" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="categoryForm.status" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreateCategoryDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveCategory">确定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 重置密码对话框 -->
     <el-dialog v-model="showResetPasswordDialog" title="重置密码" width="400px">
       <el-form :model="resetPasswordForm" :rules="resetPasswordRules" ref="resetPasswordFormRef" label-width="100px">
@@ -229,6 +288,13 @@ import {
   getApiConfigs,
   updateApiConfig
 } from '@/api/admin';
+import {
+  getAllCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  type WorkflowCategory
+} from '@/api/category';
 
 const router = useRouter();
 
@@ -391,6 +457,85 @@ const updateApiConfigStatus = async (apiType: string, status: number) => {
   }
 };
 
+// 分类管理
+const categoryList = ref<WorkflowCategory[]>([]);
+const showCreateCategoryDialog = ref(false);
+const editingCategory = ref<WorkflowCategory | null>(null);
+const categoryForm = reactive({
+  name: '',
+  code: '',
+  description: '',
+  sort_order: 0,
+  status: 1
+});
+const categoryFormRef = ref<FormInstance>();
+const categoryRules = {
+  name: [{ required: true, message: '请输入分类名称', trigger: 'blur' }],
+  code: [
+    { required: true, message: '请输入分类标识', trigger: 'blur' },
+    { pattern: /^[a-z0-9_]+$/, message: '分类标识只能包含小写字母、数字和下划线', trigger: 'blur' }
+  ]
+};
+
+const loadCategories = async () => {
+  try {
+    const res: any = await getAllCategories();
+    categoryList.value = res.data;
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载失败');
+  }
+};
+
+const handleSaveCategory = async () => {
+  if (!categoryFormRef.value) return;
+  await categoryFormRef.value.validate(async (valid) => {
+    if (valid) {
+      try {
+        if (editingCategory.value) {
+          await updateCategory(editingCategory.value.id, categoryForm);
+          ElMessage.success('更新成功');
+        } else {
+          await createCategory(categoryForm);
+          ElMessage.success('创建成功');
+        }
+        showCreateCategoryDialog.value = false;
+        editingCategory.value = null;
+        categoryForm.name = '';
+        categoryForm.code = '';
+        categoryForm.description = '';
+        categoryForm.sort_order = 0;
+        categoryForm.status = 1;
+        loadCategories();
+      } catch (error: any) {
+        ElMessage.error(error.message || '操作失败');
+      }
+    }
+  });
+};
+
+const editCategory = (category: WorkflowCategory) => {
+  editingCategory.value = category;
+  categoryForm.name = category.name;
+  categoryForm.code = category.code;
+  categoryForm.description = category.description || '';
+  categoryForm.sort_order = category.sort_order;
+  categoryForm.status = category.status;
+  showCreateCategoryDialog.value = true;
+};
+
+const deleteCategoryHandler = async (id: number) => {
+  try {
+    await ElMessageBox.confirm('确定要删除该分类吗？', '提示', { type: 'warning' });
+    await deleteCategory(id);
+    ElMessage.success('删除成功');
+    loadCategories();
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '删除失败');
+    }
+  }
+};
+
 const updateApiConfigLimit = async (apiType: string, limit: number) => {
   try {
     await updateApiConfig(apiType, { user_daily_limit: limit });
@@ -405,6 +550,7 @@ onMounted(() => {
   loadUserList();
   loadLogs();
   loadApiConfigs();
+  loadCategories();
 });
 </script>
 

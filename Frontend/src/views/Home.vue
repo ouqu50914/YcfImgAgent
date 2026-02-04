@@ -1,221 +1,139 @@
 <template>
   <div class="home-container">
-    <!-- 顶部区域 -->
+    <!-- 左侧导航栏 -->
+    <Sidebar />
+    
+    <!-- 主内容区域 -->
+    <div class="main-content">
+      <!-- 顶部Header -->
     <div class="header-section">
       <div class="header-left">
-        <h1 class="page-title">工作台</h1>
-      </div>
-      <div class="header-right">
-        <div class="login-info">
-          <span class="login-text">
-            {{ userStore.userInfo.username || '用户' }} 
-            ({{ userStore.userInfo.role === 1 ? '超级管理员' : '普通用户' }})
-          </span>
-          <el-button text type="danger" size="small" @click="handleLogout">退出</el-button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 主要导航按钮 -->
-    <div class="nav-buttons">
-      <el-button 
-        type="primary" 
-        size="large"
-        @click="router.push('/workflow')"
-      >
-        工作流编辑器
-      </el-button>
-      <el-button 
-        size="large"
-        @click="router.push('/profile')"
-      >
-        个人中心
-      </el-button>
-      <el-button 
-        v-if="userStore.userInfo.role === 1"
-        type="warning" 
-        size="large"
-        @click="router.push('/admin')"
-      >
-        管理后台
-      </el-button>
-    </div>
-
-    <!-- 主要内容区域 -->
-    <div class="main-content">
-      <div class="content-wrapper">
-        <div class="center-action">
-          <div class="action-text" @click="router.push('/workflow')">进入工作流编辑器</div>
-          <div class="action-line"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 底部：历史工作流 -->
-    <div class="workflow-section">
-      <div class="section-header">
-        <div class="section-title">历史工作流</div>
-        <el-button 
-          type="danger" 
-          size="small"
-          @click="router.push('/workflow-plaza')"
-        >
-          前往工作流广场
-        </el-button>
-      </div>
-      <!-- 有工作流时显示网格 -->
-      <div v-if="workflows.length > 0" class="workflow-grid">
-        <div 
-          v-for="(workflow, index) in workflows" 
-          :key="index"
-          class="workflow-card"
-          @click="handleWorkflowClick(workflow)"
-        >
-          <div class="workflow-preview">
-            <img 
-              v-if="workflow.preview" 
-              :src="getImageUrl(workflow.preview)" 
-              alt="工作流预览"
-              @error="handleImageError"
-            />
-            <div v-else class="workflow-placeholder">暂无预览</div>
+          <div class="logo-section">
+            <h1 class="brand-title">AI生图工具</h1>
           </div>
-          <div class="workflow-name">{{ workflow.name || '未命名工作流' }}</div>
+          <div class="title-section">
+            <h2 class="main-title">让AI生图更简单</h2>
+            <p class="sub-title">智能工作流，帮你搞定一切</p>
+      </div>
+        </div>
+        <div class="header-right">
+          <div class="user-info">
+            <el-avatar :size="32" class="user-avatar">
+              {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
+            </el-avatar>
+            <div class="user-details">
+              <span class="username">{{ userStore.userInfo.username || '用户' }}</span>
+              <span class="user-role">
+                {{ userStore.userInfo.role === 1 ? '超级管理员' : '普通用户' }}
+              </span>
+      </div>
+            <el-button text type="danger" size="small" @click="handleLogout">
+              退出
+      </el-button>
         </div>
       </div>
-      <!-- 没有工作流时显示按钮 -->
-      <div v-else class="no-workflow-container">
-        <el-button 
-          type="primary" 
-          size="large"
-          @click="router.push('/workflow')"
-          class="enter-workflow-btn"
-        >
-          进入工作流编辑器
-        </el-button>
+    </div>
+
+      <!-- 中央快速启动输入框 -->
+      <div class="quick-start-section">
+        <QuickStartInput />
+      </div>
+      
+      <!-- 最近项目区域 -->
+      <div class="recent-projects-section">
+        <RecentProjects ref="recentProjectsRef" />
+      </div>
+      
+      <!-- 灵感发现区域 -->
+      <div class="inspiration-section">
+        <InspirationGrid />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useUserStore } from '../store/user';
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { getTemplates, type WorkflowTemplate } from '@/api/workflow';
+import { useUserStore } from '../store/user';
+import Sidebar from '@/components/Sidebar.vue';
+import QuickStartInput from '@/components/QuickStartInput.vue';
+import RecentProjects from '@/components/RecentProjects.vue';
+import InspirationGrid from '@/components/InspirationGrid.vue';
 
-const userStore = useUserStore();
 const router = useRouter();
-const workflows = ref<Array<{ id?: number; name?: string; preview?: string }>>([]);
+const userStore = useUserStore();
+const recentProjectsRef = ref<InstanceType<typeof RecentProjects> | null>(null);
 
 const handleLogout = async () => {
   await userStore.logout();
   router.push('/login');
 };
-
-const handleWorkflowClick = (workflow: any) => {
-  if (workflow.id) {
-    // 可以跳转到工作流详情或直接加载
-    router.push(`/workflow?id=${workflow.id}`);
-  }
-};
-
-// 获取完整图片URL
-const getImageUrl = (url: string) => {
-  if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads/')) {
-    return `${window.location.origin}${url}`;
-  }
-  return `${window.location.origin}/uploads/${url}`;
-};
-
-// 图片加载错误处理
-const handleImageError = (event: Event) => {
-  const target = event.target as HTMLImageElement;
-  if (target) {
-    target.style.display = 'none';
-    const placeholder = target.nextElementSibling || target.parentElement?.querySelector('.workflow-placeholder');
-    if (placeholder) {
-      (placeholder as HTMLElement).style.display = 'flex';
-    }
-  }
-};
-
-// 加载工作流列表
-const loadWorkflows = async () => {
-  try {
-    const res: any = await getTemplates();
-    if (res.data && Array.isArray(res.data)) {
-      // 只显示前4个，或者公开的工作流
-      workflows.value = res.data.slice(0, 4).map((item: WorkflowTemplate) => {
-        // 优先使用封面图片，如果没有则从工作流数据中提取第一张图片作为预览
-        let preview: string | undefined = undefined;
-        
-        // 优先使用保存的封面图片
-        if (item.cover_image) {
-          preview = item.cover_image;
-        } else if (item.workflow_data && typeof item.workflow_data === 'object') {
-          // 如果没有封面图片，查找第一个图片节点的图片URL
-          const nodes = item.workflow_data.nodes || [];
-          const imageNode = nodes.find((node: any) => 
-            node.type === 'image' && (node.data?.imageUrl || node.data?.image_url)
-          );
-          if (imageNode) {
-            preview = imageNode.data?.imageUrl || imageNode.data?.image_url;
-          }
-        }
-        
-        return {
-          id: item.id,
-          name: item.name,
-          preview
-        };
-      });
-    }
-  } catch (error) {
-    console.error('加载工作流失败:', error);
-  }
-};
-
-onMounted(() => {
-  loadWorkflows();
-});
 </script>
 
 <style scoped>
 .home-container {
-  height: 100vh;
-  width: 100vw;
-  overflow-y: auto;
-  overflow-x: hidden;
-  background: #f5f5f5;
-  padding: 20px;
-  box-sizing: border-box;
+  min-height: 100vh;
+  background: #f5f7fa;
+  display: flex;
+  padding-left: 80px;
 }
 
-/* 顶部区域 */
+.main-content {
+  flex: 1;
+  padding: 24px 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 顶部Header区域 */
 .header-section {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 20px;
+  margin-bottom: 40px;
+  padding: 20px 0;
 }
 
 .header-left {
-  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 24px;
 }
 
-.page-title {
-  font-size: 32px;
+.logo-section {
+  display: flex;
+  align-items: center;
+}
+
+.brand-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #303133;
+  margin: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.main-title {
+  font-size: 28px;
   font-weight: 600;
   color: #303133;
-  margin: 0 0 8px 0;
+  margin: 0;
 }
 
-.welcome-text {
-  font-size: 16px;
-  color: #606266;
+.sub-title {
+  font-size: 14px;
+  color: #909399;
   margin: 0;
 }
 
@@ -224,180 +142,107 @@ onMounted(() => {
   align-items: center;
 }
 
-.login-info {
+.user-info {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0;
-  font-size: 14px;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fff;
+  border-radius: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
-.login-text {
+.user-avatar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-weight: 600;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.username {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.user-role {
+  font-size: 12px;
   color: #909399;
 }
 
-/* 导航按钮 */
-.nav-buttons {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
+/* 快速启动区域 */
+.quick-start-section {
+  margin-bottom: 48px;
 }
 
-.nav-buttons .el-button {
-  flex: 1;
-  max-width: 200px;
+/* 最近项目区域 */
+.recent-projects-section {
+  margin-bottom: 48px;
 }
 
-
-/* 主要内容区域 */
-.main-content {
-  margin-bottom: 40px;
+/* 灵感发现区域 */
+.inspiration-section {
+  margin-bottom: 48px;
 }
 
-.content-wrapper {
-  background: white;
-  border: 2px solid #f56c6c;
-  border-radius: 8px;
-  min-height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s;
+@media (max-width: 1024px) {
+  .home-container {
+    padding-left: 60px;
+  }
+  
+  .main-content {
+    padding: 20px 24px;
 }
 
-.content-wrapper:hover {
-  border-color: #f78989;
-  box-shadow: 0 4px 12px rgba(245, 108, 108, 0.2);
-}
-
-.center-action {
-  text-align: center;
-}
-
-.action-text {
-  font-size: 24px;
-  font-weight: 600;
-  color: #f56c6c;
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-
-.action-line {
-  width: 60px;
-  height: 2px;
-  background: #f56c6c;
-  margin: 0 auto;
-}
-
-/* 底部工作流区域 */
-.workflow-section {
-  background: white;
-  border-radius: 8px;
-  padding: 24px;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-  margin: 0;
-}
-
-.workflow-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  .header-section {
+    flex-direction: column;
   gap: 16px;
-}
-
-.workflow-card {
-  background: #fafafa;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: all 0.3s;
-  display: flex;
+    align-items: flex-start;
+  }
+  
+  .header-left {
   flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
 }
 
-.workflow-card:hover {
-  border-color: #409eff;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15);
-  transform: translateY(-2px);
+  .main-title {
+    font-size: 24px;
+}
 }
 
-.workflow-card.placeholder {
-  cursor: default;
-  opacity: 0.5;
+@media (max-width: 768px) {
+  .home-container {
+    padding-left: 0;
 }
 
-.workflow-card.placeholder:hover {
-  transform: none;
-  border-color: #e0e0e0;
-  box-shadow: none;
+  .main-content {
+    padding: 16px;
 }
 
-.workflow-preview {
-  width: 100%;
-  height: 0;
-  padding-bottom: 75%; /* 4:3 比例，更合理的高度 */
-  position: relative;
-  background: #f5f5f5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
+  .header-section {
+    margin-bottom: 24px;
+  }
+  
+  .brand-title {
+    font-size: 20px;
 }
 
-.workflow-preview img {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  .main-title {
+    font-size: 20px;
+  }
+  
+  .user-info {
+    padding: 6px 12px;
 }
 
-.workflow-placeholder {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #c0c4cc;
-  font-size: 14px;
-}
-
-.workflow-name {
-  padding: 12px;
-  font-size: 14px;
-  color: #303133;
-  text-align: center;
-  font-weight: 500;
-}
-
-/* 无工作流时的按钮容器 */
-.no-workflow-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 60px 20px;
-}
-
-.enter-workflow-btn {
-  padding: 16px 48px;
-  font-size: 16px;
-  font-weight: 500;
+  .user-details {
+    display: none;
+  }
 }
 </style>

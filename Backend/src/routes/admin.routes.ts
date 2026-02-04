@@ -12,6 +12,12 @@ import {
     updateApiConfig,
     getUserStats
 } from "../controllers/admin.controller";
+import {
+    getAllCategories,
+    createCategory,
+    updateCategory,
+    deleteCategory
+} from "../controllers/category.controller";
 
 const router = Router();
 
@@ -33,5 +39,11 @@ router.get("/logs", getOperationLogs);
 // API配置管理
 router.get("/api-configs", getApiConfigs);
 router.put("/api-configs/:apiType", updateApiConfig);
+
+// 分类管理
+router.get("/categories", getAllCategories);
+router.post("/categories", createCategory);
+router.put("/categories/:id", updateCategory);
+router.delete("/categories/:id", deleteCategory);
 
 export default router;

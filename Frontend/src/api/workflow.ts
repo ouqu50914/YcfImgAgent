@@ -19,6 +19,7 @@ export const saveTemplate = (data: {
   description?: string;
   isPublic?: boolean;
   coverImage?: string;
+  category: string;
 }) => {
   return request.post<{ message: string; data: WorkflowTemplate }>('/workflow/template', data);
 };
@@ -36,6 +37,7 @@ export const updateTemplate = (id: number, data: {
   description?: string;
   workflowData?: any;
   isPublic?: boolean;
+  category?: string;
 }) => {
   return request.put<{ message: string; data: WorkflowTemplate }>(`/workflow/template/${id}`, data);
 };
@@ -75,6 +77,7 @@ export const deleteHistory = (id: number) => {
 // 工作流广场相关
 export const getPublicTemplates = (params?: {
   keyword?: string;
+  category?: string;
   sortBy?: 'time' | 'usage';
   page?: number;
   pageSize?: number;

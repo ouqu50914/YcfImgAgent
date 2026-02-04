@@ -4,8 +4,12 @@ import {
     autoSaveHistory, getHistoryList, getHistory, deleteHistory, getPublicTemplates
 } from "../controllers/workflow.controller";
 import { authenticateToken } from "../middlewares/auth.middleware";
+import { getActiveCategories } from "../controllers/category.controller";
 
 const router = Router();
+
+// 公开接口：获取分类列表（不需要登录）
+router.get("/categories", getActiveCategories);
 
 // 所有路由都需要登录
 router.use(authenticateToken);

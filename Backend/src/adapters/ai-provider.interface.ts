@@ -7,6 +7,7 @@ export interface GenerateParams {
     imageUrl?: string; // 单图生图时使用的参考图片URL
     imageUrls?: string[]; // 多图生图时使用的参考图片URL数组
     quality?: string; // 画质：1K、2K、4K（豆包API方式1）
+    model?: 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview'; // Nano 模型选择
 }
 
 export interface UpscaleParams {

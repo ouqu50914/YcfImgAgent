@@ -16,7 +16,7 @@
                 <el-button type="primary" size="small" @click="addNode">添加生图节点</el-button>
                 <el-button type="success" size="small" @click="addUpscaleNode">添加放大节点</el-button>
                 <el-button type="success" size="small" @click="addExtendNode">添加扩展节点</el-button>
-                <el-button type="warning" size="small" @click="showSaveDialog = true">保存模板</el-button>
+                <el-button type="warning" size="small" @click="() => { loadCategories(); showSaveDialog = true; }">保存模板</el-button>
                 <el-button type="info" size="small" @click="showLoadDialogHandler">加载模板</el-button>
                 <el-button type="success" size="small" @click="showHistoryDialogHandler">历史记录</el-button>
             </div>
@@ -57,7 +57,7 @@
         </div>
 
         <!-- 保存模板对话框 -->
-        <el-dialog v-model="showSaveDialog" title="保存工作流模板" width="600px" @opened="() => { saveForm.coverImage = getLastImageFromWorkflow(); }">
+        <el-dialog v-model="showSaveDialog" title="保存工作流模板" width="600px" @opened="() => { loadCategories(); saveForm.coverImage = getLastImageFromWorkflow(); }">
             <el-form :model="saveForm" label-width="100px">
                 <el-form-item label="模板名称">
                     <el-input v-model="saveForm.name" placeholder="请输入模板名称" />
@@ -84,6 +84,20 @@
                             </div>
                         </div>
                     </div>
+                </el-form-item>
+                <el-form-item label="分类" required>
+                    <el-select 
+                        v-model="saveForm.category" 
+                        placeholder="请选择分类"
+                        style="width: 100%"
+                    >
+                        <el-option
+                            v-for="cat in categories"
+                            :key="cat.code"
+                            :label="cat.name"
+                            :value="cat.code"
+                        />
+                    </el-select>
                 </el-form-item>
                 <el-form-item label="是否公开">
                     <el-switch v-model="saveForm.isPublic" />
@@ -129,7 +143,7 @@
 
 <script setup lang="ts">
 import { ref, markRaw, onMounted, onUnmounted, h } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
@@ -137,6 +151,7 @@ import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft } from '@element-plus/icons-vue';
 import { saveTemplate, getTemplates, getTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { getActiveCategories, type WorkflowCategory } from '@/api/category';
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
@@ -169,6 +184,7 @@ const elements = ref([
 
 const { addNodes, addEdges, getEdges, getNodes, setNodes, setEdges, removeNodes } = useVueFlow();
 const router = useRouter();
+const route = useRoute();
 
 // 返回首页
 const handleGoBack = () => {
@@ -184,8 +200,10 @@ const saveForm = ref({
     name: '',
     description: '',
     isPublic: false,
-    coverImage: '' as string
+    coverImage: '' as string,
+    category: '' as string
 });
+const categories = ref<WorkflowCategory[]>([]);
 
 // 获取工作流中最后一张图片作为默认封面
 const getLastImageFromWorkflow = (): string => {
@@ -353,6 +371,11 @@ const handleSaveTemplate = async () => {
         return;
     }
 
+    if (!saveForm.value.category) {
+        ElMessage.warning('请选择分类');
+        return;
+    }
+
     saving.value = true;
     try {
         const workflowData = {
@@ -365,17 +388,28 @@ const handleSaveTemplate = async () => {
             description: saveForm.value.description,
             workflowData,
             isPublic: saveForm.value.isPublic,
-            coverImage: saveForm.value.coverImage
+            coverImage: saveForm.value.coverImage,
+            category: saveForm.value.category
         });
 
         ElMessage.success('模板保存成功');
         showSaveDialog.value = false;
-        saveForm.value = { name: '', description: '', isPublic: false, coverImage: '' };
+        saveForm.value = { name: '', description: '', isPublic: false, coverImage: '', category: '' };
         loadTemplates();
     } catch (error: any) {
         ElMessage.error(error.message || '保存失败');
     } finally {
         saving.value = false;
+    }
+};
+
+// 加载分类列表
+const loadCategories = async () => {
+    try {
+        const res: any = await getActiveCategories();
+        categories.value = res.data || [];
+    } catch (error: any) {
+        console.error('加载分类列表失败:', error);
     }
 };
 
@@ -514,6 +548,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
         if (getNodes.value.length > 0) {
+            loadCategories();
             showSaveDialog.value = true;
         } else {
             ElMessage.warning('当前没有工作流内容可保存');
@@ -544,12 +579,81 @@ const handleKeyDown = (event: KeyboardEvent) => {
     }
 };
 
-onMounted(() => {
+onMounted(async () => {
     // 启动自动保存
     startAutoSave();
 
     // 绑定快捷键
     window.addEventListener('keydown', handleKeyDown);
+    
+    // 处理URL参数
+    const query = route.query;
+    
+    // 如果有id参数，加载模板
+    if (query.id) {
+        try {
+            const templateId = parseInt(query.id as string);
+            if (!isNaN(templateId)) {
+                const res: any = await getTemplate(templateId);
+                const workflowData = res.data.workflow_data;
+                
+                if (workflowData.nodes && workflowData.edges) {
+                    setNodes(workflowData.nodes);
+                    setEdges(workflowData.edges);
+                    ElMessage.success('模板加载成功');
+                } else {
+                    ElMessage.warning('模板数据格式不正确');
+                }
+                return; // 如果加载了模板，就不处理prompt和model参数了
+            }
+        } catch (error: any) {
+            console.error('加载模板失败:', error);
+            // 如果加载失败，继续处理其他参数
+        }
+    }
+    
+    // 如果有prompt参数或imageUrl参数，创建节点并设置提示词和图片
+    if (query.prompt || query.imageUrl) {
+        const promptText = (query.prompt as string) || '';
+        const model = (query.model as string) || 'dream';
+        const imageUrl = (query.imageUrl as string) || '';
+        
+        // 清除初始节点
+        setNodes([]);
+        setEdges([]);
+        
+        // 创建新节点
+        const nodeId = Date.now().toString();
+        const nodeData: any = {
+            label: '快速启动节点',
+        };
+        
+        // 设置提示词
+        if (promptText) {
+            nodeData.prompt = promptText;
+        }
+        
+        // 设置图片URL（如果有）
+        if (imageUrl) {
+            nodeData.imageUrl = imageUrl;
+        }
+        
+        // 根据model设置apiType
+        if (model === 'nano') {
+            nodeData.apiType = 'nano';
+        } else {
+            nodeData.apiType = 'dream';
+        }
+        
+        addNodes({
+            id: nodeId,
+            type: 'dream',
+            position: { x: 250, y: 100 },
+            data: nodeData,
+        });
+        
+        ElMessage.success('已创建快速启动节点');
+    }
 });
 
 // 组件卸载时清理定时器和事件监听
