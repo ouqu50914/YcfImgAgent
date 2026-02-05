@@ -37,6 +37,22 @@
             <span>插入视频节点</span>
             <span class="shortcut">V</span>
         </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertSplit"
+        >
+            <el-icon><KnifeFork /></el-icon>
+            <span>插入拆分节点</span>
+            <span class="shortcut">S</span>
+        </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertLayerSeparation"
+        >
+            <el-icon><Grid /></el-icon>
+            <span>插入图层分离节点</span>
+            <span class="shortcut">L</span>
+        </div>
         <div class="menu-divider"></div>
         <div 
             class="menu-item"
@@ -50,7 +66,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { EditPen, Picture, VideoPlay, VideoCamera, Folder } from '@element-plus/icons-vue';
+import { EditPen, Picture, VideoPlay, VideoCamera, Folder, KnifeFork, Grid } from '@element-plus/icons-vue';
 
 interface Position {
     x: number;
@@ -67,6 +83,8 @@ const emit = defineEmits<{
     insertImage: [];
     insertDream: [];
     insertVideo: [];
+    insertSplit: [];
+    insertLayerSeparation: [];
     addGroup: [];
     close: [];
 }>();
@@ -88,6 +106,16 @@ const handleInsertDream = () => {
 
 const handleInsertVideo = () => {
     emit('insertVideo');
+    emit('close');
+};
+
+const handleInsertSplit = () => {
+    emit('insertSplit');
+    emit('close');
+};
+
+const handleInsertLayerSeparation = () => {
+    emit('insertLayerSeparation');
     emit('close');
 };
 

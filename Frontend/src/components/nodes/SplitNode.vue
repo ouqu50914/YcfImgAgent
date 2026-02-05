@@ -1,0 +1,533 @@
+<template>
+    <div class="split-node">
+        <!-- 顶部标题 -->
+        <div class="node-header">
+            <el-icon>
+                <KnifeFork />
+            </el-icon>
+            <span>图片拆分</span>
+        </div>
+
+        <!-- 内容区域 -->
+        <div class="node-content">
+            <!-- 参数设置，样式对齐生图节点 -->
+            <div class="params-section">
+                <!-- 模型选择（与生图节点一致） -->
+                <div class="param-item">
+                    <div class="param-label">模型</div>
+                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
+                        <el-option label="Seedream" value="dream" />
+                        <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
+                        <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
+                    </el-select>
+                </div>
+
+                <!-- 拆分数量 -->
+                <div class="param-item">
+                    <div class="param-label">拆分数量</div>
+                    <el-select v-model="splitCount" placeholder="选择拆分数量" size="small" class="param-select">
+                        <el-option label="2份" :value="2" />
+                        <el-option label="3份" :value="3" />
+                        <el-option label="4份" :value="4" />
+                    </el-select>
+                </div>
+
+                <!-- 拆分方向 -->
+                <div class="param-item">
+                    <div class="param-label">拆分方向</div>
+                    <el-select v-model="splitDirection" placeholder="选择拆分方向" size="small" class="param-select">
+                        <el-option label="水平拆分" value="horizontal" />
+                        <el-option label="垂直拆分" value="vertical" />
+                    </el-select>
+                </div>
+
+                <!-- 拆分提示词 -->
+                <div class="param-item">
+                    <div class="param-label">拆分提示词</div>
+                    <el-input v-model="prompt" type="textarea" :rows="2" placeholder="输入拆分提示词（可选）" size="small" class="param-input" />
+                </div>
+            </div>
+
+            <!-- 生成按钮 -->
+            <el-button
+                v-if="!isExecuted"
+                type="primary"
+                size="small"
+                class="w-100 execute-btn"
+                :loading="loading"
+                @click="handleSplit"
+            >
+                {{ loading ? '拆分中...' : '开始拆分' }}
+            </el-button>
+            
+            <!-- 已执行状态 -->
+            <div v-else class="executed-status">
+                <el-icon><CircleCheck /></el-icon>
+                <span>已执行</span>
+            </div>
+        </div>
+
+        <!-- 节点连接点 -->
+        <Handle 
+            id="target" 
+            type="target" 
+            :position="Position.Left" 
+            :style="{ 
+                background: '#555', 
+                width: '12px', 
+                height: '12px', 
+                border: '2px solid white',
+                borderRadius: '50%',
+                cursor: 'crosshair'
+            }"
+        />
+        <Handle 
+            id="source" 
+            type="source" 
+            :position="Position.Right" 
+            :style="{ 
+                background: '#555', 
+                width: '12px', 
+                height: '12px', 
+                border: '2px solid white',
+                borderRadius: '50%',
+                cursor: 'crosshair'
+            }"
+        />
+    </div>
+
+    <!-- 全屏预览对话框 -->
+    <el-dialog
+        v-model="showFullscreenPreview"
+        :show-close="true"
+        :close-on-click-modal="true"
+        :close-on-press-escape="true"
+        :append-to-body="true"
+        :modal="true"
+        :modal-append-to-body="true"
+        width="100%"
+        top="0"
+        class="fullscreen-preview-dialog"
+        @close="showFullscreenPreview = false"
+    >
+        <div class="fullscreen-preview-container" @click="showFullscreenPreview = false">
+            <img :src="previewImageUrl" class="fullscreen-image" alt="预览图片" />
+        </div>
+    </el-dialog>
+</template>
+
+<script setup lang="ts">
+import { ref, watch, computed } from 'vue';
+import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
+import { KnifeFork, CircleCheck } from '@element-plus/icons-vue';
+import { splitImage } from '../../api/image';
+import { ElMessage } from 'element-plus';
+
+// 声明 emits 以消除 Vue Flow 的警告
+defineEmits<{
+    updateNodeInternals: [];
+}>();
+
+const props = defineProps<NodeProps>();
+
+const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+
+const inputImageUrl = ref(props.data?.imageUrl || '');
+const splitCount = ref(2);
+const splitDirection = ref('horizontal');
+const prompt = ref('');
+const selectedModel = ref<string>('dream');
+const apiType = computed<'dream' | 'nano'>(() => {
+    return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
+});
+const nanoModel = computed<string | undefined>(() => {
+    if (selectedModel.value.startsWith('nano:')) {
+        return selectedModel.value.split(':')[1];
+    }
+    return undefined;
+});
+const loading = ref(false);
+const isExecuted = ref(false);
+const showFullscreenPreview = ref(false);
+const previewImageUrl = ref('');
+
+// 计算当前节点位置
+const currentNode = computed(() => {
+    return getNodes.value.find(n => n.id === props.id);
+});
+
+// 获取完整图片URL
+const getImageUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('/uploads/')) {
+        return `${window.location.origin}${url}`;
+    }
+    return url;
+};
+
+// 监听上游节点连接
+watch(
+    () => getEdges.value,
+    (edges) => {
+        const targetEdge = edges.find((e) => e.target === props.id);
+        if (targetEdge) {
+            const sourceNode = findNode(targetEdge.source);
+            if (sourceNode) {
+                // 尝试从上游节点获取图片URL
+                if (sourceNode.data?.imageUrl) {
+                    inputImageUrl.value = sourceNode.data.imageUrl;
+                    props.data.imageUrl = sourceNode.data.imageUrl;
+                } else if (sourceNode.data?.image_url) {
+                    inputImageUrl.value = sourceNode.data.image_url;
+                    props.data.imageUrl = sourceNode.data.image_url;
+                } else if (sourceNode.data?.imageUrls && sourceNode.data.imageUrls.length > 0) {
+                    // 如果有多个图片，使用第一张
+                    inputImageUrl.value = sourceNode.data.imageUrls[0];
+                    props.data.imageUrl = sourceNode.data.imageUrls[0];
+                }
+            }
+        } else {
+            // 如果没有上游连接，使用手动输入的URL或节点数据中的URL
+            if (!inputImageUrl.value && props.data?.imageUrl) {
+                inputImageUrl.value = props.data.imageUrl;
+            }
+        }
+    },
+    { immediate: true, deep: true }
+);
+
+const handleSplit = async () => {
+    const finalImageUrl = inputImageUrl.value;
+
+    if (!finalImageUrl) {
+        ElMessage.warning('请先从图片节点连接一张图片');
+        return;
+    }
+
+    loading.value = true;
+    try {
+        const params: any = {
+            apiType: apiType.value,
+            imageUrl: finalImageUrl,
+            splitCount: splitCount.value,
+            splitDirection: splitDirection.value,
+            prompt: prompt.value
+        };
+
+        if (apiType.value === 'nano' && nanoModel.value) {
+            params.model = nanoModel.value;
+        }
+
+        const res: any = await splitImage(params);
+
+        if (res.data && res.data.image_url) {
+            const url = res.data.image_url.startsWith('http')
+                ? res.data.image_url
+                : `${window.location.origin}${res.data.image_url}`;
+            // 更新节点数据，供下游节点使用
+            props.data.imageUrl = url;
+            ElMessage.success('图片拆分成功！');
+            
+            // 标记节点为已执行
+            isExecuted.value = true;
+            
+            // 🔥 创建新的 ImageNode 节点显示拆分后的图片
+            if (currentNode.value) {
+                createImageNode(url, res.data.image_url);
+            }
+        } else {
+            ElMessage.warning('拆分成功，但未获取到图片URL');
+        }
+    } catch (error: any) {
+        console.error(error);
+        ElMessage.error(error.message || '图片拆分失败');
+    } finally {
+        loading.value = false;
+    }
+};
+
+// 为拆分后的图片创建新的 ImageNode 节点
+const createImageNode = (fullUrl: string, originalUrl: string) => {
+    if (!currentNode.value) {
+        console.warn('无法获取当前节点信息，跳过创建图片节点');
+        return;
+    }
+
+    const nodeWidth = currentNode.value.dimensions?.width || 280;
+    const startX = currentNode.value.position.x + nodeWidth + 100;
+    const startY = currentNode.value.position.y;
+
+    const nodeId = `image_node_${Date.now()}`;
+    const edgeId = `edge_${Date.now()}`;
+
+    // 创建图片节点
+    addNodes({
+        id: nodeId,
+        type: 'image',
+        position: {
+            x: startX,
+            y: startY
+        },
+        data: {
+            imageUrl: fullUrl,
+            prompt: props.data?.prompt || '图片拆分',
+            // 保存原始URL（相对路径）供后续使用
+            originalImageUrl: originalUrl
+        }
+    });
+
+    // 创建从当前节点到图片节点的连接
+    addEdges({
+        id: edgeId,
+        source: props.id,
+        target: nodeId,
+        sourceHandle: 'source',
+        targetHandle: 'target'
+    });
+
+    console.log('✅ 已为拆分后的图片创建独立节点');
+};
+</script>
+
+<style scoped>
+.split-node {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    width: 280px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+.node-header {
+    background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.node-content {
+    padding: 10px 12px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.params-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 4px;
+}
+
+.param-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.param-label {
+    font-size: 12px;
+    color: #909399;
+    flex: 0 0 auto;
+    min-width: 72px;
+}
+
+.param-select {
+    width: 132px;
+    margin-bottom: 0;
+}
+
+.param-input {
+    width: 132px;
+    margin-bottom: 0;
+}
+
+.model-select {
+    max-width: 100%;
+}
+
+.mb-2 {
+    margin-bottom: 8px;
+}
+
+.mt-2 {
+    margin-top: 8px;
+}
+
+.w-100 {
+    width: 100%;
+}
+
+.execute-btn {
+    margin-top: 8px;
+}
+
+.executed-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px;
+    color: #67c23a;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.image-slot {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    background: #f5f5f5;
+    color: #999;
+    font-size: 12px;
+}
+
+.upload-demo {
+    width: 100%;
+}
+
+.upload-demo :deep(.el-upload) {
+    width: 100%;
+}
+
+.upload-btn {
+    width: 100%;
+    border-style: dashed;
+    border-color: #d0d0d0;
+    color: #666;
+}
+
+.upload-btn:hover {
+    border-color: #409eff;
+    color: #409eff;
+}
+
+.thumbnail-item {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.thumbnail-item:hover {
+    transform: scale(1.02);
+}
+
+.thumbnail-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.remove-thumb-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 10;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    color: white;
+}
+
+.remove-thumb-btn:hover {
+    background: rgba(255, 0, 0, 0.7);
+}
+
+/* 全屏预览样式 */
+.fullscreen-preview-dialog {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.fullscreen-preview-dialog :deep(.el-dialog) {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: rgba(0, 0, 0, 0.95) !important;
+    border-radius: 0 !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 10000 !important;
+}
+
+.fullscreen-preview-dialog :deep(.el-dialog__header) {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 0 !important;
+    overflow: hidden;
+}
+
+.fullscreen-preview-dialog :deep(.el-dialog__body) {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+.fullscreen-preview-dialog :deep(.el-overlay) {
+    background-color: rgba(0, 0, 0, 0.95) !important;
+    z-index: 9999 !important;
+}
+
+.fullscreen-preview-container {
+    width: 100vw !important;
+    height: 100vh !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer;
+    position: relative;
+}
+
+/* 默认隐藏所有 handle，hover 时显示 */
+.split-node :deep(.vue-flow__handle) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.split-node:hover :deep(.vue-flow__handle) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.fullscreen-image {
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+    object-fit: contain !important;
+    cursor: zoom-out;
+    user-select: none;
+}
+</style>

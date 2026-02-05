@@ -4,7 +4,7 @@ import { ApiConfig } from "../entities/ApiConfig";
 import { UserDailyQuota } from "../entities/UserDailyQuota";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
-import { GenerateParams, UpscaleParams, ExtendParams } from "../adapters/ai-provider.interface";
+import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
 
 export class ImageService {
     private imageRepo = AppDataSource.getRepository(ImageResult);
@@ -262,6 +262,73 @@ export class ImageService {
                 }
             }
             throw new Error(`图片扩展失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 图片拆分
+     */
+    async split(userId: number, apiType: 'dream' | 'nano', params: SplitParams, enableFallback: boolean = true): Promise<ImageResult> {
+        const config = await this.configRepo.findOneBy({ api_type: apiType });
+        if (!config || config.status === 0) {
+            if (enableFallback) {
+                const fallbackType = apiType === 'dream' ? 'nano' : 'dream';
+                console.log(`[ImageService] ${apiType}未启用，自动降级到${fallbackType}`);
+                return this.split(userId, fallbackType, params, false);
+            }
+            throw new Error(`API服务 [${apiType}] 未启用或配置不存在`);
+        }
+
+        // 检查用户当日限额（拆分算1次）
+        await this.checkUserQuota(userId, apiType, 1, config.user_daily_limit);
+
+        const adapter = this.adapters[apiType];
+        if (!adapter || typeof adapter.splitImage !== 'function') {
+            if (enableFallback) {
+                const fallbackType = apiType === 'dream' ? 'nano' : 'dream';
+                const fallbackAdapter = this.adapters[fallbackType];
+                if (fallbackAdapter && typeof fallbackAdapter.splitImage === 'function') {
+                    console.log(`[ImageService] ${apiType}不支持拆分，自动降级到${fallbackType}`);
+                    return this.split(userId, fallbackType, params, false);
+                }
+            }
+            throw new Error(`API [${apiType}] 不支持图片拆分功能`);
+        }
+
+        try {
+            const result = await adapter.splitImage(params, config.api_key, config.api_url);
+            
+            // 保存结果
+            const imageRecord = new ImageResult();
+            imageRecord.user_id = userId;
+            imageRecord.api_type = apiType;
+            imageRecord.prompt = `拆分图片 ${params.splitDirection || 'horizontal'} ${params.splitCount || 2} 份`;
+            const firstImageUrl = result.images?.[0];
+            if (firstImageUrl !== undefined) {
+                imageRecord.image_url = firstImageUrl;
+            }
+            imageRecord.status = 1;
+            await this.imageRepo.save(imageRecord);
+
+            // 更新用户当日使用量
+            await this.updateUserQuota(userId, apiType, 1, config.user_daily_limit);
+
+            // 更新全局额度统计
+            config.used_quota += 1;
+            await this.configRepo.save(config);
+
+            return imageRecord;
+        } catch (error: any) {
+            console.error(`[ImageService] ${apiType}拆分失败:`, error);
+            if (enableFallback) {
+                const fallbackType = apiType === 'dream' ? 'nano' : 'dream';
+                const fallbackConfig = await this.configRepo.findOneBy({ api_type: fallbackType });
+                if (fallbackConfig && fallbackConfig.status === 1) {
+                    console.log(`[ImageService] ${apiType}拆分失败，自动降级到${fallbackType}`);
+                    return this.split(userId, fallbackType, params, false);
+                }
+            }
+            throw new Error(`图片拆分失败: ${error.message}`);
         }
     }
 

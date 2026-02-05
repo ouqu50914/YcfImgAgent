@@ -1,4 +1,4 @@
-import { AiProvider, AiResponse, GenerateParams, UpscaleParams, ExtendParams } from "./ai-provider.interface";
+import { AiProvider, AiResponse, GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "./ai-provider.interface";
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -798,6 +798,84 @@ export class NanoAdapter implements AiProvider {
         } catch (error: any) {
             console.error("❌ [NanoAPI Extend Failed]", error.message);
             throw new Error(`图片扩展失败: ${error.message}`);
+        }
+    }
+
+    async splitImage(params: SplitParams, apiKey: string, apiUrl: string): Promise<AiResponse> {
+        console.log(`[NanoAPI] 开始拆分图片，数量: ${params.splitCount}, 方向: ${params.splitDirection}`);
+
+        // 模型选择：使用环境变量或默认值
+        const MODEL_NAME = process.env.NANO_MODEL_NAME || 'gemini-2.5-flash-image';
+
+        try {
+            // 下载原图并转换为base64
+            const imageData = await this.imageUrlToBase64(params.imageUrl);
+
+            // 获取拆分数量，添加默认值
+            const splitCount = params.splitCount || 2;
+            
+            // 构建拆分提示词
+            let splitPrompt = params.prompt || "";
+            if (!splitPrompt) {
+                switch (params.splitDirection) {
+                    case 'horizontal':
+                        splitPrompt = `将图片水平拆分为${splitCount}个部分，保持每个部分的完整性和连贯性，确保分割边界自然`;
+                        break;
+                    case 'vertical':
+                        splitPrompt = `将图片垂直拆分为${splitCount}个部分，保持每个部分的完整性和连贯性，确保分割边界自然`;
+                        break;
+                    default:
+                        splitPrompt = `将图片拆分为${splitCount}个部分，保持每个部分的完整性和连贯性，确保分割边界自然`;
+                }
+            }
+
+            // 计算目标尺寸和比例
+            let targetWidth = 1024;
+            let targetHeight = 1024;
+            
+            // 根据拆分方向调整尺寸
+            if (params.splitDirection === 'horizontal') {
+                targetHeight = Math.floor(1024 / splitCount);
+            } else if (params.splitDirection === 'vertical') {
+                targetWidth = Math.floor(1024 / splitCount);
+            }
+
+            const aspectRatio = this.calculateAspectRatio(targetWidth, targetHeight);
+
+            console.log(`[NanoAPI] 使用图生图模式实现拆分，方向: ${params.splitDirection}, 数量: ${splitCount}, 目标尺寸: ${targetWidth}x${targetHeight}`);
+
+            const response = await this.callWithRetry(async () => {
+                return await this.ai.models.generateContent({
+                    model: MODEL_NAME,
+                    contents: [
+                        { text: splitPrompt },
+                        {
+                            inlineData: {
+                                mimeType: imageData.mimeType,
+                                data: imageData.data
+                            }
+                        }
+                    ],
+                    config: {
+                        responseModalities: ["TEXT", "IMAGE"],
+                        imageConfig: {
+                            aspectRatio: aspectRatio
+                        }
+                    }
+                });
+            }, 3, 1000);
+
+            // 从响应中提取图片并保存
+            const localUrl = await this.extractAndSaveImageFromResponse(response, 'nano');
+            console.log(`[NanoAPI] ✅ 图片拆分成功: ${localUrl}`);
+
+            return {
+                original_id: response.candidates?.[0]?.content?.parts?.[0]?.text || `nano_split_${Date.now()}`,
+                images: [localUrl]
+            };
+        } catch (error: any) {
+            console.error("❌ [NanoAPI Split Failed]", error.message);
+            throw new Error(`图片拆分失败: ${error.message}`);
         }
     }
 

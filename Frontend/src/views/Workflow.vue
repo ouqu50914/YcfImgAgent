@@ -44,6 +44,16 @@
                             <el-icon><FullScreen /></el-icon>
                         </el-button>
                     </el-tooltip>
+                    <el-tooltip content="添加拆分节点" placement="right">
+                        <el-button circle class="side-btn" @click="addSplitNode">
+                            <el-icon><KnifeFork /></el-icon>
+                        </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="添加图层分离节点" placement="right">
+                        <el-button circle class="side-btn" @click="addLayerSeparationNode">
+                            <el-icon><Grid /></el-icon>
+                        </el-button>
+                    </el-tooltip>
                 </div>
 
                 <div class="side-divider"></div>
@@ -132,9 +142,11 @@
                 @insert-image="insertImageNode"
                 @insert-dream="insertDreamNode"
                 @insert-video="insertVideoNode"
-                @add-group="handleAddGroup"
-                @close="contextMenuVisible = false"
-            />
+            @insert-split="insertSplitNode"
+            @insert-layer-separation="insertLayerSeparationNode"
+            @add-group="handleAddGroup"
+            @close="contextMenuVisible = false"
+        />
             
             <!-- 连接菜单 -->
             <ConnectionMenu
@@ -239,7 +251,7 @@ import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick } from '@element-plus/icons-vue';
+import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid } from '@element-plus/icons-vue';
 import { saveTemplate, getTemplates, getTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
 import { uploadImage } from '@/api/upload';
@@ -260,6 +272,8 @@ import ImageNode from '@/components/nodes/ImageNode.vue';
 import LayerNode from '@/components/nodes/LayerNode.vue';
 import PromptNode from '@/components/nodes/PromptNode.vue';
 import VideoNode from '@/components/nodes/VideoNode.vue';
+import SplitNode from '@/components/nodes/SplitNode.vue';
+import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
 
 // 注册节点类型
 const nodeTypes = {
@@ -270,6 +284,8 @@ const nodeTypes = {
     layer: markRaw(LayerNode),
     prompt: markRaw(PromptNode),
     video: markRaw(VideoNode),
+    split: markRaw(SplitNode),
+    layerSeparation: markRaw(LayerSeparationNode),
 };
 
 // 初始节点数据
@@ -367,7 +383,9 @@ const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
     'upscale': { width: 280, height: 350 },
     'extend': { width: 280, height: 350 },
     'video': { width: 350, height: 450 },
-    'layer': { width: 300, height: 400 }
+    'layer': { width: 300, height: 400 },
+    'split': { width: 280, height: 350 },
+    'layerSeparation': { width: 280, height: 400 }
 };
 
 // 间距配置
@@ -620,6 +638,15 @@ const isValidConnection = (connection: Connection) => {
         // 其他情况一律禁止作为输入（包括用户上传的图片节点）
         ElMessage.warning('该节点不支持作为输入被连接');
         return false;
+    }
+    
+    // 拆分节点作为 target 的限制：只接受图片节点的输入
+    if (targetNode.type === 'split') {
+        if (sourceNode.type !== 'image') {
+            ElMessage.warning('拆分节点只接受图片节点的输入');
+            return false;
+        }
+        return true;
     }
     
     // 如果目标节点是 DreamNode，需要检查连接限制（DreamNode 只有一个 target handle）
@@ -934,6 +961,44 @@ const insertVideoNode = () => {
     saveState();
 };
 
+const insertSplitNode = () => {
+    const preferredPosition = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+    const position = calculateOptimalPosition('split', preferredPosition);
+    
+    const nodeId = `split_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'split',
+        position,
+        data: {}
+    });
+    
+    // 保存状态到撤销栈
+    saveState();
+};
+
+const insertLayerSeparationNode = () => {
+    const preferredPosition = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+    const position = calculateOptimalPosition('layerSeparation', preferredPosition);
+    
+    const nodeId = `layer_separation_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'layerSeparation',
+        position,
+        data: {}
+    });
+    
+    // 保存状态到撤销栈
+    saveState();
+};
+
 const handleAddGroup = () => {
     ElMessage.info('添加组功能待实现');
 };
@@ -1169,6 +1234,34 @@ const addExtendNode = () => {
     saveState();
 };
 
+const addSplitNode = () => {
+    const position = calculateOptimalPosition('split');
+    const id = Date.now().toString();
+    addNodes({
+        id,
+        type: 'split',
+        position,
+        data: {},
+    });
+    
+    // 保存状态到撤销栈
+    saveState();
+};
+
+const addLayerSeparationNode = () => {
+    const position = calculateOptimalPosition('layerSeparation');
+    const id = Date.now().toString();
+    addNodes({
+        id,
+        type: 'layerSeparation',
+        position,
+        data: {},
+    });
+    
+    // 保存状态到撤销栈
+    saveState();
+};
+
 // 保存模板
 const handleSaveTemplate = async () => {
     if (!saveForm.value.name.trim()) {
@@ -1378,6 +1471,42 @@ const handleKeyDown = (event: KeyboardEvent) => {
             // 保存状态到撤销栈
             saveState();
         }
+    }
+    
+    // 快捷键：T - 插入提示词节点
+    if (event.key === 't' && !isInputElement) {
+        event.preventDefault();
+        insertPromptNode();
+    }
+    
+    // 快捷键：I - 插入图片节点
+    if (event.key === 'i' && !isInputElement) {
+        event.preventDefault();
+        insertImageNode();
+    }
+    
+    // 快捷键：G - 插入生图节点
+    if (event.key === 'g' && !isInputElement) {
+        event.preventDefault();
+        insertDreamNode();
+    }
+    
+    // 快捷键：V - 插入视频节点
+    if (event.key === 'v' && !isInputElement) {
+        event.preventDefault();
+        insertVideoNode();
+    }
+    
+    // 快捷键：S - 插入拆分节点
+    if (event.key === 's' && !isInputElement) {
+        event.preventDefault();
+        insertSplitNode();
+    }
+    
+    // 快捷键：L - 插入图层分离节点
+    if (event.key === 'l' && !isInputElement) {
+        event.preventDefault();
+        insertLayerSeparationNode();
     }
 
     // Ctrl+Z 或 Cmd+Z: 撤销

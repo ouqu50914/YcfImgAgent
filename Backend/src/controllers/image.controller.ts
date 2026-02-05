@@ -163,3 +163,48 @@ export const extendImage = async (req: Request, res: Response) => {
         return res.status(500).json({ message: error.message });
     }
 };
+
+export const splitImage = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        const { apiType, imageUrl, splitCount, splitDirection, prompt } = req.body;
+
+        if (!imageUrl) {
+            return res.status(400).json({ message: "图片URL不能为空" });
+        }
+
+        const result = await imageService.split(userId, apiType || 'dream', {
+            imageUrl,
+            splitCount,
+            splitDirection,
+            prompt
+        });
+
+        // 记录操作日志
+        const ipAddressRaw = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const logOptions: {
+            apiType?: string;
+            details?: any;
+            ipAddress?: string;
+        } = {
+            apiType: apiType || 'dream',
+            details: { imageUrl, splitCount, splitDirection, prompt, imageId: result.id }
+        };
+        
+        if (ipAddressRaw) {
+            const ipAddress = Array.isArray(ipAddressRaw) ? ipAddressRaw[0] : ipAddressRaw;
+            if (ipAddress && typeof ipAddress === 'string') {
+                logOptions.ipAddress = ipAddress;
+            }
+        }
+        
+        await logService.logOperation(userId, 'split', logOptions);
+
+        return res.status(200).json({
+            message: "图片拆分成功",
+            data: result
+        });
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+    }
+};

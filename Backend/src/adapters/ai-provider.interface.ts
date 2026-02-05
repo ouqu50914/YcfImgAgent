@@ -25,6 +25,13 @@ export interface ExtendParams {
     prompt?: string;  // 扩展区域的提示词
 }
 
+export interface SplitParams {
+    imageUrl: string; // 要拆分的图片URL
+    splitCount?: number; // 拆分的数量，默认为 2
+    splitDirection?: 'horizontal' | 'vertical'; // 拆分方向，水平或垂直
+    prompt?: string;  // 拆分的提示词，用于指导拆分过程
+}
+
 export interface AiResponse {
     original_id: string; // 第三方API返回的任务ID
     images?: string[];   // 图片URL（如果是同步返回）
@@ -34,4 +41,5 @@ export interface AiProvider {
     generateImage(params: GenerateParams, apiKey: string, apiUrl: string): Promise<AiResponse>;
     upscaleImage?(params: UpscaleParams, apiKey: string, apiUrl: string): Promise<AiResponse>;
     extendImage?(params: ExtendParams, apiKey: string, apiUrl: string): Promise<AiResponse>;
+    splitImage?(params: SplitParams, apiKey: string, apiUrl: string): Promise<AiResponse>;
 }

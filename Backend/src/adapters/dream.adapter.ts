@@ -1,4 +1,4 @@
-import { AiProvider, AiResponse, GenerateParams, UpscaleParams, ExtendParams } from "./ai-provider.interface";
+import { AiProvider, AiResponse, GenerateParams, UpscaleParams, ExtendParams, SplitParams } from './ai-provider.interface';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -697,6 +697,83 @@ private async generateImagesInParallel(
             const errInfo = error.response?.data || error.message;
             console.error("❌ [DreamAPI Extend Failed]", typeof errInfo === 'object' ? JSON.stringify(errInfo) : errInfo);
             throw new Error(`图片扩展失败: ${error.message}`);
+        }
+    }
+
+    async splitImage(params: SplitParams, apiKey: string, apiUrl: string): Promise<AiResponse> {
+        console.log(`[DreamAPI] 开始拆分图片，数量: ${params.splitCount || 2}, 方向: ${params.splitDirection || 'horizontal'}`);
+
+        const ARK_API_KEY = apiKey || process.env.SEED_ARK_API_KEY;
+        const MODEL_ID = process.env.SEED_ARK_MODEL_ID || "ep-20260129215218-w29ps";
+        const BASE_URL = "https://ark.cn-beijing.volces.com";
+
+        if (!ARK_API_KEY) throw new Error("❌ 未配置 ARK_API_KEY");
+
+        try {
+            // Seedream API 通过图生图模式实现图片拆分：使用原图作为参考，通过提示词指导拆分
+            // 下载原图并转换为base64
+            const imagePath = await this.downloadImageToTemp(params.imageUrl);
+            const imageBuffer = fs.readFileSync(imagePath);
+            const imageBase64 = imageBuffer.toString('base64');
+
+            // 设置默认参数
+            const splitCount = params.splitCount || 2;
+            const splitDirection = params.splitDirection || 'horizontal';
+            const splitPrompt = params.prompt || `将图片${splitDirection === 'horizontal' ? '水平' : '垂直'}拆分为${splitCount}个部分，保持每个部分的内容完整和连贯性`;
+
+            // 计算目标尺寸（保持原图比例，适当调整大小）
+            const dimensions = await this.getImageDimensions(params.imageUrl);
+            let targetWidth = dimensions?.width || 1024;
+            let targetHeight = dimensions?.height || 1024;
+
+            // 根据拆分方向调整尺寸
+            if (splitDirection === 'horizontal') {
+                // 水平拆分：保持宽度，调整高度
+                targetHeight = Math.floor(targetHeight * 1.2);
+            } else {
+                // 垂直拆分：保持高度，调整宽度
+                targetWidth = Math.floor(targetWidth * 1.2);
+            }
+
+            const targetSize = `${targetWidth}x${targetHeight}`;
+            console.log(`[DreamAPI] 使用图生图模式实现拆分，目标尺寸: ${targetSize}`);
+
+            const url = `${BASE_URL}/api/v3/images/generations`;
+            const requestBody: any = {
+                model: MODEL_ID,
+                prompt: splitPrompt,
+                image: `data:image/png;base64,${imageBase64}`,
+                n: 1,
+                response_format: "url",
+                size: targetSize,
+                stream: false,
+                watermark: false,
+            };
+
+            const response = await axios.post(url, requestBody, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${ARK_API_KEY}`
+                },
+                timeout: 120000
+            });
+
+            const resData = response.data;
+            if (!resData.data || resData.data.length === 0 || !resData.data[0].url) {
+                throw new Error("API返回成功但未包含图片URL");
+            }
+
+            const localUrl = await this.downloadAndSaveImage(resData.data[0].url);
+            console.log(`[DreamAPI] ✅ 图片拆分成功: ${localUrl}`);
+
+            return {
+                original_id: resData.created ? String(resData.created) : `dream_split_${Date.now()}`,
+                images: [localUrl]
+            };
+        } catch (error: any) {
+            const errInfo = error.response?.data || error.message;
+            console.error("❌ [DreamAPI Split Failed]", typeof errInfo === 'object' ? JSON.stringify(errInfo) : errInfo);
+            throw new Error(`图片拆分失败: ${error.message}`);
         }
     }
 

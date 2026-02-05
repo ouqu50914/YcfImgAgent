@@ -6,17 +6,15 @@ import { pipeline } from 'stream/promises';
 
 export class LayerService {
     /**
-     * 拆分图片图层（对接魔搭Qwen-Image-Layered API）
+     * 拆分图片图层（使用Seedream API实现）
      */
     async splitImage(userId: number, imageUrl: string) {
-        const API_URL = process.env.MODELSCOPE_API_URL || 'https://api.modelscope.cn/api/v1/models';
-        const API_KEY = process.env.MODELSCOPE_API_KEY;
-        const MODEL_NAME = process.env.MODELSCOPE_LAYER_MODEL || 'qwen/Qwen-Image-Layered';
+        const ARK_API_KEY = process.env.SEED_ARK_API_KEY;
+        const MODEL_ID = process.env.SEED_ARK_MODEL_ID || "ep-20260129215218-w29ps";
+        const BASE_URL = "https://ark.cn-beijing.volces.com";
 
-        if (!API_KEY) {
-            // 如果没有配置API，返回Mock数据
-            console.log('[LayerService] 未配置魔搭API，使用Mock模式');
-            return this.mockSplitImage(imageUrl);
+        if (!ARK_API_KEY) {
+            throw new Error("❌ 未配置 SEED_ARK_API_KEY");
         }
 
         try {
@@ -25,74 +23,83 @@ export class LayerService {
             const imageBuffer = fs.readFileSync(imagePath);
             const imageBase64 = imageBuffer.toString('base64');
 
-            // 2. 调用魔搭API
-            const response = await axios.post(
-                `${API_URL}/${MODEL_NAME}/inference`,
-                {
-                    input: {
-                        image: `data:image/png;base64,${imageBase64}`
-                    }
+            // 2. 构建图层分离提示词
+            const layerPrompt = "将图片分离为多个图层，包括前景主体和背景，每个图层保持完整和清晰";
+
+            // 3. 计算目标尺寸
+            const dimensions = await this.getImageDimensions(imageUrl);
+            let targetWidth = dimensions?.width || 1024;
+            let targetHeight = dimensions?.height || 1024;
+
+            const targetSize = `${targetWidth}x${targetHeight}`;
+            console.log(`[LayerService] 使用Seedream API实现图层分离，目标尺寸: ${targetSize}`);
+
+            // 4. 调用Seedream API
+            const url = `${BASE_URL}/api/v3/images/generations`;
+            const requestBody: any = {
+                model: MODEL_ID,
+                prompt: layerPrompt,
+                image: `data:image/png;base64,${imageBase64}`,
+                n: 1,
+                response_format: "url",
+                size: targetSize,
+                stream: false,
+                watermark: false,
+            };
+
+            const response = await axios.post(url, requestBody, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${ARK_API_KEY}`
                 },
+                timeout: 120000
+            });
+
+            // 5. 处理响应结果
+            const resData = response.data;
+            if (!resData.data || resData.data.length === 0 || !resData.data[0].url) {
+                throw new Error("API返回成功但未包含图片URL");
+            }
+
+            // 6. 下载并保存分离后的图层
+            const localUrl = await this.downloadAndSaveImage(resData.data[0].url, 'layer');
+            console.log(`[LayerService] ✅ 图层分离成功: ${localUrl}`);
+
+            // 7. 构建图层数据
+            const layers = [
                 {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${API_KEY}`
-                    },
-                    timeout: 120000
+                    index: 1,
+                    url: localUrl,
+                    name: '分离图层',
+                    type: 'separated'
                 }
-            );
-
-            // 3. 处理响应结果
-            const result = response.data;
-            const layers = result.output?.layers || result.layers || [];
-
-            // 4. 下载并保存分层图片
-            const savedLayers = await Promise.all(
-                layers.map(async (layer: any, index: number) => {
-                    const layerUrl = layer.url || layer.image_url;
-                    if (!layerUrl) return null;
-
-                    const localUrl = await this.downloadAndSaveImage(layerUrl, `layer_${index + 1}`);
-                    return {
-                        index: index + 1,
-                        url: localUrl,
-                        name: layer.name || `图层 ${index + 1}`,
-                        type: layer.type || 'unknown'
-                    };
-                })
-            );
-
-            const validLayers = savedLayers.filter((layer): layer is NonNullable<typeof layer> => layer !== null);
+            ];
 
             return {
                 originalImageUrl: imageUrl,
-                layers: validLayers,
-                layerCount: validLayers.length
+                layers: layers,
+                layerCount: layers.length
             };
         } catch (error: any) {
-            console.error('[LayerService] API调用失败:', error.message);
-            // 降级到Mock模式
-            return this.mockSplitImage(imageUrl);
+            const errInfo = error.response?.data || error.message;
+            console.error("❌ [LayerService] 图层分离失败", typeof errInfo === 'object' ? JSON.stringify(errInfo) : errInfo);
+            throw new Error(`图层分离失败: ${error.message}`);
         }
     }
 
     /**
-     * Mock模式：返回模拟的分层结果
+     * 获取图片尺寸
      */
-    private async mockSplitImage(imageUrl: string) {
-        // 返回原图作为唯一图层（Mock）
-        return {
-            originalImageUrl: imageUrl,
-            layers: [
-                {
-                    index: 1,
-                    url: imageUrl,
-                    name: '背景图层',
-                    type: 'background'
-                }
-            ],
-            layerCount: 1
-        };
+    private async getImageDimensions(imageUrl: string): Promise<{ width: number; height: number } | null> {
+        try {
+            // 简化实现：直接返回默认尺寸，避免依赖sharp
+            // 实际项目中可以使用其他方式获取图片尺寸
+            console.log('[LayerService] 使用默认图片尺寸');
+            return { width: 1024, height: 1024 };
+        } catch (error) {
+            console.error('[LayerService] 获取图片尺寸失败:', error);
+            return null;
+        }
     }
 
     /**

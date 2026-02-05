@@ -27,6 +27,14 @@ export interface ExtendParams {
     prompt?: string;
 }
 
+export interface SplitParams {
+    apiType: 'dream' | 'nano';
+    imageUrl: string;
+    splitCount: number;
+    splitDirection: 'horizontal' | 'vertical';
+    prompt?: string;
+}
+
 // 调用生图接口
 export const generateImage = (data: GenerateParams) => {
     return request.post('/image/generate', data);
@@ -40,4 +48,9 @@ export const upscaleImage = (data: UpscaleParams) => {
 // 调用扩展接口
 export const extendImage = (data: ExtendParams) => {
     return request.post('/image/extend', data);
+};
+
+// 调用拆分接口
+export const splitImage = (data: SplitParams) => {
+    return request.post('/image/split', data);
 };
