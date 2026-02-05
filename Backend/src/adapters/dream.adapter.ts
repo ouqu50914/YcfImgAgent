@@ -39,10 +39,13 @@ async generateImage(params: GenerateParams, apiKey: string, apiUrl: string): Pro
     
     console.log(`[DreamAPI] 尺寸配置: ${modeInfo}`);
     
+    // 注意：前端已经将尺寸信息添加到提示词中，这里直接使用即可
+    // 如果提示词中已包含尺寸信息，不需要再次添加
+    
     const url = `${BASE_URL}/api/v3/images/generations`;
     const requestBody: any = {
         model: MODEL_ID,
-        prompt: params.prompt,
+        prompt: params.prompt, // 提示词已包含尺寸信息（由前端添加）
         response_format: "url",
         size: sizeString,
         watermark: false,

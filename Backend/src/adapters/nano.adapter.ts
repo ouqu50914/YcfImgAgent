@@ -452,20 +452,30 @@ export class NanoAdapter implements AiProvider {
                 });
             }
 
-            // 计算 aspect ratio
-            const width = params.width || 1024;
-            const height = params.height || 1024;
-            const aspectRatio = this.calculateAspectRatio(width, height);
+            // 确定 aspect ratio：优先使用直接提供的 aspectRatio，否则从 width/height 计算
+            let finalAspectRatio: string;
+            if (params.aspectRatio) {
+                // 直接使用提供的 aspectRatio（字符串格式，如 "1:1"）
+                finalAspectRatio = params.aspectRatio;
+                console.log(`[NanoAPI] 使用提供的 aspectRatio: ${finalAspectRatio}`);
+            } else {
+                // 从 width/height 计算（向后兼容）
+                const width = params.width || 1024;
+                const height = params.height || 1024;
+                finalAspectRatio = this.calculateAspectRatio(width, height);
+                console.log(`[NanoAPI] 从 width/height 计算 aspectRatio: ${finalAspectRatio} (${width}x${height})`);
+            }
 
             // 构建配置
             const config: any = {
                 responseModalities: ["TEXT", "IMAGE"],
                 imageConfig: {
-                    aspectRatio: aspectRatio
+                    aspectRatio: finalAspectRatio
                 }
             };
 
-            // 如果使用 gemini-3-pro-image-preview，可以设置 imageSize
+            // 只有 gemini-3-pro-image-preview 支持 imageSize
+            // gemini-2.5-flash-image 固定使用 1024px，不支持 imageSize 参数
             if (MODEL_NAME === 'gemini-3-pro-image-preview' && params.quality) {
                 const qualityMap: Record<string, string> = {
                     '1K': '1K',
@@ -474,7 +484,10 @@ export class NanoAdapter implements AiProvider {
                 };
                 if (qualityMap[params.quality]) {
                     config.imageConfig.imageSize = qualityMap[params.quality];
+                    console.log(`[NanoAPI] 设置 imageSize: ${qualityMap[params.quality]}`);
                 }
+            } else if (MODEL_NAME === 'gemini-2.5-flash-image' && params.quality) {
+                console.log(`[NanoAPI] 注意: gemini-2.5-flash-image 不支持 imageSize，固定使用 1024px，忽略 quality 参数: ${params.quality}`);
             }
 
             console.log(`[NanoAPI] 发送请求至模型 ${MODEL_NAME}...`);

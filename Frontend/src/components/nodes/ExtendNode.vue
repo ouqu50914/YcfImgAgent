@@ -10,105 +10,66 @@
 
         <!-- 内容区域 -->
         <div class="node-content">
-            <!-- 图片上传 -->
-            <div class="input-section">
-                <div v-if="uploadedImage" class="preview-section">
-                    <div class="thumbnail-item">
-                        <el-image
-                            :src="uploadedImage.url"
-                            fit="cover"
-                            class="thumbnail-img"
-                            :preview-src-list="[]"
-                            @click="handleThumbnailClick(uploadedImage.url)"
-                        />
-                        <el-button
-                            size="small"
-                            type="danger"
-                            circle
-                            class="remove-thumb-btn"
-                            @click="removeImage"
-                        >
-                            <el-icon><Close /></el-icon>
-                        </el-button>
-                    </div>
+            <div class="params-section">
+                <!-- 模型选择（与生图节点一致） -->
+                <div class="param-item">
+                    <div class="param-label">模型</div>
+                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
+                        <el-option label="Seedream" value="dream" />
+                        <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
+                        <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
+                    </el-select>
                 </div>
-                <el-upload
-                    v-if="!uploadedImage && !inputImageUrl"
-                    class="upload-demo"
-                    :auto-upload="false"
-                    :on-change="handleImageChange"
-                    :on-remove="handleImageRemove"
-                    :show-file-list="false"
-                    accept="image/*"
-                >
-                    <el-button size="small" type="default" plain class="upload-btn">
-                        <el-icon><Upload /></el-icon>
-                        上传图片
-                    </el-button>
-                </el-upload>
+
+                <!-- 扩展方向选择 -->
+                <div class="param-item">
+                    <div class="param-label">扩展方向</div>
+                    <el-select v-model="direction" placeholder="选择扩展方向" size="small" class="param-select">
+                        <el-option label="向上 (Top)" value="top" />
+                        <el-option label="向下 (Bottom)" value="bottom" />
+                        <el-option label="向左 (Left)" value="left" />
+                        <el-option label="向右 (Right)" value="right" />
+                        <el-option label="全周 (All Around)" value="all" />
+                    </el-select>
+                </div>
+
+                <!-- 比例选择 -->
+                <div class="param-item">
+                    <div class="param-label">图片比例</div>
+                    <el-select v-model="ratio" placeholder="选择比例" size="small" class="param-select">
+                        <el-option label="自动 (Auto)" value="auto" />
+                        <el-option label="1:1" value="1:1" />
+                        <el-option label="4:3" value="4:3" />
+                        <el-option label="3:4" value="3:4" />
+                        <el-option label="16:9" value="16:9" />
+                        <el-option label="9:16" value="9:16" />
+                        <el-option label="3:2" value="3:2" />
+                        <el-option label="2:3" value="2:3" />
+                        <el-option label="21:9" value="21:9" />
+                    </el-select>
+                </div>
+
+                <!-- 扩展提示词（可选） -->
+                <div class="param-item" style="align-items: flex-start;">
+                    <div class="param-label">扩展提示词</div>
+                    <el-input
+                        v-model="extendPrompt"
+                        type="textarea"
+                        :rows="2"
+                        placeholder="扩展区域提示词（可选，可通过提示词控制比例）..."
+                        class="param-select"
+                        size="small"
+                    />
+                </div>
             </div>
-
-            <div v-if="inputImageUrl && !uploadedImage" class="preview-section">
-                <el-image
-                    :src="getImageUrl(inputImageUrl)"
-                    fit="cover"
-                    class="preview-image"
-                    :preview-src-list="[]"
-                    @click="handlePreviewClick(inputImageUrl)"
-                    style="cursor: pointer;"
-                >
-                    <template #error>
-                        <div class="image-slot">加载失败</div>
-                    </template>
-                </el-image>
-            </div>
-
-            <!-- 扩展方向选择 -->
-            <el-select v-model="direction" placeholder="选择扩展方向" class="mb-2" size="small">
-                <el-option label="向上 (Top)" value="top" />
-                <el-option label="向下 (Bottom)" value="bottom" />
-                <el-option label="向左 (Left)" value="left" />
-                <el-option label="向右 (Right)" value="right" />
-                <el-option label="全周 (All Around)" value="all" />
-            </el-select>
-
-            <!-- 比例选择 -->
-            <el-select v-model="ratio" placeholder="选择比例" class="mb-2" size="small">
-                <el-option label="自动 (Auto)" value="auto" />
-                <el-option label="1:1" value="1:1" />
-                <el-option label="4:3" value="4:3" />
-                <el-option label="3:4" value="3:4" />
-                <el-option label="16:9" value="16:9" />
-                <el-option label="9:16" value="9:16" />
-                <el-option label="3:2" value="3:2" />
-                <el-option label="2:3" value="2:3" />
-                <el-option label="21:9" value="21:9" />
-            </el-select>
-
-            <!-- 扩展提示词（可选） -->
-            <el-input
-                v-model="extendPrompt"
-                type="textarea"
-                :rows="2"
-                placeholder="扩展区域提示词（可选，可通过提示词控制比例）..."
-                class="mb-2"
-                size="small"
-            />
-
-            <!-- 模型选择 -->
-            <el-select v-model="apiType" placeholder="选择模型" class="mb-2" size="small">
-                <el-option label="Seedream" value="dream" />
-                <el-option label="Nano" value="nano" />
-            </el-select>
 
             <!-- 生成按钮 -->
             <el-button
                 v-if="!isExecuted"
                 type="primary"
                 size="small"
-                class="w-100"
+                class="w-100 execute-btn"
                 :loading="loading"
-                :disabled="!inputImageUrl && !uploadedImage"
                 @click="handleExtend"
             >
                 {{ loading ? '扩展中...' : '开始扩展' }}
@@ -173,11 +134,9 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
-import { FullScreen, Upload, Close, CircleCheck } from '@element-plus/icons-vue';
+import { FullScreen, CircleCheck } from '@element-plus/icons-vue';
 import { extendImage } from '../../api/image';
-import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
-import type { UploadFile } from 'element-plus';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -189,11 +148,19 @@ const props = defineProps<NodeProps>();
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
-const uploadedImage = ref<{ url: string; file: File } | null>(null);
 const direction = ref<'top' | 'bottom' | 'left' | 'right' | 'all'>('right');
 const ratio = ref<string>('auto');
 const extendPrompt = ref('');
-const apiType = ref<'dream' | 'nano'>('dream');
+const selectedModel = ref<string>('dream');
+const apiType = computed<'dream' | 'nano'>(() => {
+    return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
+});
+const nanoModel = computed<string | undefined>(() => {
+    if (selectedModel.value.startsWith('nano:')) {
+        return selectedModel.value.split(':')[1];
+    }
+    return undefined;
+});
 const loading = ref(false);
 const isExecuted = ref(false);
 const showFullscreenPreview = ref(false);
@@ -203,42 +170,6 @@ const previewImageUrl = ref('');
 const currentNode = computed(() => {
     return getNodes.value.find(n => n.id === props.id);
 });
-
-// 处理图片上传
-const handleImageChange = (file: UploadFile) => {
-    if (file.raw) {
-        const url = URL.createObjectURL(file.raw);
-        uploadedImage.value = {
-            url,
-            file: file.raw
-        };
-    }
-};
-
-// 移除图片
-const handleImageRemove = () => {
-    if (uploadedImage.value) {
-        URL.revokeObjectURL(uploadedImage.value.url);
-        uploadedImage.value = null;
-    }
-};
-
-// 移除图片
-const removeImage = () => {
-    handleImageRemove();
-};
-
-// 点击缩略图预览
-const handleThumbnailClick = (url: string) => {
-    previewImageUrl.value = url;
-    showFullscreenPreview.value = true;
-};
-
-// 点击预览图片
-const handlePreviewClick = (url: string) => {
-    previewImageUrl.value = getImageUrl(url);
-    showFullscreenPreview.value = true;
-};
 
 // 获取完整图片URL
 const getImageUrl = (url: string) => {
@@ -282,41 +213,28 @@ watch(
 );
 
 const handleExtend = async () => {
-    let finalImageUrl = inputImageUrl.value;
-
-    // 如果上传了图片，先上传到服务器
-    if (uploadedImage.value) {
-        try {
-            const uploadRes: any = await uploadImage(uploadedImage.value.file);
-            if (uploadRes.data && uploadRes.data.url) {
-                finalImageUrl = uploadRes.data.url.startsWith('http')
-                    ? uploadRes.data.url
-                    : `${window.location.origin}${uploadRes.data.url}`;
-            } else {
-                ElMessage.warning('图片上传失败');
-                return;
-            }
-        } catch (error: any) {
-            console.error('图片上传失败:', error);
-            ElMessage.error('图片上传失败');
-            return;
-        }
-    }
+    const finalImageUrl = inputImageUrl.value;
 
     if (!finalImageUrl) {
-        ElMessage.warning('请先上传图片或连接上游节点');
+        ElMessage.warning('请先从图片节点连接一张图片');
         return;
     }
 
     loading.value = true;
     try {
-        const res: any = await extendImage({
+        const params: any = {
             apiType: apiType.value,
             imageUrl: finalImageUrl,
             direction: direction.value,
             ratio: ratio.value !== 'auto' ? ratio.value : undefined,
             prompt: extendPrompt.value || undefined
-        });
+        };
+
+        if (apiType.value === 'nano' && nanoModel.value) {
+            params.model = nanoModel.value;
+        }
+
+        const res: any = await extendImage(params);
 
         if (res.data && res.data.image_url) {
             const url = res.data.image_url.startsWith('http')
@@ -410,7 +328,45 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 }
 
 .node-content {
-    padding: 12px;
+    padding: 10px 12px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.params-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    margin-bottom: 4px;
+}
+
+.param-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.param-label {
+    font-size: 12px;
+    color: #909399;
+    flex: 0 0 auto;
+    min-width: 72px;
+}
+
+.param-select {
+    width: 132px;
+    margin-bottom: 0;
+}
+
+.model-select {
+    max-width: 100%;
 }
 
 .mb-2 {
@@ -425,16 +381,8 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
     width: 100%;
 }
 
-.input-section,
-.preview-section {
-    margin-bottom: 8px;
-}
-
-.preview-image {
-    width: 100%;
-    height: 150px;
-    border-radius: 4px;
-    border: 1px solid #eee;
+.execute-btn {
+    margin-top: 8px;
 }
 
 .executed-status {
@@ -571,6 +519,18 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
     justify-content: center !important;
     cursor: pointer;
     position: relative;
+}
+
+/* 默认隐藏所有 handle，hover 时显示 */
+.extend-node :deep(.vue-flow__handle) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.extend-node:hover :deep(.vue-flow__handle) {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .fullscreen-image {

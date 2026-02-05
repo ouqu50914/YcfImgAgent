@@ -1,133 +1,15 @@
 <template>
     <div class="dream-node">
-        <!-- 内容区域 - 参考截图布局 -->
+        <!-- 内容区域 -->
         <div class="node-content">
-            <!-- 左侧：输入区域 -->
-            <div class="input-section">
-                <div class="section-title">
-                    <span class="arrow-icon">→</span>
-                    <span>输入</span>
-                </div>
-                
-                <!-- 提示词输入区域 -->
-                <div class="prompt-wrapper" @mousedown.stop @mousemove.stop>
-                    <div class="prompt-content" style="position: relative;">
-                        <el-input
-                            ref="promptInputRef"
-                            v-model="prompt"
-                            type="textarea"
-                            :autosize="{ minRows: 3, maxRows: 8 }"
-                            :placeholder="props.data?.isVariation ? '变体生成：将使用上游节点的提示词和图片' : '输入提示词,或输入 / 从已有提示词中选择'"
-                            class="prompt-input"
-                            maxlength="500"
-                            :disabled="isExecuted"
-                            @mousedown.stop
-                            @click.stop
-                            @input="handlePromptInput"
-                            @keydown="handlePromptKeydown"
-                        />
-                        <!-- 提示词列表下拉框 -->
-                        <div
-                            v-if="showPromptSuggestions && promptTemplates.length > 0"
-                            class="prompt-suggestions"
-                        >
-                            <div
-                                v-for="(template, index) in promptTemplates"
-                                :key="template.id"
-                                class="suggestion-item"
-                                :class="{ active: selectedSuggestionIndex === index }"
-                                @click="selectPromptTemplate(template)"
-                                @mouseenter="selectedSuggestionIndex = index"
-                            >
-                                <span class="suggestion-dot"></span>
-                                <span class="suggestion-name">{{ template.name || '未命名提示词' }}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 按钮组 -->
-                    <div class="prompt-actions" v-if="!isExecuted">
-                        <el-button
-                            size="small"
-                            type="primary"
-                            class="save-prompt-btn"
-                            :disabled="!prompt.trim()"
-                            @click="showSavePromptDialog = true"
-                        >
-                            保存提示词
-                        </el-button>
-                        <el-button
-                            size="small"
-                            type="danger"
-                            class="polish-btn"
-                            :loading="polishing"
-                            @click="handlePolish"
-                        >
-                            + AI润色
-                        </el-button>
-                    </div>
-                </div>
-
-                <!-- 图片上传区域（支持多张） -->
-                <div class="upload-section">
-                    <div class="upload-content">
-                        <!-- 图片缩略图列表 -->
-                        <div v-if="uploadedImages.length > 0" class="image-thumbnails">
-                            <div
-                                v-for="(img, index) in uploadedImages"
-                                :key="index"
-                                class="thumbnail-item"
-                            >
-                                <el-image
-                                    :src="img.url"
-                                    fit="cover"
-                                    class="thumbnail-img"
-                                    :preview-src-list="[]"
-                                    :hide-on-click-modal="false"
-                                    @click="() => handleThumbnailClick(img.url)"
-                                />
-                                <el-button
-                                    size="small"
-                                    type="danger"
-                                    circle
-                                    class="remove-thumb-btn"
-                                    @click="removeImage(index)"
-                                >
-                                    <el-icon><Close /></el-icon>
-                                </el-button>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- 上传按钮始终在最下面 -->
-                    <el-upload
-                        v-if="!isExecuted"
-                        class="upload-demo"
-                        :auto-upload="false"
-                        :on-change="handleImageChange"
-                        :on-remove="handleImageRemove"
-                        :file-list="uploadedImages"
-                        :show-file-list="false"
-                        accept="image/*"
-                        multiple
-                    >
-                        <el-button size="small" type="default" plain class="upload-btn">
-                            <el-icon><Upload /></el-icon>
-                            上传图片
-                        </el-button>
-                    </el-upload>
-                </div>
-            </div>
-
             <!-- 右侧：参数设置 -->
             <div class="params-section">
-                <div class="section-title">
-                    <el-icon><Picture /></el-icon>
-                    图片
-                </div>
+                <div class="section-title">模型参数</div>
                 
                 <!-- 模型选择 -->
                 <div class="param-item">
                     <div class="param-label">模型</div>
-                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select" :disabled="isExecuted">
+                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
                         <el-option label="Seedream" value="dream" />
                         <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
                         <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
@@ -137,7 +19,7 @@
                 <!-- 生成数量 -->
                 <div class="param-item">
                     <div class="param-label">生成数量</div>
-                    <el-select v-model="numImages" placeholder="生成数量" size="small" class="param-select" :disabled="isExecuted">
+                    <el-select v-model="numImages" placeholder="生成数量" size="small" class="param-select">
                         <el-option label="1" :value="1" />
                         <el-option label="2" :value="2" />
                         <el-option label="3" :value="3" />
@@ -148,11 +30,19 @@
                 <!-- 分辨率设置 -->
                 <div class="param-item">
                     <div class="param-label">分辨率</div>
-                    <el-select v-model="quality" placeholder="画质" size="small" class="param-select" :disabled="isExecuted">
-                        <el-option label="1K" value="1K" />
-                        <el-option label="2K" value="2K" />
-                        <el-option label="4K" value="4K" />
-                        <el-option label="标准画质" value="standard" />
+                    <el-select 
+                        v-model="quality" 
+                        placeholder="画质" 
+                        size="small" 
+                        class="param-select" 
+                        :disabled="!availableResolutions.length"
+                    >
+                        <el-option 
+                            v-for="res in availableResolutions" 
+                            :key="res" 
+                            :label="res === 'standard' ? '标准画质' : res" 
+                            :value="res" 
+                        />
                     </el-select>
                 </div>
 
@@ -160,48 +50,30 @@
                 <div class="param-item">
                     <div class="param-label">图片比例</div>
                     <el-select 
-                        v-model="size" 
+                        v-model="aspectRatio" 
                         placeholder="比例" 
                         size="small" 
                         class="param-select"
-                        :disabled="isExecuted || quality !== 'standard'"
                     >
-                        <el-option label="1:1" value="2048x2048" />
-                        <el-option label="4:3" value="2304x1728" />
-                        <el-option label="3:4" value="1728x2304" />
-                        <el-option label="16:9" value="2560x1440" />
-                        <el-option label="9:16" value="1440x2560" />
-                        <el-option label="3:2" value="2496x1664" />
-                        <el-option label="2:3" value="1664x2496" />
-                        <el-option label="21:9" value="3024x1296" />
-                        <el-option label="Auto" value="auto" />
+                        <el-option 
+                            v-for="ratio in availableAspectRatios" 
+                            :key="ratio" 
+                            :label="ratio" 
+                            :value="ratio" 
+                        />
                     </el-select>
-                    <div v-if="quality !== 'standard'" class="param-hint">
-                        <el-icon><InfoFilled /></el-icon>
-                        <span>使用{{ quality }}模式，请在提示词中描述图片宽高比</span>
-                    </div>
-                    <div v-else class="param-hint">
-                        <el-icon><InfoFilled /></el-icon>
-                        <span>使用像素模式，当前尺寸：{{ size === 'auto' ? '自动' : size }}</span>
-                    </div>
                 </div>
 
                 <!-- 执行按钮 -->
                 <el-button
-                    v-if="!isExecuted"
                     type="primary"
                     size="default"
                     class="execute-btn"
                     :loading="loading"
                     @click="handleGenerate"
                 >
-                    <el-icon><VideoPlay /></el-icon>
-                    执行
+                    {{ isExecuted ? '再次执行' : '执行' }}
                 </el-button>
-                <div v-else class="executed-status">
-                    <el-icon><CircleCheck /></el-icon>
-                    <span>已执行</span>
-                </div>
             </div>
         </div>
 
@@ -216,9 +88,11 @@
                 height: '12px', 
                 border: '2px solid white',
                 borderRadius: '50%',
-                cursor: 'crosshair'
+                cursor: 'crosshair',
+                top: '50%'
             }"
         />
+        <!-- 输出端口 -->
         <Handle 
             id="source" 
             type="source" 
@@ -253,69 +127,15 @@
         </div>
     </el-dialog>
 
-    <!-- 保存提示词对话框（居中） -->
-    <el-dialog
-        v-model="showSavePromptDialog"
-        title="保存自定义提示词"
-        width="800px"
-        :show-close="true"
-        :close-on-click-modal="true"
-        :close-on-press-escape="true"
-        :append-to-body="true"
-        :modal="true"
-        :modal-append-to-body="true"
-        :center="true"
-        class="centered-save-prompt-dialog"
-        @close="savePromptName = ''; savePromptDescription = ''"
-    >
-        <el-form label-width="120px">
-            <el-form-item label="提示词名称" required>
-                <el-input
-                    v-model="savePromptName"
-                    placeholder="请输入提示词名称，例如：未命名提示词"
-                    maxlength="100"
-                    show-word-limit
-                    size="large"
-                />
-            </el-form-item>
-            <el-form-item label="提示词内容">
-                <el-input
-                    :value="prompt"
-                    type="textarea"
-                    :rows="8"
-                    readonly
-                    disabled
-                    size="large"
-                />
-            </el-form-item>
-            <el-form-item label="描述（可选）">
-                <el-input
-                    v-model="savePromptDescription"
-                    type="textarea"
-                    :rows="4"
-                    placeholder="请输入提示词的描述信息"
-                    maxlength="200"
-                    show-word-limit
-                    size="large"
-                />
-            </el-form-item>
-        </el-form>
-        <template #footer>
-            <el-button size="large" @click="showSavePromptDialog = false">取消</el-button>
-            <el-button type="primary" size="large" @click="handleSavePrompt">确认</el-button>
-        </template>
-    </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
-import { Picture, Upload, Close, VideoPlay, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
+import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
 import { generateImage } from '../../api/image';
-import { optimizePrompt, getPromptTemplates, createPromptTemplate, type PromptTemplate } from '../../api/prompt';
 import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
-import type { UploadFile } from 'element-plus';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -325,15 +145,14 @@ defineEmits<{
 // 定义 Vue Flow 节点所需的 props
 const props = defineProps<NodeProps>();
 
-const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
 
-const prompt = ref(props.data?.prompt || '');
-const size = ref('2048x2048'); // 默认使用推荐的1:1尺寸
 // 统一的模型选择：dream 或 nano:model-name 格式
 const selectedModel = ref<string>(props.data?.apiType === 'nano' 
     ? 'nano:gemini-2.5-flash-image' 
     : (props.data?.apiType || 'dream'));
 const quality = ref('2K');
+const aspectRatio = ref('1:1'); // 使用比例字符串格式
 const numImages = ref(1);
 
 // 计算属性：从 selectedModel 中提取 apiType
@@ -349,53 +168,158 @@ const nanoModel = computed<'gemini-2.5-flash-image' | 'gemini-3-pro-image-previe
     }
     return undefined;
 });
+
+// toast 去重，避免频繁提示
+const lastToastKey = ref<string>('');
+const toastOnce = (key: string, message: string) => {
+    if (lastToastKey.value === key) return;
+    lastToastKey.value = key;
+    ElMessage.info(message);
+};
+
+// 可用的分辨率选项（根据模型动态过滤）
+const availableResolutions = computed(() => {
+    if (apiType.value === 'dream') {
+        return ['1K', '2K', '4K', 'standard'];
+    } else if (nanoModel.value === 'gemini-2.5-flash-image') {
+        // Nano Banana 不支持分辨率选择，固定 1024px
+        return [];
+    } else if (nanoModel.value === 'gemini-3-pro-image-preview') {
+        return ['1K', '2K', '4K'];
+    }
+    return ['1K', '2K', '4K'];
+});
+
+// 可用的比例选项（所有模型都支持相同的比例）
+const availableAspectRatios = computed(() => {
+    return ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+});
+
+// 根据比例和分辨率计算像素尺寸（用于 Seedream）
+const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): { width: number; height: number } => {
+    // 分辨率映射
+    const resolutionMap: Record<string, number> = {
+        '1K': 1024,
+        '2K': 2048,
+        '4K': 4096,
+        'standard': 2048 // 默认
+    };
+    
+    const baseSize = resolutionMap[resolutionValue] || 2048;
+    
+    // 比例映射
+    const ratioMap: Record<string, { width: number; height: number }> = {
+        '1:1': { width: baseSize, height: baseSize },
+        '2:3': { width: Math.floor(baseSize * 2/3), height: baseSize },
+        '3:2': { width: baseSize, height: Math.floor(baseSize * 2/3) },
+        '3:4': { width: Math.floor(baseSize * 3/4), height: baseSize },
+        '4:3': { width: baseSize, height: Math.floor(baseSize * 3/4) },
+        '4:5': { width: Math.floor(baseSize * 4/5), height: baseSize },
+        '5:4': { width: baseSize, height: Math.floor(baseSize * 4/5) },
+        '9:16': { width: Math.floor(baseSize * 9/16), height: baseSize },
+        '16:9': { width: baseSize, height: Math.floor(baseSize * 9/16) },
+        '21:9': { width: baseSize, height: Math.floor(baseSize * 9/21) }
+    };
+    
+    return ratioMap[aspectRatioValue] || { width: baseSize, height: baseSize };
+};
+
+// 监听模型切换，重置不兼容的选项
+watch([selectedModel, nanoModel], ([newModel, newNanoModel]) => {
+    // 当切换到 Nano Banana 时，清空 quality（因为该模型不支持分辨率选择）
+    if (newModel.startsWith('nano:') && newNanoModel === 'gemini-2.5-flash-image') {
+        if (quality.value && quality.value !== '') {
+            console.log('[前端] 切换到 Nano Banana，清空分辨率选择（固定 1024px）');
+            quality.value = '';
+        }
+        toastOnce('nano:flash', 'Nano Banana 固定使用 1024px 分辨率');
+    } else if (newModel.startsWith('nano:') && newNanoModel === 'gemini-3-pro-image-preview') {
+        // 切换到 Nano Banana Pro，如果没有选择分辨率，默认使用 2K
+        if (!quality.value || quality.value === '') {
+            quality.value = '2K';
+        } else if (!['1K', '2K', '4K'].includes(quality.value)) {
+            // 如果当前值是 'standard'，改为 '2K'
+            quality.value = '2K';
+        }
+        toastOnce('nano:pro', 'Nano Banana Pro 支持 1K/2K/4K 分辨率');
+    } else if (newModel === 'dream') {
+        // 切换到 Seedream，如果没有选择分辨率，默认使用 2K
+        if (!quality.value || quality.value === '') {
+            quality.value = '2K';
+        }
+        toastOnce('dream', 'Seedream 将自动把尺寸信息添加到提示词中');
+    }
+}, { immediate: false });
+
 const loading = ref(false);
-const polishing = ref(false);
 const imageUrl = ref(props.data?.imageUrl || '');
 const imageUrls = ref<string[]>(props.data?.imageUrls || []); // 支持多图结果（用于传递给下游节点和创建 ImageNode）
-const uploadedImages = ref<Array<{ url: string; file: File }>>([]);
 const showFullscreenPreview = ref(false);
 const previewImageUrl = ref('');
 const isExecuted = ref(false); // 标记节点是否已执行
 
-// 提示词模板相关
-const promptTemplates = ref<PromptTemplate[]>([]);
-const showPromptSuggestions = ref(false);
-const selectedSuggestionIndex = ref(0);
-const promptInputRef = ref<any>(null);
-const showSavePromptDialog = ref(false);
-const savePromptName = ref('');
-const savePromptDescription = ref('');
+// 记录本次执行预创建的占位图片节点ID，用于结果回来后填充
+const pendingImageNodeIds = ref<string[]>([]);
 
-// 如果是变体节点，初始化时使用传入的数据
-if (props.data?.isVariation) {
-    if (props.data.imageUrl && !imageUrl.value) {
-        imageUrl.value = props.data.imageUrl;
-    }
-    if (props.data.imageUrls && props.data.imageUrls.length > 0 && imageUrls.value.length === 0) {
-        imageUrls.value = props.data.imageUrls;
-    }
-    if (props.data.prompt && !prompt.value) {
-        prompt.value = props.data.prompt;
-    }
-    // 变体节点的 imageUrl 是参考图片，不是执行结果，不应该标记为已执行
-    // 只有在真正执行完成后才标记为已执行
-}
+// 从连接读取的数据
+const connectedPrompt = ref('');
+const connectedImages = ref<string[]>([]);
 
-// 如果从外部传入图片URL（如从首页快速启动），将其添加到上传图片列表中以便显示
-if (props.data?.imageUrl && !props.data?.isVariation && uploadedImages.value.length === 0) {
-    // 将图片URL添加到上传图片列表中（用于显示，但不包含File对象）
-    uploadedImages.value.push({
-        url: props.data.imageUrl,
-        file: new File([], 'uploaded-image.jpg') // 创建一个空的File对象作为占位符
+// 计算连接状态
+const connectedPromptCount = computed(() => {
+    const edges = getEdges.value;
+    const targetEdges = edges.filter(e => e.target === props.id);
+    const promptEdges = targetEdges.filter(e => {
+        const sourceNode = findNode(e.source);
+        return sourceNode?.type === 'prompt';
     });
-}
+    return promptEdges.length;
+});
 
-// 如果节点已有执行结果，标记为已执行
-// 注意：变体节点的 imageUrl 是参考图片，不是执行结果，所以需要排除变体节点
-// 从首页快速启动传入的图片也是参考图片，不应该标记为已执行
-// 只有当 imageUrl 是执行结果时（通常会有 imageUrls 数组），才标记为已执行
-if (!props.data?.isVariation && props.data?.imageUrls && Array.isArray(props.data.imageUrls) && props.data.imageUrls.length > 0) {
+const connectedImageCount = computed(() => {
+    const edges = getEdges.value;
+    const targetEdges = edges.filter(e => e.target === props.id);
+    const imageEdges = targetEdges.filter(e => {
+        const sourceNode = findNode(e.source);
+        return sourceNode?.type === 'image';
+    });
+    return imageEdges.length;
+});
+
+// 监听连接变化，更新连接的数据
+watch(
+    () => [getEdges.value, getNodes.value],
+    () => {
+        const edges = getEdges.value;
+        const targetEdges = edges.filter(e => e.target === props.id);
+        
+        // 收集提示词
+        connectedPrompt.value = '';
+        targetEdges.forEach(edge => {
+            const sourceNode = findNode(edge.source);
+            if (sourceNode && sourceNode.type === 'prompt' && sourceNode.data?.text) {
+                // 取第一个提示词节点
+                if (!connectedPrompt.value) connectedPrompt.value = sourceNode.data.text;
+    }
+        });
+
+        // 收集图片
+        connectedImages.value = [];
+        targetEdges.forEach(edge => {
+            const sourceNode = findNode(edge.source);
+            if (sourceNode && sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
+                const url = sourceNode.data.imageUrl;
+                if (url && !connectedImages.value.includes(url)) {
+                    connectedImages.value.push(url);
+        }
+    }
+        });
+    },
+    { immediate: true, deep: true }
+);
+
+// 如果节点已有执行结果，标记为已执行（用于按钮文案“再次执行”）
+if (props.data?.imageUrls && Array.isArray(props.data.imageUrls) && props.data.imageUrls.length > 0) {
     isExecuted.value = true;
 }
 
@@ -404,389 +328,103 @@ const currentNode = computed(() => {
     return getNodes.value.find(n => n.id === props.id);
 });
 
-// 处理图片上传（支持多张）
-const handleImageChange = (file: UploadFile) => {
-    if (file.raw) {
-        const url = URL.createObjectURL(file.raw);
-        uploadedImages.value.push({
-            url,
-            file: file.raw
-        });
-    }
-};
-
-// 移除图片
-const handleImageRemove = (file: UploadFile) => {
-    if (!file.raw) return;
-    const index = uploadedImages.value.findIndex(img => img.file === file.raw);
-    if (index !== -1 && uploadedImages.value[index]) {
-        URL.revokeObjectURL(uploadedImages.value[index].url);
-        uploadedImages.value.splice(index, 1);
-    }
-};
-
-// 移除指定索引的图片
-const removeImage = (index: number) => {
-    if (uploadedImages.value[index]) {
-        URL.revokeObjectURL(uploadedImages.value[index].url);
-        uploadedImages.value.splice(index, 1);
-    }
-};
-
-// 点击缩略图预览
-const handleThumbnailClick = (url: string) => {
-    previewImageUrl.value = url;
-    showFullscreenPreview.value = true;
-};
-
-// 加载提示词模板列表
-const loadPromptTemplates = async () => {
-    try {
-        const res: any = await getPromptTemplates();
-        if (res.data) {
-            promptTemplates.value = res.data;
-        }
-    } catch (error: any) {
-        console.error('加载提示词模板失败:', error);
-    }
-};
-
-// 处理提示词输入
-const handlePromptInput = () => {
-    // 检测是否输入了斜杠
-    const currentValue = prompt.value;
-    const lastChar = currentValue[currentValue.length - 1];
-    if (lastChar === '/') {
-        // 显示提示词列表
-        if (promptTemplates.value.length > 0) {
-            showPromptSuggestions.value = true;
-            selectedSuggestionIndex.value = 0;
-        } else {
-            // 如果没有提示词，加载一次
-            loadPromptTemplates().then(() => {
-                if (promptTemplates.value.length > 0) {
-                    showPromptSuggestions.value = true;
-                    selectedSuggestionIndex.value = 0;
-                }
-            });
-        }
-    } else {
-        // 如果输入的不是斜杠，隐藏提示词列表
-        showPromptSuggestions.value = false;
-    }
-};
-
-// 处理键盘事件
-const handlePromptKeydown = (event: KeyboardEvent) => {
-    if (showPromptSuggestions.value && promptTemplates.value.length > 0) {
-        if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            selectedSuggestionIndex.value = Math.min(
-                selectedSuggestionIndex.value + 1,
-                promptTemplates.value.length - 1
-            );
-        } else if (event.key === 'ArrowUp') {
-            event.preventDefault();
-            selectedSuggestionIndex.value = Math.max(selectedSuggestionIndex.value - 1, 0);
-        } else if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            const selectedTemplate = promptTemplates.value[selectedSuggestionIndex.value];
-            if (selectedTemplate) {
-                selectPromptTemplate(selectedTemplate);
-            }
-        } else if (event.key === 'Escape') {
-            showPromptSuggestions.value = false;
-        }
-    }
-};
-
-// 选择提示词模板
-const selectPromptTemplate = (template: PromptTemplate) => {
-    // 移除最后的斜杠，然后插入提示词内容
-    let currentPrompt = prompt.value;
-    if (currentPrompt.endsWith('/')) {
-        currentPrompt = currentPrompt.slice(0, -1);
-    }
-    // 插入提示词内容
-    prompt.value = currentPrompt + template.content;
-    showPromptSuggestions.value = false;
-    // 聚焦输入框
-    if (promptInputRef.value) {
-        promptInputRef.value.focus();
-    }
-};
-
-// 保存提示词
-const handleSavePrompt = async () => {
-    if (!savePromptName.value.trim()) {
-        ElMessage.warning('请输入提示词名称');
-        return;
-    }
-    if (!prompt.value.trim()) {
-        ElMessage.warning('提示词内容不能为空');
-        return;
-    }
-
-    try {
-        await createPromptTemplate({
-            name: savePromptName.value.trim(),
-            content: prompt.value.trim(),
-            description: savePromptDescription.value.trim() || undefined
-        });
-        ElMessage.success('提示词保存成功！');
-        showSavePromptDialog.value = false;
-        savePromptName.value = '';
-        savePromptDescription.value = '';
-        // 重新加载提示词列表
-        await loadPromptTemplates();
-    } catch (error: any) {
-        ElMessage.error(error.message || '保存失败');
-    }
-};
-
-// 点击外部关闭提示词列表
-const handleClickOutside = (event: MouseEvent) => {
-    if (showPromptSuggestions.value && promptInputRef.value) {
-        const target = event.target as HTMLElement;
-        if (!promptInputRef.value.$el?.contains(target)) {
-            showPromptSuggestions.value = false;
-        }
-    }
-};
-
-// 处理润色
-const handlePolish = async () => {
-    if (!prompt.value.trim()) {
-        ElMessage.warning('请先输入提示词');
-        return;
-    }
-    
-    polishing.value = true;
-    try {
-        const res: any = await optimizePrompt({
-            prompt: prompt.value,
-            apiType: 'dream'
-        });
-        
-        if (res.data && res.data.optimized) {
-            prompt.value = res.data.optimized;
-            ElMessage.success('提示词润色成功！');
-        } else if (res.optimized) {
-            prompt.value = res.optimized;
-            ElMessage.success('提示词润色成功！');
-        } else {
-            ElMessage.warning('润色功能暂未实现');
-        }
-    } catch (error: any) {
-        console.log('润色API调用失败:', error);
-        ElMessage.warning('润色功能暂未实现，请稍后再试');
-    } finally {
-        polishing.value = false;
-    }
-};
-
-// 组件挂载时加载提示词列表
-onMounted(() => {
-    loadPromptTemplates();
-    document.addEventListener('click', handleClickOutside);
-});
-
-onUnmounted(() => {
-    document.removeEventListener('click', handleClickOutside);
-});
-
 
 
 // 生成图片
 const handleGenerate = async () => {
     loading.value = true;
     try {
-        // 1. 查找连接到当前节点(target=props.id)的所有连线（支持多个上游节点）
-        const edges = getEdges.value;
-        const targetEdges = edges.filter((e) => e.target === props.id);
+        // 1. 从连接读取数据
+        const finalPrompt = connectedPrompt.value;
+        const referenceImageUrls = [...connectedImages.value];
 
-        // 2. 获取所有上游节点的数据（图片和提示词）
-        let upstreamImageUrl = '';
-        let upstreamImageUrls: string[] = [];
-        let upstreamPrompt = '';
-
-        // 收集所有上游节点的图片
-        targetEdges.forEach((edge) => {
-            const sourceNode = findNode(edge.source);
-            if (sourceNode && sourceNode.data) {
-                // 收集图片：优先使用 imageUrls，否则使用 imageUrl
-                if (sourceNode.data.imageUrls && Array.isArray(sourceNode.data.imageUrls) && sourceNode.data.imageUrls.length > 0) {
-                    // 如果是多图，添加到数组（过滤掉 undefined）
-                    const validUrls = sourceNode.data.imageUrls.filter((url: any): url is string => !!url);
-                    upstreamImageUrls.push(...validUrls);
-                } else if (sourceNode.data.imageUrl) {
-                    // 如果是单图，添加到数组
-                    upstreamImageUrls.push(sourceNode.data.imageUrl);
-                }
-                
-                // 获取上游节点的提示词（使用第一个上游节点的提示词）
-                if (!upstreamPrompt) {
-                    if (sourceNode.data.prompt) {
-                        upstreamPrompt = sourceNode.data.prompt;
-                    } else if (sourceNode.data.text) {
-                        upstreamPrompt = sourceNode.data.text;
-                    }
-                }
-            }
-        });
-
-        // 处理收集到的图片
-        if (upstreamImageUrls.length > 0) {
-            // 如果有多个图片，使用多图模式
-            if (upstreamImageUrls.length === 1 && upstreamImageUrls[0]) {
-                upstreamImageUrl = upstreamImageUrls[0];
-            }
-            console.log(`🔗 检测到 ${targetEdges.length} 个上游节点，共 ${upstreamImageUrls.length} 张图片:`, {
-                imageUrl: upstreamImageUrl,
-                imageUrls: upstreamImageUrls,
-                prompt: upstreamPrompt
-            });
-        }
-
-        // 3. 如果是变体生成，优先使用上游节点的数据
-        const isVariation = props.data?.isVariation;
-        if (isVariation) {
-            // 变体生成：使用上游的图片和提示词
-            if (upstreamImageUrl && !imageUrl.value && uploadedImages.value.length === 0) {
-                imageUrl.value = upstreamImageUrl;
-                console.log('变体生成：使用上游图片', upstreamImageUrl);
-            }
-            if (upstreamImageUrls.length > 0 && imageUrls.value.length === 0 && uploadedImages.value.length === 0) {
-                imageUrls.value = upstreamImageUrls;
-                console.log('变体生成：使用上游多图', upstreamImageUrls);
-            }
-            if (upstreamPrompt && !prompt.value) {
-                prompt.value = upstreamPrompt;
-                console.log('变体生成：使用上游提示词', upstreamPrompt);
-            }
-        }
-
-        // 4. 确定最终使用的提示词和图片
-        let finalPrompt = prompt.value || upstreamPrompt; // 优先使用当前输入，否则使用上游
-
-        // 5. 校验：至少需要提示词或图片之一
-        const hasImage = uploadedImages.value.length > 0 || imageUrl.value || upstreamImageUrl || upstreamImageUrls.length > 0;
-        if (!finalPrompt && !hasImage) {
-            ElMessage.warning('请输入提示词或上传图片，或连接上游节点');
+        // 2. 校验：至少需要提示词或图片之一
+        // 约束：必须至少连接一个提示词节点才能执行
+        if (!finalPrompt) {
+            ElMessage.warning('请先连接一个提示词节点');
             loading.value = false;
             return;
         }
 
-        // 解析尺寸
-        let width = 2048; // 默认使用推荐的1:1尺寸
+        console.log(`🔗 使用连接的数据:`, {
+            prompt: finalPrompt,
+            images: referenceImageUrls.length
+        });
+
+        // 3. 根据模型和选择计算尺寸（用于 Seedream）
+        let width = 2048;
         let height = 2048;
-        if (size.value !== 'auto') {
-            const dimensions = size.value.split('x').map(Number);
-            width = dimensions[0] || 2048;
-            height = dimensions[1] || 2048;
+        if (apiType.value === 'dream') {
+            const pixelSize = calculatePixelSize(aspectRatio.value, quality.value);
+            width = pixelSize.width;
+            height = pixelSize.height;
         }
 
-        // 6. 处理参考图片：优先使用上传的图片，否则使用上游节点的图片
+        // 4. 处理参考图片：转换URL格式
+        const hasMultipleReferenceImages = referenceImageUrls.length > 1;
         let referenceImageUrl = '';
-        let referenceImageUrls: string[] = [];
         
-        // 过滤出有效的上传图片（有file对象的）
-        const validUploadedImages = uploadedImages.value.filter(img => img.file && img.file.size > 0);
-        const hasMultipleReferenceImages = validUploadedImages.length > 1;
-        
-        // 如果没有有效上传图片，但上游节点有图片，使用上游图片
-        if (validUploadedImages.length === 0) {
-            if (upstreamImageUrls.length > 1) {
-                // 多个上游节点或多个图片，使用多图模式
-                referenceImageUrls = upstreamImageUrls;
-                console.log(`使用上游 ${upstreamImageUrls.length} 张图片作为参考:`, referenceImageUrls);
-            } else if (upstreamImageUrls.length === 1 && upstreamImageUrls[0]) {
-                // 单个图片
-                referenceImageUrl = upstreamImageUrls[0];
-                console.log('使用上游单图作为参考:', referenceImageUrl);
-            } else if (imageUrl.value) {
-                // 从首页传入的图片URL或变体节点的图片URL
-                referenceImageUrl = imageUrl.value.startsWith('http') 
-                    ? imageUrl.value 
-                    : `${window.location.origin}${imageUrl.value}`;
-                console.log('使用节点已有图片作为参考:', referenceImageUrl);
+        // 转换图片URL为完整URL
+        const processedImageUrls = referenceImageUrls.map(url => {
+            if (url.startsWith('http')) return url;
+            if (url.startsWith('/uploads/')) {
+                return `${window.location.origin}${url}`;
             }
-        }
-        
-        // 如果有有效上传图片，上传它们
-        if (validUploadedImages.length > 0) {
-            try {
-                console.log(`开始上传参考图片... (${validUploadedImages.length}张)`);
-                
-                if (hasMultipleReferenceImages) {
-                    // 多图上传
-                    const uploadPromises = validUploadedImages.map(img => uploadImage(img.file));
-                    const uploadResults = await Promise.all(uploadPromises);
+            return `${window.location.origin}/uploads/${url}`;
+        });
                     
-                    referenceImageUrls = uploadResults
-                        .map((res: any) => res.data?.url)
-                        .filter((url: string) => url)
-                        .map((url: string) => 
-                            url.startsWith('http') ? url : `${window.location.origin}${url}`
-                        );
-                    
-                    console.log(`参考图片上传成功: ${referenceImageUrls.length}张`, referenceImageUrls);
-                } else if (validUploadedImages[0]) {
-                    // 单图上传
-                    const uploadRes: any = await uploadImage(validUploadedImages[0].file);
-                    if (uploadRes.data && uploadRes.data.url) {
-                        referenceImageUrl = uploadRes.data.url.startsWith('http')
-                            ? uploadRes.data.url
-                            : `${window.location.origin}${uploadRes.data.url}`;
-                        console.log('参考图片上传成功:', referenceImageUrl);
-                    } else {
-                        console.warn('图片上传返回格式异常:', uploadRes);
-                        ElMessage.warning('图片上传失败，使用文生图模式');
-                    }
-                }
-            } catch (error: any) {
-                console.error('图片上传失败:', error);
-                ElMessage.warning('图片上传失败，使用文生图模式');
-            }
+        if (processedImageUrls.length === 1 && processedImageUrls[0]) {
+            referenceImageUrl = processedImageUrls[0];
         }
 
-        // 确定使用的模式
-        const useQualityMode = quality.value !== 'standard';
-        const modeInfo = useQualityMode 
-            ? `方式1（分辨率模式）: ${quality.value}，请在提示词中描述宽高比`
-            : `方式2（像素模式）: ${width}x${height}`;
-        
-        // 构建请求参数
+        // 5. 构建请求参数
         const requestParams: any = {
             apiType: apiType.value,
-            prompt: finalPrompt || '基于上传的图片生成',
+            prompt: finalPrompt || '基于参考图片生成',
             numImages: numImages.value,
             imageUrl: hasMultipleReferenceImages ? undefined : (referenceImageUrl || undefined),
-            imageUrls: hasMultipleReferenceImages && referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
+            imageUrls: hasMultipleReferenceImages && processedImageUrls.length > 0 ? processedImageUrls : undefined,
         };
 
-        // 如果使用 Nano 模型，添加子模型参数
-        if (apiType.value === 'nano') {
-            requestParams.model = nanoModel.value;
-        }
-
-        // 根据模式决定传递哪些参数
-        if (useQualityMode) {
-            // 方式1：只传递quality，不传递width/height
-            requestParams.quality = quality.value;
-            console.log(`[前端] 使用方式1（分辨率模式）: ${quality.value}`);
-            console.log(`[前端] 提示：请在提示词中描述图片宽高比，例如："1:1的正方形图片"、"16:9的横屏图片"等`);
-        } else {
-            // 方式2：传递width/height，不传递quality
+        // 6. 根据模型类型处理参数
+        if (apiType.value === 'dream') {
+            // Seedream: 将尺寸信息添加到提示词，并传递 width/height
+            const sizeInfo = `${aspectRatio.value}比例、${quality.value === 'standard' ? '标准' : quality.value}分辨率的图片，尺寸为${width}x${height}像素`;
+            
+            // 检查提示词中是否已包含尺寸信息，避免重复添加
+            const hasSizeInfo = requestParams.prompt.includes('比例') || requestParams.prompt.includes('分辨率') || requestParams.prompt.includes('像素');
+            if (!hasSizeInfo) {
+                requestParams.prompt = `${requestParams.prompt || '生成图片'}，生成一个${sizeInfo}`;
+            }
+            
+            // 传递像素尺寸
             requestParams.width = width;
             requestParams.height = height;
-            console.log(`[前端] 使用方式2（像素模式）: ${width}x${height}`);
+            
+            // 传递 quality（用于 Seedream 的尺寸模式）
+            if (quality.value !== 'standard') {
+                requestParams.quality = quality.value;
+            }
+            
+            console.log(`[前端] Seedream 模式: ${width}x${height}, 比例: ${aspectRatio.value}, 分辨率: ${quality.value}`);
+        } else if (apiType.value === 'nano') {
+            // Nano: 传递 aspectRatio 和 quality（作为 imageSize）
+            requestParams.model = nanoModel.value;
+            requestParams.aspectRatio = aspectRatio.value;
+            
+            // 只有 Nano Banana Pro 支持 imageSize
+            if (nanoModel.value === 'gemini-3-pro-image-preview' && quality.value) {
+                requestParams.quality = quality.value; // 后端会将其转换为 imageSize
+            }
+            
+            console.log(`[前端] Nano 模式: 模型=${nanoModel.value}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '固定1024px'}`);
         }
         
-        console.log('发送生图请求，参数:', {
-            ...requestParams,
-            mode: modeInfo
-        });
+        console.log('发送生图请求，参数:', requestParams);
+
+        // 在发送请求前，根据生成数量预创建占位图片节点（loading 状态）
+        const expectedCount = numImages.value || 1;
+        createPlaceholderImageNodes(expectedCount);
 
         const res: any = await generateImage(requestParams);
         
@@ -817,11 +455,11 @@ const handleGenerate = async () => {
                 console.log(`👉 成功生成 ${fullUrls.length} 张图片:`, fullUrls);
                 ElMessage.success(`成功生成 ${fullUrls.length} 张图片！`);
                 
-                // 标记节点为已执行
+                // 标记节点为已执行（下次显示“再次执行”）
                 isExecuted.value = true;
                 
-                // 🔥 为每张图片创建新的 ImageNode 节点
-                if (fullUrls.length > 0 && currentNode.value) {
+                // 用真实图片填充占位节点；若不存在占位，则按老逻辑创建新节点
+                if (!fillPlaceholderImageNodes(fullUrls, allImages) && fullUrls.length > 0 && currentNode.value) {
                     createImageNodes(fullUrls, allImages);
                 }
             } else if (res.data.image_url) {
@@ -835,11 +473,11 @@ const handleGenerate = async () => {
                 console.log('👉 完整图片URL:', url);
                 ElMessage.success('图片生成成功！');
                 
-                // 标记节点为已执行
+                // 标记节点为已执行（下次显示“再次执行”）
                 isExecuted.value = true;
                 
-                // 🔥 为单张图片也创建新的 ImageNode 节点
-                if (currentNode.value) {
+                // 单张图同样优先填充占位节点
+                if (!fillPlaceholderImageNodes([url], [res.data.image_url]) && currentNode.value) {
                     createImageNodes([url], [res.data.image_url]);
                 }
             } else {
@@ -886,8 +524,9 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
         // 为多图节点添加标记，用于缩小尺寸
         const nodeData: any = {
             imageUrl: fullUrl,
-            prompt: prompt.value || props.data?.prompt || '',
-            originalImageUrl: originalUrls[index]
+            prompt: connectedPrompt.value || '',
+            originalImageUrl: originalUrls[index],
+            fromNodeId: props.id, // 记录来源生图节点，方便在 ImageNode 中自动补连线
         };
         
         if (isMultipleImages) {
@@ -914,6 +553,81 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
 
     console.log(`✅ 已为 ${fullUrls.length} 张图片创建独立节点`);
 };
+
+// 预创建占位图片节点（仅有 loading 骨架，无实际图片）
+const createPlaceholderImageNodes = (count: number) => {
+    if (!currentNode.value) {
+        console.warn('无法获取当前节点信息，跳过创建占位图片节点');
+        return;
+    }
+
+    const nodeWidth = currentNode.value.dimensions?.width || 480;
+    const startX = currentNode.value.position.x + nodeWidth + 80;
+    const startY = currentNode.value.position.y;
+    const nodeSpacing = count > 1 ? 180 : 280;
+
+    const ids: string[] = [];
+
+    for (let i = 0; i < count; i++) {
+        const nodeId = `image_placeholder_${Date.now()}_${i}`;
+        const edgeId = `edge_placeholder_${Date.now()}_${i}`;
+
+        const newNodePosition = {
+            x: startX,
+            y: startY + i * nodeSpacing,
+        };
+
+        ids.push(nodeId);
+
+        addNodes({
+            id: nodeId,
+            type: 'image',
+            position: newNodePosition,
+            data: {
+                imageUrl: '',
+                isLoading: true,
+                fromNodeId: props.id, // 记录来源生图节点
+            },
+        });
+
+        addEdges({
+            id: edgeId,
+            source: props.id,
+            target: nodeId,
+            sourceHandle: 'source',
+            targetHandle: 'target',
+        });
+    }
+
+    pendingImageNodeIds.value = ids;
+    console.log(`✅ 已预创建 ${ids.length} 个占位图片节点`, ids);
+};
+
+// 将真实结果填充到占位图片节点；若没有占位返回 false
+const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): boolean => {
+    const ids = pendingImageNodeIds.value;
+    if (!ids.length) return false;
+
+    setNodes(nodes =>
+        nodes.map(node => {
+            const idx = ids.indexOf(node.id);
+            if (idx === -1 || idx >= fullUrls.length) return node;
+
+            return {
+                ...node,
+                data: {
+                    ...node.data,
+                    imageUrl: fullUrls[idx],
+                    originalImageUrl: originalUrls[idx],
+                    isLoading: false,
+                },
+            };
+        })
+    );
+
+    pendingImageNodeIds.value = [];
+    return true;
+};
 </script>
 
 <style scoped>
@@ -921,24 +635,34 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     background: white;
     border: 1px solid #e0e0e0;
     border-radius: 8px;
-    width: 420px;
+    width: 280px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
 }
 
+/* 默认隐藏所有 handle，hover 时显示 */
+.dream-node :deep(.vue-flow__handle) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.dream-node:hover :deep(.vue-flow__handle) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
 /* 节点标题已移除，保留样式以防其他地方使用 */
 
 .node-content {
-    display: grid;
-    grid-template-columns: 1.2fr 0.8fr;
-    gap: 12px;
+    display: flex;
+    flex-direction: column;
     padding: 12px;
     border-bottom: 1px solid #eee;
 }
 
-.input-section,
 .params-section {
     display: flex;
     flex-direction: column;
@@ -949,9 +673,6 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     font-size: 13px;
     font-weight: 600;
     color: #303133;
-    display: flex;
-    align-items: center;
-    gap: 6px;
     margin-bottom: 8px;
 }
 
@@ -968,203 +689,31 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     font-weight: normal;
 }
 
-/* 提示词输入区域 */
-.prompt-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 10px;
-}
-
-.prompt-content {
-    position: relative;
-    background: #f8f9fa;
-}
-
-.prompt-input {
-    width: 100%;
-}
-
-.prompt-input :deep(.el-textarea__inner) {
-    min-height: 180px !important;
-    line-height: 1.6;
-    padding: 8px 12px;
-    font-size: 13px;
-    background: transparent;
-    border: none;
-    resize: none;
-    color: #333;
-}
-
-.prompt-input :deep(.el-textarea__inner):focus {
-    border: none;
-    box-shadow: none;
-}
-
-.prompt-input :deep(.el-textarea__inner)::placeholder {
-    color: #999;
-}
-
-.prompt-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: flex-end;
-}
-
-.save-prompt-btn,
-.polish-btn {
-    font-size: 12px;
-    padding: 4px 12px;
-    height: auto;
-}
-
-/* 提示词建议列表 */
-.prompt-suggestions {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 1000;
-    max-height: 200px;
-    overflow-y: auto;
-    margin-top: 4px;
-}
-
-.suggestion-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.suggestion-item:hover,
-.suggestion-item.active {
-    background-color: #f5f7fa;
-}
-
-.suggestion-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background-color: #409eff;
-    flex-shrink: 0;
-}
-
-.suggestion-name {
-    font-size: 13px;
-    color: #303133;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* 上传区域 */
-.upload-content {
-    background: #f8f9fa;
-}
-
-.image-thumbnails {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 6px;
-    width: 100%;
-}
-
-.image-thumbnails::after {
-    content: '';
-    flex: 1 1 calc(33.333% - 8px);
-    max-width: calc(33.333% - 8px);
-}
-
-.thumbnail-item {
-    position: relative;
-    width: calc(33.333% - 6px);
-    aspect-ratio: 1;
-    border-radius: 4px;
-    overflow: hidden;
-    border: 1px solid #e0e0e0;
-    cursor: pointer;
-    transition: transform 0.2s;
-    flex: 0 0 calc(33.333% - 6px);
-}
-
-.thumbnail-item:hover {
-    transform: scale(1.05);
-}
-
-.thumbnail-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.remove-thumb-btn {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    z-index: 10;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    background: rgba(0, 0, 0, 0.5);
-    border: none;
-    color: white;
-}
-
-.remove-thumb-btn:hover {
-    background: rgba(255, 0, 0, 0.7);
-}
-
-.upload-demo {
-    width: 100%;
-}
-
-.upload-demo :deep(.el-upload) {
-    width: 100%;
-}
-
-.upload-btn {
-    width: 100%;
-    border-style: dashed;
-    border-color: #d0d0d0;
-    color: #666;
-}
-
-.upload-btn:hover {
-    border-color: #409eff;
-    color: #409eff;
-}
 
 /* 参数设置区域 */
 .params-section {
-    border-left: 1px solid #eee;
-    padding-left: 12px;
+    width: 100%;
 }
 
 .param-item {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 0;
 }
 
 .param-label {
     font-size: 12px;
     color: #909399;
-    margin-bottom: 4px;
+    flex: 0 0 auto;
+    min-width: 72px;
 }
 
 .param-select {
-    width: 100%;
-    margin-bottom: 6px;
+    width: 132px;
+    margin-bottom: 0;
 }
 
 .model-select {
@@ -1181,6 +730,7 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     padding: 4px 8px;
     background: #f5f7fa;
     border-radius: 4px;
+    line-height: 1.3;
 }
 
 .param-hint .el-icon {
@@ -1279,42 +829,5 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     user-select: none;
 }
 
-/* 居中保存提示词对话框样式 */
-.centered-save-prompt-dialog :deep(.el-dialog) {
-    margin: 0 !important;
-    position: fixed !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    max-height: 90vh !important;
-    display: flex !important;
-    flex-direction: column !important;
-}
-
-.centered-save-prompt-dialog :deep(.el-dialog__header) {
-    padding: 24px 30px !important;
-    margin: 0 !important;
-    border-bottom: 1px solid #e0e0e0;
-    flex-shrink: 0;
-}
-
-.centered-save-prompt-dialog :deep(.el-dialog__title) {
-    font-size: 20px !important;
-    font-weight: 600 !important;
-    color: #303133;
-}
-
-.centered-save-prompt-dialog :deep(.el-dialog__body) {
-    padding: 30px !important;
-    overflow-y: auto !important;
-    flex: 1 !important;
-    min-height: 0 !important;
-}
-
-.centered-save-prompt-dialog :deep(.el-dialog__footer) {
-    padding: 20px 30px !important;
-    border-top: 1px solid #e0e0e0;
-    flex-shrink: 0;
-}
 
 </style>

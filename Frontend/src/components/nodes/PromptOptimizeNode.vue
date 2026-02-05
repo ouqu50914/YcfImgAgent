@@ -163,6 +163,18 @@ const copyToClipboard = async () => {
     font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
+/* 默认隐藏所有 handle，hover 时显示 */
+.prompt-optimize-node :deep(.vue-flow__handle) {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.prompt-optimize-node:hover :deep(.vue-flow__handle) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
 .node-header {
     background: linear-gradient(90deg, #fa709a 0%, #fee140 100%);
     color: white;

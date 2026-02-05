@@ -11,18 +11,22 @@
           
           <!-- 输入框区域 -->
           <div class="input-content">
-            <!-- 上传文件后显示文件预览 -->
-            <div v-if="uploadedFile" class="uploaded-file-preview">
-              <el-image
-                v-if="filePreviewUrl"
-                :src="filePreviewUrl"
-                fit="cover"
-                class="preview-image"
-                :preview-src-list="[filePreviewUrl]"
-              />
-              <div class="file-info">
-                <span class="file-name">{{ uploadedFile.name }}</span>
-                <el-icon class="remove-file-icon" @click="removeFile">
+            <!-- 上传文件后显示文件预览（最多4个） -->
+            <div v-if="uploadedFiles.length > 0" class="uploaded-files-preview">
+              <div
+                v-for="(file, index) in uploadedFiles"
+                :key="index"
+                class="file-preview-item"
+              >
+                <el-image
+                  :src="filePreviewUrls[index]"
+                  fit="cover"
+                  class="preview-image-small"
+                  :preview-src-list="filePreviewUrls"
+                  :initial-index="index"
+                />
+                <span class="file-name-small">{{ file.name }}</span>
+                <el-icon class="remove-file-icon-small" @click="removeFile(index)">
                   <Close />
                 </el-icon>
               </div>
@@ -33,7 +37,7 @@
               v-model="inputValue"
               type="text"
               class="quick-input"
-              :placeholder="uploadedFile ? '这里是设计提示词' : '输入提示词，让AI帮你生成图片...'"
+              :placeholder="uploadedFiles.length > 0 ? '这里是设计提示词' : '输入提示词，让AI帮你生成图片...'"
               @keyup.enter="handleSubmit"
             />
           </div>
@@ -85,26 +89,6 @@
       </div>
     </div>
     
-    <!-- 分类标签区域 -->
-    <div class="category-tags">
-      <div
-        v-for="tag in categoryTags"
-        :key="tag.value"
-        class="category-tag"
-        :class="{ 
-          active: selectedCategory === tag.value,
-          'model-tag': tag.isModel,
-          [tag.color]: tag.color
-        }"
-        @click="handleCategoryClick(tag.value)"
-      >
-        <el-icon v-if="tag.icon" class="tag-icon">
-          <component :is="tag.icon" />
-        </el-icon>
-        {{ tag.label }}
-      </div>
-    </div>
-    
     <input
       ref="fileInputRef"
       type="file"
@@ -125,12 +109,7 @@ import {
   Connection, 
   Grid, 
   Top, 
-  Close,
-  Picture,
-  Star,
-  EditPen,
-  Monitor,
-  VideoPlay
+  Close
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { uploadImage } from '@/api/upload';
@@ -138,10 +117,9 @@ import { uploadImage } from '@/api/upload';
 const router = useRouter();
 const inputValue = ref('');
 const selectedModel = ref('nano');
-const selectedCategory = ref('nano');
 const fileInputRef = ref<HTMLInputElement | null>(null);
-const uploadedFile = ref<File | null>(null);
-const filePreviewUrl = ref<string>('');
+const uploadedFiles = ref<File[]>([]);
+const filePreviewUrls = ref<string[]>([]);
 const showModelDropdown = ref(false);
 
 const models = [
@@ -149,60 +127,9 @@ const models = [
   { label: 'Dream AI', value: 'dream' },
 ];
 
-const categoryTags = [
-  { 
-    label: 'Nano Banana Pro', 
-    value: 'nano', 
-    isModel: true, 
-    color: 'orange',
-    icon: 'Picture'
-  },
-  { 
-    label: 'Design', 
-    value: 'design', 
-    isModel: false,
-    icon: 'Picture'
-  },
-  { 
-    label: 'Branding', 
-    value: 'branding', 
-    isModel: false,
-    icon: 'Star'
-  },
-  { 
-    label: 'Illustration', 
-    value: 'illustration', 
-    isModel: false,
-    icon: 'EditPen'
-  },
-  { 
-    label: 'E-Commerce', 
-    value: 'ecommerce', 
-    isModel: false,
-    icon: 'Monitor'
-  },
-  { 
-    label: 'Video', 
-    value: 'video', 
-    isModel: false,
-    icon: 'VideoPlay'
-  },
-];
-
-const handleCategoryClick = (value: string) => {
-  selectedCategory.value = value;
-  // 如果是模型标签，同时更新模型选择
-  const modelTag = categoryTags.find(tag => tag.value === value && tag.isModel);
-  if (modelTag) {
-    selectedModel.value = value;
-  }
-};
-
 const handleModelSelect = (value: string) => {
   selectedModel.value = value;
   showModelDropdown.value = false;
-  // 同步更新分类标签
-  selectedCategory.value = value;
 };
 
 const handleFileUpload = () => {
@@ -213,22 +140,36 @@ const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (file) {
-    uploadedFile.value = file;
+    // 检查是否已达到最大数量
+    if (uploadedFiles.value.length >= 4) {
+      ElMessage.warning('最多只能上传4个文件');
+      if (fileInputRef.value) {
+        fileInputRef.value.value = '';
+      }
+      return;
+    }
+    
+    // 添加到文件数组
+    uploadedFiles.value.push(file);
     // 创建预览URL
-    filePreviewUrl.value = URL.createObjectURL(file);
+    filePreviewUrls.value.push(URL.createObjectURL(file));
     ElMessage.success('文件已选择');
+    
+    // 清空input以便可以再次选择
+    if (fileInputRef.value) {
+      fileInputRef.value.value = '';
+    }
   }
 };
 
-const removeFile = () => {
-  if (filePreviewUrl.value) {
-    URL.revokeObjectURL(filePreviewUrl.value);
+const removeFile = (index: number) => {
+  // 清理预览URL
+  if (filePreviewUrls.value[index]) {
+    URL.revokeObjectURL(filePreviewUrls.value[index]);
   }
-  uploadedFile.value = null;
-  filePreviewUrl.value = '';
-  if (fileInputRef.value) {
-    fileInputRef.value.value = '';
-  }
+  // 从数组中移除
+  uploadedFiles.value.splice(index, 1);
+  filePreviewUrls.value.splice(index, 1);
 };
 
 const handleInspiration = () => {
@@ -246,24 +187,27 @@ const handleLanguage = () => {
 };
 
 const handleSubmit = async () => {
-  if (!inputValue.value.trim() && !uploadedFile.value) {
+  if (!inputValue.value.trim() && uploadedFiles.value.length === 0) {
     ElMessage.warning('请输入提示词或上传图片');
     return;
   }
   
   // 如果有上传的图片，先上传获取URL
-  let imageUrl = '';
-  if (uploadedFile.value) {
+  const imageUrls: string[] = [];
+  if (uploadedFiles.value.length > 0) {
     try {
-      ElMessage.info('正在上传图片...');
-      const res: any = await uploadImage(uploadedFile.value);
-      if (res.data && res.data.url) {
-        imageUrl = res.data.url;
-        ElMessage.success('图片上传成功');
-      } else {
-        ElMessage.error('图片上传失败');
-        return;
+      ElMessage.info(`正在上传 ${uploadedFiles.value.length} 个图片...`);
+      for (let i = 0; i < uploadedFiles.value.length; i++) {
+        const file = uploadedFiles.value[i];
+        const res: any = await uploadImage(file);
+        if (res.data && res.data.url) {
+          imageUrls.push(res.data.url);
+        } else {
+          ElMessage.error(`第 ${i + 1} 个图片上传失败`);
+          return;
+        }
       }
+      ElMessage.success('所有图片上传成功');
     } catch (error: any) {
       ElMessage.error(error.message || '图片上传失败');
       return;
@@ -278,8 +222,9 @@ const handleSubmit = async () => {
   if (selectedModel.value) {
     query.model = selectedModel.value;
   }
-  if (imageUrl) {
-    query.imageUrl = imageUrl;
+  if (imageUrls.length > 0) {
+    // 传递多个图片URL，使用逗号分隔
+    query.imageUrls = imageUrls.join(',');
   }
   
   router.push({
@@ -306,10 +251,10 @@ onUnmounted(() => {
   if (typeof window !== 'undefined') {
     document.removeEventListener('click', handleClickOutside);
   }
-  // 清理文件预览URL
-  if (filePreviewUrl.value) {
-    URL.revokeObjectURL(filePreviewUrl.value);
-  }
+  // 清理所有文件预览URL
+  filePreviewUrls.value.forEach(url => {
+    URL.revokeObjectURL(url);
+  });
 });
 </script>
 
@@ -362,47 +307,52 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.uploaded-file-preview {
+.uploaded-files-preview {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px;
+  flex-wrap: wrap;
+  padding: 6px;
   background: #f5f7fa;
   border-radius: 8px;
 }
 
-.preview-image {
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
-  object-fit: cover;
-}
-
-.file-info {
-  flex: 1;
+.file-preview-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
 }
 
-.file-name {
-  font-size: 14px;
+.preview-image-small {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.file-name-small {
+  font-size: 12px;
   color: #303133;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
+  max-width: 120px;
 }
 
-.remove-file-icon {
+.remove-file-icon-small {
   color: #909399;
   cursor: pointer;
   transition: color 0.3s;
-  font-size: 16px;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
-.remove-file-icon:hover {
+.remove-file-icon-small:hover {
   color: #f56c6c;
 }
 
@@ -506,54 +456,6 @@ onUnmounted(() => {
   line-height: 1;
 }
 
-/* 分类标签区域 */
-.category-tags {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.category-tag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-  background: #f5f7fa;
-  color: #606266;
-  border: 1px solid #e0e0e0;
-}
-
-.category-tag:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.category-tag.active {
-  background: #ecf5ff;
-  color: #409eff;
-  border-color: #409eff;
-}
-
-.category-tag.model-tag.orange {
-  background: #fff7e6;
-  color: #fa8c16;
-  border-color: #ffd591;
-}
-
-.category-tag.model-tag.orange.active {
-  background: #fff1d9;
-  border-color: #fa8c16;
-}
-
-.tag-icon {
-  font-size: 16px;
-}
-
 @media (max-width: 768px) {
   .input-card {
     padding: 16px;
@@ -569,8 +471,8 @@ onUnmounted(() => {
     width: 100%;
   }
   
-  .category-tags {
-    justify-content: flex-start;
+  .file-name-small {
+    max-width: 80px;
   }
 }
 </style>
