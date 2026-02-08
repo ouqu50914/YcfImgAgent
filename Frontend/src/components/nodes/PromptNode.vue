@@ -12,7 +12,7 @@
           v-model="text"
           type="textarea"
                     :autosize="{ minRows: 6, maxRows: 12 }"
-                    placeholder="输入提示词，输入 / 可选择已保存提示词"
+                    placeholder="请输入提示词..."
                     class="prompt-input"
                     maxlength="2000"
                     @input="handlePromptInput"
@@ -275,11 +275,11 @@ onUnmounted(() => {
   
   <style scoped>
   .prompt-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 320px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
 }
@@ -302,12 +302,12 @@ onUnmounted(() => {
   }
   
   .node-header {
-    background: #f5f7fa;
-    border-bottom: 1px solid #eee;
+    background: #3a3a3f;
+    border-bottom: 1px solid #404040;
     padding: 8px 12px;
     font-size: 14px;
     font-weight: bold;
-    color: #606266;
+    color: #e0e0e0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -316,12 +316,13 @@ onUnmounted(() => {
   }
   
   .node-content {
-    padding: 12px;
+    padding: 14px 16px;
+    color: #e0e0e0;
   }
 
 .prompt-content {
     position: relative;
-    background: #f8f9fa;
+    background: transparent;
     border-radius: 6px;
     padding: 8px;
 }
@@ -336,14 +337,15 @@ onUnmounted(() => {
     padding: 8px 10px;
     font-size: 13px;
     background: transparent;
-    border: none;
+    border: 1px solid #404040;
+    border-radius: 8px;
     resize: none;
-    color: #333;
+    color: #e0e0e0;
 }
 
 .prompt-input :deep(.el-textarea__inner):focus {
-    border: none;
-    box-shadow: none;
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }
 
 .prompt-suggestions {

@@ -20,4 +20,10 @@ html, body {
   width: 100vw;
   overflow: hidden;
 }
+
+/* 图片预览（el-image 预览、全屏预览）去掉滚动条 */
+.el-image-viewer__wrapper,
+.el-image-viewer__canvas {
+  overflow: hidden !important;
+}
 </style>

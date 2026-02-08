@@ -39,14 +39,6 @@
         </div>
         <div 
             class="menu-item"
-            @click="handleInsertSplit"
-        >
-            <el-icon><KnifeFork /></el-icon>
-            <span>插入拆分节点</span>
-            <span class="shortcut">S</span>
-        </div>
-        <div 
-            class="menu-item"
             @click="handleInsertLayerSeparation"
         >
             <el-icon><Grid /></el-icon>
@@ -83,7 +75,6 @@ const emit = defineEmits<{
     insertImage: [];
     insertDream: [];
     insertVideo: [];
-    insertSplit: [];
     insertLayerSeparation: [];
     addGroup: [];
     close: [];
@@ -106,11 +97,6 @@ const handleInsertDream = () => {
 
 const handleInsertVideo = () => {
     emit('insertVideo');
-    emit('close');
-};
-
-const handleInsertSplit = () => {
-    emit('insertSplit');
     emit('close');
 };
 

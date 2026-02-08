@@ -3,9 +3,9 @@
         <!-- 顶部标题 -->
         <div class="node-header">
             <el-icon>
-                <KnifeFork />
+                <Grid />
             </el-icon>
-            <span>图片拆分</span>
+            <span>图层拆分</span>
         </div>
 
         <!-- 内容区域 -->
@@ -55,9 +55,10 @@
                 size="small"
                 class="w-100 execute-btn"
                 :loading="loading"
+                :disabled="!canExecute"
                 @click="handleSplit"
             >
-                {{ loading ? '拆分中...' : '开始拆分' }}
+                {{ executeButtonText }}
             </el-button>
             
             <!-- 已执行状态 -->
@@ -73,10 +74,10 @@
             type="target" 
             :position="Position.Left" 
             :style="{ 
-                background: '#555', 
+                background: '#409eff', 
                 width: '12px', 
                 height: '12px', 
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair'
             }"
@@ -86,10 +87,10 @@
             type="source" 
             :position="Position.Right" 
             :style="{ 
-                background: '#555', 
+                background: '#409eff', 
                 width: '12px', 
                 height: '12px', 
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair'
             }"
@@ -119,9 +120,11 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
-import { KnifeFork, CircleCheck } from '@element-plus/icons-vue';
+import { Grid, CircleCheck } from '@element-plus/icons-vue';
 import { splitImage } from '../../api/image';
 import { ElMessage } from 'element-plus';
+import { useUserStore } from '@/store/user';
+import { getCreditCost } from '@/utils/credits';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -131,11 +134,12 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+const userStore = useUserStore();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
 const splitCount = ref(2);
 const splitDirection = ref('horizontal');
-const prompt = ref('');
+const prompt = ref('将图片按图层拆分，分别输出背景、主体、装饰元素等独立图层');
 const selectedModel = ref<string>('dream');
 const apiType = computed<'dream' | 'nano'>(() => {
     return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
@@ -146,6 +150,18 @@ const nanoModel = computed<string | undefined>(() => {
     }
     return undefined;
 });
+
+const executeCost = computed(() => getCreditCost(apiType.value, 'split'));
+const canExecute = computed(() => {
+    if (userStore.userInfo?.role === 1) return true;
+    return (userStore.userInfo?.credits ?? 0) >= executeCost.value;
+});
+const executeButtonText = computed(() => {
+    if (loading.value) return '拆分中...';
+    if (userStore.userInfo?.role === 1) return '开始拆分';
+    return `开始拆分 (消耗 ${executeCost.value} 积分)`;
+});
+
 const loading = ref(false);
 const isExecuted = ref(false);
 const showFullscreenPreview = ref(false);
@@ -198,6 +214,10 @@ watch(
 );
 
 const handleSplit = async () => {
+    if (!canExecute.value) {
+        ElMessage.warning('积分不足，请向超级管理员申请');
+        return;
+    }
     const finalImageUrl = inputImageUrl.value;
 
     if (!finalImageUrl) {
@@ -228,6 +248,7 @@ const handleSplit = async () => {
             // 更新节点数据，供下游节点使用
             props.data.imageUrl = url;
             ElMessage.success('图片拆分成功！');
+            userStore.fetchCredits();
             
             // 标记节点为已执行
             isExecuted.value = true;
@@ -292,18 +313,18 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 
 <style scoped>
 .split-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 280px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
 .node-header {
-    background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
-    color: white;
+    background: #3a3a3f;
+    color: #e0e0e0;
     padding: 8px 12px;
     font-size: 14px;
     font-weight: bold;
@@ -313,8 +334,9 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 }
 
 .node-content {
-    padding: 10px 12px 12px;
-    border-bottom: 1px solid #eee;
+    padding: 14px 16px;
+    border-bottom: 1px solid #404040;
+    color: #e0e0e0;
 }
 
 .params-section {
@@ -340,7 +362,7 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 
 .param-label {
     font-size: 12px;
-    color: #909399;
+    color: #b0b0b0;
     flex: 0 0 auto;
     min-width: 72px;
 }
@@ -348,6 +370,22 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 .param-select {
     width: 132px;
     margin-bottom: 0;
+}
+
+.param-select :deep(.el-input__wrapper) {
+    background: #393c45;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #555;
+}
+
+.param-select :deep(.el-input__wrapper:hover) {
+    border-color: #409eff;
+}
+
+.param-select :deep(.el-input__wrapper.is-focus) {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }
 
 .param-input {
@@ -504,11 +542,14 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 .fullscreen-preview-container {
     width: 100vw !important;
     height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     cursor: pointer;
     position: relative;
+    overflow: hidden !important;
 }
 
 /* 默认隐藏所有 handle，hover 时显示 */

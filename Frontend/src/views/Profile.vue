@@ -32,8 +32,10 @@
 
         <el-divider />
 
-        <h3>修改密码</h3>
+        <h3 v-if="userStore.userInfo.role === 1">修改密码</h3>
+        <p v-else class="password-tip">普通用户不能修改密码，请联系管理员。</p>
 
+        <template v-if="userStore.userInfo.role === 1">
         <el-form-item label="原密码" prop="oldPassword">
           <el-input
             v-model="form.oldPassword"
@@ -66,6 +68,7 @@
             修改密码
           </el-button>
         </el-form-item>
+        </template>
       </el-form>
     </el-card>
   </div>
@@ -195,5 +198,11 @@ const handleSubmit = async () => {
 h3 {
   margin: 20px 0 10px 0;
   color: #606266;
+}
+
+.password-tip {
+  color: #909399;
+  font-size: 14px;
+  margin: 0 0 12px 0;
 }
 </style>

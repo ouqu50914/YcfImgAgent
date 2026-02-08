@@ -54,10 +54,17 @@
               </el-tag>
             </template>
           </el-table-column>
+          <el-table-column prop="credits" label="积分" width="100">
+            <template #default="{ row }">
+              <span v-if="row.role_id === 1">—</span>
+              <span v-else>{{ row.credits ?? 0 }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="180" />
-          <el-table-column label="操作" width="300" fixed="right">
+          <el-table-column label="操作" width="360" fixed="right">
             <template #default="{ row }">
               <el-button size="small" @click="viewUserStats(row.id)">统计</el-button>
+              <el-button size="small" @click="editCreditsHandler(row)" v-if="row.role_id !== 1">积分</el-button>
               <el-button size="small" @click="showResetPasswordDialogHandler(row)">重置密码</el-button>
               <el-button size="small" @click="editUser(row)">编辑</el-button>
               <el-button size="small" type="danger" @click="deleteUserHandler(row.id)">删除</el-button>
@@ -75,6 +82,48 @@
           @current-change="loadUserList"
           style="margin-top: 20px"
         />
+      </el-tab-pane>
+
+      <!-- 积分申请 -->
+      <el-tab-pane label="积分申请" name="creditApplications">
+        <div class="toolbar">
+          <el-select
+            v-model="creditAppStatusFilter"
+            placeholder="状态筛选"
+            style="width: 150px"
+            clearable
+            @change="loadCreditApplications"
+          >
+            <el-option label="待处理" value="pending" />
+            <el-option label="已通过" value="approved" />
+            <el-option label="已驳回" value="rejected" />
+          </el-select>
+          <el-button @click="loadCreditApplications" style="margin-left: 10px">刷新</el-button>
+        </div>
+
+        <el-table :data="creditApplications" border style="margin-top: 20px">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="user_id" label="用户ID" width="100" />
+          <el-table-column prop="username" label="用户名" width="120" />
+          <el-table-column prop="amount" label="申请积分" width="100" />
+          <el-table-column prop="reason" label="申请原因" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'approved' ? 'success' : row.status === 'rejected' ? 'danger' : 'warning'">
+                {{ row.status === 'pending' ? '待处理' : row.status === 'approved' ? '已通过' : '已驳回' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="申请时间" width="180" />
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <template v-if="row.status === 'pending'">
+                <el-button size="small" type="success" @click="approveCreditAppHandler(row)">通过</el-button>
+                <el-button size="small" type="danger" @click="rejectCreditAppHandler(row)">驳回</el-button>
+              </template>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-tab-pane>
 
       <!-- 日志查看 -->
@@ -202,6 +251,30 @@
           <el-table-column prop="last_sync_time" label="最后同步" width="180" />
         </el-table>
       </el-tab-pane>
+
+      <!-- 系统配置 -->
+      <el-tab-pane label="系统配置" name="system">
+        <div class="toolbar">
+          <el-form :inline="false" label-width="120px" style="max-width: 640px">
+            <el-form-item label="操作手册链接">
+              <el-input
+                v-model="helpDocUrlForm.url"
+                placeholder="请输入腾讯文档阅读链接，例如：https://docs.qq.com/..."
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="handleSaveHelpDocUrl" :loading="savingHelpDocUrl">
+                保存
+              </el-button>
+            </el-form-item>
+            <el-form-item>
+              <div style="font-size: 12px; color: #909399;">
+                小提示：建议使用腾讯文档的阅读链接，修改后左侧“操作手册”入口将打开该地址。
+              </div>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 创建用户对话框 -->
@@ -256,6 +329,73 @@
       </template>
     </el-dialog>
 
+    <!-- 编辑积分对话框 -->
+    <el-dialog v-model="showEditCreditsDialog" title="编辑积分" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="用户">
+          <span>{{ editCreditsForm.username }}</span>
+        </el-form-item>
+        <el-form-item label="积分数量">
+          <el-input-number v-model="editCreditsForm.credits" :min="0" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditCreditsDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleUpdateCredits">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 用户统计对话框 -->
+    <el-dialog v-model="showUserStatsDialog" title="用户统计" width="560px" @opened="loadUserStatsData">
+      <div class="stats-filters" v-if="statsUserId">
+        <el-date-picker
+          v-model="statsDateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          style="width: 260px"
+        />
+        <el-select v-model="statsApiType" placeholder="模型筛选" style="width: 120px; margin-left: 10px" clearable>
+          <el-option label="即梦" value="dream" />
+          <el-option label="Nano" value="nano" />
+        </el-select>
+        <el-button type="primary" @click="loadUserStatsData" style="margin-left: 10px">查询</el-button>
+      </div>
+      <div class="stats-content" v-if="userStatsData">
+        <div class="stats-summary">
+          <div class="stats-item">
+            <span class="stats-label">可用积分</span>
+            <span class="stats-value">{{ userStatsData.user?.credits ?? 0 }}</span>
+          </div>
+          <div class="stats-item">
+            <span class="stats-label">使用总积分</span>
+            <span class="stats-value highlight">{{ userStatsData.totalCreditsUsed ?? 0 }}</span>
+          </div>
+          <div class="stats-item">
+            <span class="stats-label">项目数</span>
+            <span class="stats-value">{{ userStatsData.projectCount ?? 0 }}</span>
+          </div>
+        </div>
+        <div class="stats-section" v-if="userStatsData.creditsByApiType?.length">
+          <div class="stats-section-title">按模型统计（积分消耗）</div>
+          <el-table :data="userStatsData.creditsByApiType" size="small" border>
+            <el-table-column prop="apiType" label="模型" width="120">
+              <template #default="{ row }">{{ row.apiType === 'dream' ? '即梦' : row.apiType === 'nano' ? 'Nano' : row.apiType }}</template>
+            </el-table-column>
+            <el-table-column prop="total" label="消耗积分" />
+          </el-table>
+        </div>
+        <div class="stats-meta">
+          <span>最后登录：{{ userStatsData.lastLoginTime ? new Date(userStatsData.lastLoginTime).toLocaleString() : '—' }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showUserStatsDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 重置密码对话框 -->
     <el-dialog v-model="showResetPasswordDialog" title="重置密码" width="400px">
       <el-form :model="resetPasswordForm" :rules="resetPasswordRules" ref="resetPasswordFormRef" label-width="100px">
@@ -272,7 +412,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft } from '@element-plus/icons-vue';
@@ -286,7 +426,13 @@ import {
   getUserStats,
   getOperationLogs,
   getApiConfigs,
-  updateApiConfig
+  updateApiConfig,
+  getCreditApplications,
+  approveCreditApplication,
+  rejectCreditApplication,
+  updateUserCredits,
+  getHelpDocUrl,
+  updateHelpDocUrl
 } from '@/api/admin';
 import {
   getAllCategories,
@@ -401,12 +547,103 @@ const deleteUserHandler = async (userId: number) => {
   }
 };
 
-const viewUserStats = async (userId: number) => {
+const showUserStatsDialog = ref(false);
+const statsUserId = ref<number | null>(null);
+const statsDateRange = ref<[string, string] | null>(null);
+const statsApiType = ref('');
+const userStatsData = ref<any>(null);
+
+const viewUserStats = (userId: number) => {
+  statsUserId.value = userId;
+  statsDateRange.value = null;
+  statsApiType.value = '';
+  userStatsData.value = null;
+  showUserStatsDialog.value = true;
+};
+
+const loadUserStatsData = async () => {
+  if (!statsUserId.value) return;
   try {
-    const res: any = await getUserStats(userId);
-    ElMessageBox.alert(JSON.stringify(res.data, null, 2), '用户统计', { type: 'info' });
+    const params: { startDate?: string; endDate?: string; apiType?: string } = {};
+    if (statsDateRange.value && statsDateRange.value.length === 2) {
+      params.startDate = statsDateRange.value[0];
+      params.endDate = statsDateRange.value[1];
+    }
+    if (statsApiType.value) params.apiType = statsApiType.value;
+    const res: any = await getUserStats(statsUserId.value, params);
+    userStatsData.value = res.data;
   } catch (error: any) {
     ElMessage.error(error.message || '获取失败');
+  }
+};
+
+// 积分管理
+const showEditCreditsDialog = ref(false);
+const editCreditsForm = reactive<{ userId: number; username: string; credits: number }>({ userId: 0, username: '', credits: 0 });
+
+const editCreditsHandler = (user: any) => {
+  editCreditsForm.userId = user.id;
+  editCreditsForm.username = user.username;
+  editCreditsForm.credits = user.credits ?? 0;
+  showEditCreditsDialog.value = true;
+};
+
+const handleUpdateCredits = async () => {
+  try {
+    await updateUserCredits(editCreditsForm.userId, editCreditsForm.credits);
+    ElMessage.success('积分更新成功');
+    showEditCreditsDialog.value = false;
+    loadUserList();
+  } catch (error: any) {
+    ElMessage.error(error.message || '更新失败');
+  }
+};
+
+// 积分申请
+const creditApplications = ref<any[]>([]);
+const creditAppStatusFilter = ref('');
+
+const loadCreditApplications = async () => {
+  try {
+    const res: any = await getCreditApplications(creditAppStatusFilter.value || undefined);
+    creditApplications.value = res.data || [];
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载失败');
+  }
+};
+
+const approveCreditAppHandler = async (row: any) => {
+  try {
+    const { value } = await ElMessageBox.prompt('确认通过的积分数量（可修改）', '通过申请', {
+      inputValue: String(row.amount),
+      inputPattern: /^\d+$/,
+      inputErrorMessage: '请输入正整数'
+    });
+    const amount = parseInt(value, 10);
+    if (isNaN(amount) || amount < 1) {
+      ElMessage.error('积分数量无效');
+      return;
+    }
+    await approveCreditApplication(row.id, { amount });
+    ElMessage.success('已通过');
+    loadCreditApplications();
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '操作失败');
+    }
+  }
+};
+
+const rejectCreditAppHandler = async (row: any) => {
+  try {
+    await ElMessageBox.confirm('确定驳回该申请？', '驳回', { type: 'warning' });
+    await rejectCreditApplication(row.id);
+    ElMessage.success('已驳回');
+    loadCreditApplications();
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '操作失败');
+    }
   }
 };
 
@@ -454,6 +691,35 @@ const updateApiConfigStatus = async (apiType: string, status: number) => {
   } catch (error: any) {
     ElMessage.error(error.message || '更新失败');
     loadApiConfigs();
+  }
+};
+
+// 系统配置 - 操作手册链接
+const helpDocUrlForm = reactive<{ url: string }>({ url: '' });
+const savingHelpDocUrl = ref(false);
+
+const loadHelpDocUrl = async () => {
+  try {
+    const res: any = await getHelpDocUrl();
+    helpDocUrlForm.url = res.url || '';
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载操作手册链接失败');
+  }
+};
+
+const handleSaveHelpDocUrl = async () => {
+  if (!helpDocUrlForm.url.trim()) {
+    ElMessage.warning('请输入文档链接');
+    return;
+  }
+  savingHelpDocUrl.value = true;
+  try {
+    await updateHelpDocUrl(helpDocUrlForm.url.trim());
+    ElMessage.success('已更新操作手册链接');
+  } catch (error: any) {
+    ElMessage.error(error.message || '保存失败');
+  } finally {
+    savingHelpDocUrl.value = false;
   }
 };
 
@@ -546,6 +812,11 @@ const updateApiConfigLimit = async (apiType: string, limit: number) => {
   }
 };
 
+watch(activeTab, (tab) => {
+  if (tab === 'creditApplications') loadCreditApplications();
+  if (tab === 'system') loadHelpDocUrl();
+});
+
 onMounted(() => {
   loadUserList();
   loadLogs();
@@ -593,5 +864,57 @@ onMounted(() => {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.stats-filters {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.stats-content {
+  min-height: 120px;
+}
+
+.stats-summary {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.stats-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.stats-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.stats-value.highlight {
+  color: #e6a23c;
+}
+
+.stats-section {
+  margin-bottom: 16px;
+}
+
+.stats-section-title {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.stats-meta {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

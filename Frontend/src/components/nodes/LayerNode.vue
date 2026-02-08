@@ -104,10 +104,10 @@
             class="handle-target"
             :position="Position.Left"
             :style="{
-                background: '#555',
+                background: '#409eff',
                 width: '12px',
                 height: '12px',
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair'
             }"
@@ -147,15 +147,15 @@ const imageUrl = computed(() => {
 });
 
 const previewImageUrl = computed(() => {
-    if (layerResult.value && layerResult.value.layers.length > 0) {
+    if (layerResult.value && layerResult.value.layers && layerResult.value.layers.length > 0 && layerResult.value.layers[0] && layerResult.value.layers[0].url) {
         return getImageUrl(layerResult.value.layers[0].url);
     }
     return getImageUrl(imageUrl.value);
 });
 
 const previewList = computed(() => {
-    if (layerResult.value && layerResult.value.layers.length > 0) {
-        return layerResult.value.layers.map(l => getImageUrl(l.url));
+    if (layerResult.value && layerResult.value.layers && layerResult.value.layers.length > 0) {
+        return layerResult.value.layers.map(l => getImageUrl(l?.url || ''));
     }
     return [getImageUrl(imageUrl.value)];
 });
@@ -219,9 +219,9 @@ const handleCardClick = () => {
 
 <style scoped>
 .layer-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 240px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow: visible;
@@ -239,12 +239,12 @@ const handleCardClick = () => {
 }
 
 .image-content:hover {
-    background: #f8f9fa;
+    background: transparent;
 }
 
 .section-title {
     font-size: 12px;
-    color: #666;
+    color: #e0e0e0;
     margin-bottom: 8px;
     font-weight: 500;
 }
@@ -252,8 +252,8 @@ const handleCardClick = () => {
 .img-preview {
     width: 100%;
     display: block;
-    border-radius: 4px;
-    border: 1px solid #eee;
+    border-radius: 8px;
+    border: 1px solid #404040;
     object-fit: cover;
 }
 
@@ -263,14 +263,17 @@ const handleCardClick = () => {
     align-items: center;
     width: 100%;
     min-height: 150px;
-    background: #f5f5f5;
+    background: #25262b;
+    border-radius: 8px;
+    border: 1px solid #404040;
 }
 
 .loading-slot {
-    background: linear-gradient(90deg, #f0f0f0 0%, #e5e5e5 50%, #f0f0f0 100%);
+    background: linear-gradient(90deg, #25262b 0%, #2d2e34 50%, #25262b 100%);
     background-size: 200% 100%;
     animation: shimmer 1.2s ease-in-out infinite;
-    border-radius: 4px;
+    border-radius: 8px;
+    border: 1px solid #404040;
 }
 
 @keyframes shimmer {
@@ -384,11 +387,14 @@ const handleCardClick = () => {
 .layer-fullscreen-container {
     width: 100vw;
     height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
     display: flex;
     align-items: stretch;
     justify-content: center;
     padding: 32px 40px;
     box-sizing: border-box;
+    overflow: hidden;
 }
 
 .layer-fullscreen-main {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import request from '@/utils/request';
+import { getMe } from '@/api/user';
 
 export const useUserStore = defineStore('user', {
   state: () => ({
@@ -16,20 +17,21 @@ export const useUserStore = defineStore('user', {
         const res: any = await request.post('/auth/login', loginForm);
         
         // 假设后端返回结构: { message: "...", data: { token: "...", refreshToken: "...", userInfo: {...} } }
-        const { token, refreshToken, userInfo } = res.data; 
+        const { token, refreshToken, userInfo } = res.data;
+        const info = { ...userInfo, credits: userInfo?.credits ?? 0 };
 
         // 保存状态
         this.token = token;
         this.refreshTokenValue = refreshToken || '';
-        this.userInfo = userInfo;
+        this.userInfo = info;
         
         // 持久化到 LocalStorage
         localStorage.setItem('token', token);
         if (refreshToken) {
           localStorage.setItem('refreshToken', refreshToken);
         }
-        localStorage.setItem('userInfo', JSON.stringify(userInfo));
-        
+        localStorage.setItem('userInfo', JSON.stringify(info));
+
         return true;
       } catch (error) {
         return false;
@@ -61,10 +63,11 @@ export const useUserStore = defineStore('user', {
         });
 
         const { token, userInfo } = res.data;
+        const info = { ...userInfo, credits: userInfo?.credits ?? 0 };
         this.token = token;
-        this.userInfo = userInfo;
+        this.userInfo = info;
         localStorage.setItem('token', token);
-        localStorage.setItem('userInfo', JSON.stringify(userInfo));
+        localStorage.setItem('userInfo', JSON.stringify(info));
 
         return token;
       } catch (error: any) {
@@ -73,6 +76,21 @@ export const useUserStore = defineStore('user', {
         throw error;
       } finally {
         this.isRefreshing = false;
+      }
+    },
+    // 刷新积分（从 /api/auth/me 获取最新用户信息）
+    async fetchCredits() {
+      try {
+        const res: any = await getMe();
+        const data = res?.data;
+        if (data && typeof this.userInfo === 'object') {
+          this.userInfo = { ...this.userInfo, credits: data.credits ?? 0 };
+          localStorage.setItem('userInfo', JSON.stringify(this.userInfo));
+          return data.credits ?? 0;
+        }
+        return this.userInfo?.credits ?? 0;
+      } catch {
+        return this.userInfo?.credits ?? 0;
       }
     },
     // 登出动作

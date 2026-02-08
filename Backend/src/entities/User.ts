@@ -18,6 +18,9 @@ export class User {
     @Column({ type: 'tinyint', default: 1, comment: '1-启用, 0-禁用' })
     status!: number;
 
+    @Column({ type: 'int', default: 0, comment: '可用积分（普通用户消耗）' })
+    credits!: number;
+
     @CreateDateColumn()
     created_at!: Date;
 

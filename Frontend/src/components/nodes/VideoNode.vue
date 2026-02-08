@@ -59,11 +59,11 @@ const props = defineProps<NodeProps>();
 
 <style scoped>
 .video-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 240px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.45);
     font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -86,12 +86,12 @@ const props = defineProps<NodeProps>();
 }
 
 .node-header {
-    background: #f5f7fa;
-    border-bottom: 1px solid #eee;
+    background: #3a3a3f;
+    border-bottom: 1px solid #404040;
     padding: 8px 12px;
     font-size: 14px;
     font-weight: bold;
-    color: #606266;
+    color: #e0e0e0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -100,7 +100,8 @@ const props = defineProps<NodeProps>();
 }
 
 .node-content {
-    padding: 24px 12px;
+    padding: 24px 16px;
+    color: #e0e0e0;
 }
 
 .placeholder-content {

@@ -136,10 +136,18 @@ const handleFileUpload = () => {
   fileInputRef.value?.click();
 };
 
+const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+const isSupportedImageFile = (file: File) => file.type && SUPPORTED_IMAGE_TYPES.includes(file.type);
+
 const handleFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement;
   const file = target.files?.[0];
   if (file) {
+    if (!isSupportedImageFile(file)) {
+      ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
+      if (fileInputRef.value) fileInputRef.value.value = '';
+      return;
+    }
     // 检查是否已达到最大数量
     if (uploadedFiles.value.length >= 4) {
       ElMessage.warning('最多只能上传4个文件');
@@ -196,14 +204,30 @@ const handleSubmit = async () => {
   const imageUrls: string[] = [];
   if (uploadedFiles.value.length > 0) {
     try {
+      for (let i = 0; i < uploadedFiles.value.length; i++) {
+        const file = uploadedFiles.value[i] as File;
+        if (!file || typeof file !== 'object' || !('name' in file)) {
+          ElMessage.error(`第 ${i + 1} 个文件不是有效的图片文件`);
+          return;
+        }
+        if (!isSupportedImageFile(file)) {
+          ElMessage.warning(`第 ${i + 1} 个文件格式不支持，请上传 JPG、PNG、GIF、WebP 等图片`);
+          return;
+        }
+      }
       ElMessage.info(`正在上传 ${uploadedFiles.value.length} 个图片...`);
       for (let i = 0; i < uploadedFiles.value.length; i++) {
         const file = uploadedFiles.value[i];
-        const res: any = await uploadImage(file);
-        if (res.data && res.data.url) {
-          imageUrls.push(res.data.url);
+        if (file && typeof file === 'object' && 'name' in file && 'size' in file) {
+          const res: any = await uploadImage(file as File);
+          if (res.data && res.data.url) {
+            imageUrls.push(res.data.url);
+          } else {
+            ElMessage.error(`第 ${i + 1} 个图片上传失败`);
+            return;
+          }
         } else {
-          ElMessage.error(`第 ${i + 1} 个图片上传失败`);
+          ElMessage.error(`第 ${i + 1} 个文件不是有效的图片文件`);
           return;
         }
       }

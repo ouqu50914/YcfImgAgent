@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # 复制依赖文件
-COPY package*.json ./
+COPY package.json ./
 COPY yarn.lock ./
 
 # 安装依赖

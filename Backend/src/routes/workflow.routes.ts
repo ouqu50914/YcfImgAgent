@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { 
     saveTemplate, getTemplates, getTemplate, deleteTemplate, updateTemplate,
-    autoSaveHistory, getHistoryList, getHistory, deleteHistory, getPublicTemplates
+    autoSaveHistory, getHistoryList, getHistory, updateHistory, deleteHistory, getPublicTemplates
 } from "../controllers/workflow.controller";
 import { authenticateToken } from "../middlewares/auth.middleware";
 import { getActiveCategories } from "../controllers/category.controller";
@@ -26,6 +26,7 @@ router.delete("/template/:id", deleteTemplate);
 router.post("/history/auto-save", autoSaveHistory);
 router.get("/history", getHistoryList);
 router.get("/history/:id", getHistory);
+router.put("/history/:id", updateHistory);
 router.delete("/history/:id", deleteHistory);
 
 export default router;

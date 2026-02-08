@@ -46,9 +46,10 @@
                 size="small"
                 class="w-100 execute-btn"
                 :loading="loading"
+                :disabled="!canExecute"
                 @click="handleSeparate"
             >
-                {{ loading ? '分离中...' : '开始分离' }}
+                {{ executeButtonText }}
             </el-button>
             
             <!-- 已执行状态 -->
@@ -81,10 +82,10 @@
             type="target" 
             :position="Position.Left" 
             :style="{
-                background: '#555',
+                background: '#409eff',
                 width: '12px',
                 height: '12px',
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair'
             }"
@@ -94,10 +95,10 @@
             type="source" 
             :position="Position.Right" 
             :style="{
-                background: '#555',
+                background: '#409eff',
                 width: '12px',
                 height: '12px',
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair'
             }"
@@ -130,6 +131,7 @@ import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Grid, CircleCheck } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import request from '@/utils/request';
+import { useUserStore } from '@/store/user';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -139,6 +141,19 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+const userStore = useUserStore();
+
+// 图层分离使用 Dream API，固定 1 积分
+const executeCost = 1;
+const canExecute = computed(() => {
+    if (userStore.userInfo?.role === 1) return true;
+    return (userStore.userInfo?.credits ?? 0) >= executeCost;
+});
+const executeButtonText = computed(() => {
+    if (loading.value) return '分离中...';
+    if (userStore.userInfo?.role === 1) return '开始分离';
+    return `开始分离 (消耗 ${executeCost} 积分)`;
+});
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
 const selectedModel = ref<string>('qwen');
@@ -158,6 +173,7 @@ const currentNode = computed(() => {
 // 获取完整图片URL
 const getImageUrl = (url: string) => {
     if (!url) return '';
+    if (typeof url !== 'string') return '';
     if (url.startsWith('http')) return url;
     if (url.startsWith('/uploads/')) {
         return `${window.location.origin}${url}`;
@@ -197,6 +213,10 @@ watch(
 );
 
 const handleSeparate = async () => {
+    if (!canExecute.value) {
+        ElMessage.warning('积分不足，请向超级管理员申请');
+        return;
+    }
     const finalImageUrl = inputImageUrl.value;
 
     if (!finalImageUrl) {
@@ -223,6 +243,7 @@ const handleSeparate = async () => {
             });
             
             ElMessage.success(`成功分离出 ${layers.value.length} 个图层！`);
+            userStore.fetchCredits();
             
             // 标记节点为已执行
             isExecuted.value = true;
@@ -294,18 +315,18 @@ const previewLayer = (url: string) => {
 
 <style scoped>
 .layer-separation-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 280px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
 .node-header {
-    background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
-    color: white;
+    background: #3a3a3f;
+    color: #e0e0e0;
     padding: 8px 12px;
     font-size: 14px;
     font-weight: bold;
@@ -315,8 +336,9 @@ const previewLayer = (url: string) => {
 }
 
 .node-content {
-    padding: 10px 12px 12px;
-    border-bottom: 1px solid #eee;
+    padding: 14px 16px;
+    border-bottom: 1px solid #404040;
+    color: #e0e0e0;
 }
 
 .params-section {
@@ -342,7 +364,7 @@ const previewLayer = (url: string) => {
 
 .param-label {
     font-size: 12px;
-    color: #909399;
+    color: #b0b0b0;
     flex: 0 0 auto;
     min-width: 72px;
 }
@@ -350,6 +372,22 @@ const previewLayer = (url: string) => {
 .param-select {
     width: 132px;
     margin-bottom: 0;
+}
+
+.param-select :deep(.el-input__wrapper) {
+    background: #393c45;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #555;
+}
+
+.param-select :deep(.el-input__wrapper:hover) {
+    border-color: #409eff;
+}
+
+.param-select :deep(.el-input__wrapper.is-focus) {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }
 
 .param-input {
@@ -524,11 +562,14 @@ const previewLayer = (url: string) => {
 .fullscreen-preview-container {
     width: 100vw !important;
     height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     cursor: pointer;
     position: relative;
+    overflow: hidden !important;
 }
 
 /* 默认隐藏所有 handle，hover 时显示 */

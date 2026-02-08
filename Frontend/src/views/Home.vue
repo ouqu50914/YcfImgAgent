@@ -5,17 +5,9 @@
     
     <!-- 主内容区域 -->
     <div class="main-content">
-      <!-- 顶部Header -->
-    <div class="header-section">
-      <div class="header-left">
-          <div class="logo-section">
-            <h1 class="brand-title">AI生图工具</h1>
-          </div>
-          <div class="title-section">
-            <h2 class="main-title">让AI生图更简单</h2>
-            <p class="sub-title">智能工作流，帮你搞定一切</p>
-      </div>
-        </div>
+      <!-- 顶部用户信息 -->
+      <div class="header-section">
+        <div class="header-spacer" />
         <div class="header-right">
           <div class="user-info">
             <el-avatar :size="32" class="user-avatar">
@@ -25,18 +17,38 @@
               <span class="username">{{ userStore.userInfo.username || '用户' }}</span>
               <span class="user-role">
                 {{ userStore.userInfo.role === 1 ? '超级管理员' : '普通用户' }}
+                <template v-if="userStore.userInfo.role !== 1">
+                  · 可用积分 {{ userStore.userInfo.credits ?? 0 }}
+                </template>
               </span>
-      </div>
+            </div>
+            <el-button
+              v-if="userStore.userInfo.role !== 1"
+              text
+              type="primary"
+              size="small"
+              @click="showApplyCreditsModal = true"
+            >
+              申请积分
+            </el-button>
             <el-button text type="danger" size="small" @click="handleLogout">
               退出
-      </el-button>
+            </el-button>
+          </div>
         </div>
       </div>
-    </div>
 
-      <!-- 中央快速启动输入框 -->
-      <div class="quick-start-section">
-        <QuickStartInput />
+      <!-- 同一板块：Logo + 主副标题 + 输入框 -->
+      <div class="hero-section">
+        <div class="hero-brand">
+          <div class="brand-row">
+            <img src="/logo.svg" alt="Logo" class="brand-logo" />
+            <h1 class="main-title">ART<sup class="small-text">N</sup>.AI</h1>
+          </div>
+        </div>
+        <div class="hero-input">
+          <QuickStartInput />
+        </div>
       </div>
       
       <!-- 最近项目区域 -->
@@ -49,13 +61,31 @@
         <InspirationGrid />
       </div>
     </div>
+
+    <!-- 申请积分弹窗 -->
+    <el-dialog v-model="showApplyCreditsModal" title="申请积分" width="400px">
+      <el-form :model="applyCreditsForm" label-width="80px">
+        <el-form-item label="申请数量">
+          <el-input-number v-model="applyCreditsForm.amount" :min="1" :max="10000" />
+        </el-form-item>
+        <el-form-item label="申请原因">
+          <el-input v-model="applyCreditsForm.reason" type="textarea" :rows="3" placeholder="请输入申请原因（可选）" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showApplyCreditsModal = false">取消</el-button>
+        <el-button type="primary" :loading="applyCreditsLoading" @click="handleApplyCredits">提交</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../store/user';
+import { applyCredits } from '@/api/user';
+import { ElMessage } from 'element-plus';
 import Sidebar from '@/components/Sidebar.vue';
 import QuickStartInput from '@/components/QuickStartInput.vue';
 import RecentProjects from '@/components/RecentProjects.vue';
@@ -63,11 +93,34 @@ import InspirationGrid from '@/components/InspirationGrid.vue';
 
 const router = useRouter();
 const userStore = useUserStore();
+
+onMounted(() => {
+  userStore.fetchCredits();
+});
 const recentProjectsRef = ref<InstanceType<typeof RecentProjects> | null>(null);
 
 const handleLogout = async () => {
   await userStore.logout();
   router.push('/login');
+};
+
+const showApplyCreditsModal = ref(false);
+const applyCreditsForm = reactive({ amount: 10, reason: '' });
+const applyCreditsLoading = ref(false);
+
+const handleApplyCredits = async () => {
+  applyCreditsLoading.value = true;
+  try {
+    await applyCredits(applyCreditsForm.amount, applyCreditsForm.reason);
+    ElMessage.success('申请已提交，请等待管理员审核');
+    showApplyCreditsModal.value = false;
+    applyCreditsForm.amount = 10;
+    applyCreditsForm.reason = '';
+  } catch {
+    // error handled by request interceptor
+  } finally {
+    applyCreditsLoading.value = false;
+  }
 };
 </script>
 
@@ -82,53 +135,70 @@ const handleLogout = async () => {
 .main-content {
   flex: 1;
   padding: 24px 32px;
-  max-width: 1400px;
+  /* max-width: 1400px; */
   margin: 0 auto;
   width: 100%;
 }
 
-/* 顶部Header区域 */
+/* 顶部仅用户信息 */
 .header-section {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 40px;
-  padding: 20px 0;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 12px 0 0;
 }
 
-.header-left {
+.header-spacer {
+  flex: 1;
+}
+
+/* 同一板块：Logo + 文案 + 输入框 */
+.hero-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 0 32px;
+  margin-bottom: 24px;
+}
+
+.hero-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.hero-input {
+  width: 100%;
+  max-width: 720px;
+}
+
+.brand-row {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 12px;
 }
 
-.logo-section {
-  display: flex;
-  align-items: center;
+.brand-logo {
+  width: 48px;
+  height: 48px;
+  display: block;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
-.brand-title {
+.main-title {
   font-size: 24px;
   font-weight: 700;
   color: #303133;
   margin: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
-.title-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.main-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #303133;
-  margin: 0;
+.small-text {
+  font-size: 12px;
+  margin: 0 0 4px 4px;
 }
 
 .sub-title {
@@ -175,19 +245,18 @@ const handleLogout = async () => {
   color: #909399;
 }
 
-/* 快速启动区域 */
-.quick-start-section {
-  margin-bottom: 48px;
-}
-
 /* 最近项目区域 */
 .recent-projects-section {
   margin-bottom: 48px;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 /* 灵感发现区域 */
 .inspiration-section {
   margin-bottom: 48px;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 @media (max-width: 1024px) {
@@ -197,23 +266,21 @@ const handleLogout = async () => {
   
   .main-content {
     padding: 20px 24px;
-}
+  }
 
   .header-section {
     flex-direction: column;
-  gap: 16px;
-    align-items: flex-start;
+    gap: 16px;
+    align-items: center;
   }
-  
-  .header-left {
-  flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-}
+
+  .hero-section {
+    padding: 16px 0 24px;
+  }
 
   .main-title {
-    font-size: 24px;
-}
+    font-size: 22px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -228,10 +295,11 @@ const handleLogout = async () => {
   .header-section {
     margin-bottom: 24px;
   }
-  
-  .brand-title {
-    font-size: 20px;
-}
+
+  .brand-logo {
+    width: 40px;
+    height: 40px;
+  }
 
   .main-title {
     font-size: 20px;

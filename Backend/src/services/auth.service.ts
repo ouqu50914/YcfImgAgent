@@ -46,7 +46,7 @@ export class AuthService {
         // 1. 查找用户 (显式查询 password 字段，因为 Entity 中设置了 select: false)
         const user = await this.userRepository.findOne({
             where: { username },
-            select: ["id", "username", "password", "role_id", "status"] 
+            select: ["id", "username", "password", "role_id", "status", "credits"]
         });
 
         if (!user) {
@@ -106,7 +106,8 @@ export class AuthService {
             userInfo: {
                 id: user.id,
                 username: user.username,
-                role: user.role_id
+                role: user.role_id,
+                credits: user.credits ?? 0
             }
         };
     }
@@ -137,7 +138,7 @@ export class AuthService {
             // 3. 查找用户
             const user = await this.userRepository.findOne({
                 where: { id: decoded.userId },
-                select: ["id", "username", "role_id", "status"]
+                select: ["id", "username", "role_id", "status", "credits"]
             });
 
             if (!user || user.status === 0) {
@@ -156,7 +157,8 @@ export class AuthService {
                 userInfo: {
                     id: user.id,
                     username: user.username,
-                    role: user.role_id
+                    role: user.role_id,
+                    credits: user.credits ?? 0
                 }
             };
         } catch (error: any) {
@@ -165,6 +167,23 @@ export class AuthService {
             }
             throw new Error(`Token 刷新失败: ${error.message}`);
         }
+    }
+
+    /**
+     * 获取当前用户信息（含积分）
+     */
+    async getMe(userId: number) {
+        const user = await this.userRepository.findOne({
+            where: { id: userId },
+            select: ["id", "username", "role_id", "status", "credits"]
+        });
+        if (!user) throw new Error("用户不存在");
+        return {
+            id: user.id,
+            username: user.username,
+            role: user.role_id,
+            credits: user.credits ?? 0
+        };
     }
 
     /**
@@ -177,9 +196,18 @@ export class AuthService {
     }
 
     /**
-     * 修改密码
+     * 修改密码（仅超级管理员可修改）
      */
     async changePassword(userId: number, oldPassword: string, newPassword: string) {
+        // 0. 仅超级管理员可修改密码
+        const roleUser = await this.userRepository.findOne({
+            where: { id: userId },
+            select: ["id", "role_id"]
+        });
+        if (!roleUser || roleUser.role_id !== 1) {
+            throw new Error("普通用户不能修改密码");
+        }
+
         // 1. 验证新密码复杂度
         if (newPassword.length < 6 || !/^(?=.*[A-Za-z])(?=.*\d)/.test(newPassword)) {
             throw new Error("新密码需满足6位以上且包含字母和数字");

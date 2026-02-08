@@ -94,6 +94,19 @@ export const refreshToken = async (req: Request, res: Response) => {
     }
 };
 
+export const getMe = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录" });
+        }
+        const userInfo = await authService.getMe(userId);
+        return res.status(200).json({ data: userInfo });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
 export const logout = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;

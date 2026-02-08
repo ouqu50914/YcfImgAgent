@@ -1,57 +1,90 @@
 <template>
     <div class="workflow-container">
         <!-- 悬浮返回按钮 -->
-        <el-button 
-            text 
-            @click="handleGoBack"
-            class="back-button-float"
-        >
-            <el-icon><ArrowLeft /></el-icon>
+        <el-button text @click="handleGoBack" class="back-button-float">
+            <el-icon>
+                <ArrowLeft />
+            </el-icon>
             返回
         </el-button>
 
-        <div 
-            class="canvas-wrapper"
-            @dragover.prevent="handleDragOver"
-            @drop.prevent="handleDrop"
-            @contextmenu.prevent="handleCanvasContextMenu"
-        >
+        <!-- 右上角用户信息与积分 -->
+        <div class="workflow-header-float">
+            <div class="workflow-user-info">
+                <el-avatar :size="28" class="workflow-avatar">
+                    {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
+                </el-avatar>
+                <div class="workflow-user-details">
+                    <span class="workflow-username">{{ userStore.userInfo.username || '用户' }}</span>
+                    <span class="workflow-credits" v-if="userStore.userInfo.role !== 1">
+                        积分 {{ userStore.userInfo.credits ?? 0 }}
+                        <el-button text type="primary" size="small" @click="showApplyCreditsModal = true">申请</el-button>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 申请积分弹窗 -->
+        <el-dialog v-model="showApplyCreditsModal" title="申请积分" width="400px">
+            <el-form :model="applyCreditsForm" label-width="80px">
+                <el-form-item label="申请数量">
+                    <el-input-number v-model="applyCreditsForm.amount" :min="1" :max="10000" />
+                </el-form-item>
+                <el-form-item label="申请原因">
+                    <el-input v-model="applyCreditsForm.reason" type="textarea" :rows="3" placeholder="请输入申请原因（可选）" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="showApplyCreditsModal = false">取消</el-button>
+                <el-button type="primary" :loading="applyCreditsLoading" @click="handleApplyCredits">提交</el-button>
+            </template>
+        </el-dialog>
+
+        <div ref="canvasWrapperRef" class="canvas-wrapper" @dragover.prevent="handleDragOver" @drop.prevent="handleDrop"
+            @contextmenu.prevent="handleCanvasContextMenu">
             <!-- 左侧功能图标栏 -->
             <div class="side-toolbar">
                 <div class="side-group side-group-primary">
                     <el-tooltip content="添加提示词节点" placement="right">
                         <el-button circle class="side-btn" @click="addPromptNodeFromToolbar">
-                            <el-icon><EditPen /></el-icon>
+                            <el-icon>
+                                <EditPen />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="添加图片节点" placement="right">
                         <el-button circle class="side-btn" @click="addImageNodeFromToolbar">
-                            <el-icon><Picture /></el-icon>
+                            <el-icon>
+                                <Picture />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="添加生图节点" placement="right">
                         <el-button circle class="side-btn" @click="addNode">
-                            <el-icon><MagicStick /></el-icon>
+                            <el-icon>
+                                <MagicStick />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="添加放大节点" placement="right">
                         <el-button circle class="side-btn" @click="addUpscaleNode">
-                            <el-icon><ZoomIn /></el-icon>
+                            <el-icon>
+                                <ZoomIn />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="添加扩展节点" placement="right">
                         <el-button circle class="side-btn" @click="addExtendNode">
-                            <el-icon><FullScreen /></el-icon>
-                        </el-button>
-                    </el-tooltip>
-                    <el-tooltip content="添加拆分节点" placement="right">
-                        <el-button circle class="side-btn" @click="addSplitNode">
-                            <el-icon><KnifeFork /></el-icon>
+                            <el-icon>
+                                <FullScreen />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="添加图层分离节点" placement="right">
                         <el-button circle class="side-btn" @click="addLayerSeparationNode">
-                            <el-icon><Grid /></el-icon>
+                            <el-icon>
+                                <Grid />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                 </div>
@@ -61,105 +94,73 @@
                 <div class="side-group side-group-secondary">
                     <el-tooltip content="保存模板" placement="right">
                         <el-button circle class="side-btn" @click="() => { loadCategories(); showSaveDialog = true; }">
-                            <el-icon><Collection /></el-icon>
+                            <el-icon>
+                                <Collection />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="加载模板" placement="right">
                         <el-button circle class="side-btn" @click="showLoadDialogHandler">
-                            <el-icon><FolderOpened /></el-icon>
+                            <el-icon>
+                                <FolderOpened />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="历史记录" placement="right">
                         <el-button circle class="side-btn" @click="showHistoryDialogHandler">
-                            <el-icon><Clock /></el-icon>
+                            <el-icon>
+                                <Clock />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                 </div>
-                
+
                 <div class="side-divider"></div>
-                
+
                 <div class="side-group side-group-secondary">
                     <el-tooltip content="撤销 (Ctrl+Z)" placement="right">
-                        <el-button 
-                            circle 
-                            class="side-btn" 
-                            @click="undo"
-                            :disabled="undoStack.length === 0"
-                        >
-                            <el-icon><RefreshLeft /></el-icon>
+                        <el-button circle class="side-btn" @click="undo" :disabled="undoStack.length === 0">
+                            <el-icon>
+                                <RefreshLeft />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="重做 (Ctrl+Y)" placement="right">
-                        <el-button 
-                            circle 
-                            class="side-btn" 
-                            @click="redo"
-                            :disabled="redoStack.length === 0"
-                        >
-                            <el-icon><RefreshRight /></el-icon>
+                        <el-button circle class="side-btn" @click="redo" :disabled="redoStack.length === 0">
+                            <el-icon>
+                                <RefreshRight />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                 </div>
             </div>
 
-            <VueFlow 
-                v-model="elements" 
-                :node-types="nodeTypes" 
-                :default-edge-options="{ type: 'default', animated: true }"
-                :connection-line-style="{ stroke: '#b1b1b7', strokeWidth: 2 }"
-                :connection-radius="20"
-                :snap-to-grid="true"
-                :snap-grid="[15, 15]"
-                :nodes-connectable="true"
-                :edges-updatable="true"
-                :nodes-draggable="!isSpacePressed"
-                :select-nodes-on-drag="false"
-                :pan-on-drag="isSpacePressed"
-                :pan-on-scroll="true"
-                :zoom-on-scroll="true"
-                :zoom-on-double-click="true"
-                :min-zoom="0.2"
-                :max-zoom="4"
-                :default-viewport="{ x: 0, y: 0, zoom: 0.8 }"
-                :infinite="true"
-                :is-valid-connection="isValidConnection"
-                :only-render-visible-elements="true"
-                @connect="onConnect"
-                @connect-start="handleConnectStart"
-                @connect-end="handleConnectEnd"
-                @pane-contextmenu="handlePaneContextMenu"
-            >
-                <Background pattern-color="#aaa" :gap="8" />
+            <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
+                :connection-line-style="{ stroke: '#409eff', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
+                :snap-to-grid="true" :snap-grid="[15, 15]" :nodes-connectable="true" :edges-updatable="true"
+                :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="false"
+                :pan-on-drag="panOnDrag"
+                :pan-on-scroll="true" :zoom-on-scroll="true" :zoom-on-double-click="true" :min-zoom="0.2" :max-zoom="4"
+                :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="true"
+                @connect="onConnect" @connect-start="handleConnectStart" @connect-end="handleConnectEnd"
+                @pane-contextmenu="handlePaneContextMenu">
+                <Background pattern-color="#2d2e36" :gap="8" />
                 <Controls />
                 <MiniMap />
             </VueFlow>
-            
+
             <!-- 右键菜单 -->
-            <ContextMenu
-                :visible="contextMenuVisible"
-                :position="contextMenuPosition"
-                @insert-prompt="insertPromptNode"
-                @insert-image="insertImageNode"
-                @insert-dream="insertDreamNode"
-                @insert-video="insertVideoNode"
-            @insert-split="insertSplitNode"
-            @insert-layer-separation="insertLayerSeparationNode"
-            @add-group="handleAddGroup"
-            @close="contextMenuVisible = false"
-        />
-            
+            <ContextMenu :visible="contextMenuVisible" :position="contextMenuPosition" @insert-prompt="insertPromptNode" @insert-image="insertImageNode" @insert-dream="insertDreamNode" @insert-video="insertVideoNode" @insert-layer-separation="insertLayerSeparationNode" @add-group="handleAddGroup" @close="contextMenuVisible = false" />
+
             <!-- 连接菜单 -->
-            <ConnectionMenu
-                :visible="connectionMenuVisible"
-                :position="connectionMenuPosition"
-                @generate-image="handleConnectToImage"
-                @generate-video="handleConnectToVideo"
-                @close="connectionMenuVisible = false"
-            />
+            <ConnectionMenu :visible="connectionMenuVisible" :position="connectionMenuPosition"
+                @generate-image="handleConnectToImage" @generate-video="handleConnectToVideo"
+                @close="connectionMenuVisible = false" />
         </div>
 
         <!-- 保存模板对话框 -->
-        <el-dialog v-model="showSaveDialog" title="保存工作流模板" width="600px" @opened="() => { loadCategories(); saveForm.coverImage = getLastImageFromWorkflow(); }">
+        <el-dialog v-model="showSaveDialog" title="保存工作流模板" width="600px"
+            @opened="() => { loadCategories(); saveForm.coverImage = getLastImageFromWorkflow(); }">
             <el-form :model="saveForm" label-width="100px">
                 <el-form-item label="模板名称">
                     <el-input v-model="saveForm.name" placeholder="请输入模板名称" />
@@ -169,14 +170,11 @@
                 </el-form-item>
                 <el-form-item label="封面图片">
                     <div style="display: flex; gap: 12px; align-items: flex-start;">
-                        <el-image 
-                            v-if="saveForm.coverImage"
-                            :src="saveForm.coverImage"
-                            style="width: 120px; height: 120px; border: 1px solid #ddd; border-radius: 4px;"
-                            fit="cover"
-                            :preview-src-list="[saveForm.coverImage]"
-                        />
-                        <div v-else style="width: 120px; height: 120px; border: 1px dashed #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999;">
+                        <el-image v-if="saveForm.coverImage" :src="saveForm.coverImage"
+                            style="width: 120px; height: 120px; border: 1px solid #ddd; border-radius: 4px;" fit="cover"
+                            :preview-src-list="[saveForm.coverImage]" />
+                        <div v-else
+                            style="width: 120px; height: 120px; border: 1px dashed #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999;">
                             暂无封面
                         </div>
                         <div style="flex: 1;">
@@ -188,17 +186,8 @@
                     </div>
                 </el-form-item>
                 <el-form-item label="分类" required>
-                    <el-select 
-                        v-model="saveForm.category" 
-                        placeholder="请选择分类"
-                        style="width: 100%"
-                    >
-                        <el-option
-                            v-for="cat in categories"
-                            :key="cat.code"
-                            :label="cat.name"
-                            :value="cat.code"
-                        />
+                    <el-select v-model="saveForm.category" placeholder="请选择分类" style="width: 100%">
+                        <el-option v-for="cat in categories" :key="cat.code" :label="cat.name" :value="cat.code" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="是否公开">
@@ -244,20 +233,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, markRaw, onMounted, onUnmounted, h, provide } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { ref, reactive, markRaw, onMounted, onUnmounted, h, provide, nextTick, computed } from 'vue';
+import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
+import { useUserStore } from '@/store/user';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid } from '@element-plus/icons-vue';
-import { saveTemplate, getTemplates, getTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
+import { applyCredits } from '@/api/user';
 import { uploadImage } from '@/api/upload';
+import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
-import Sidebar from '@/components/Sidebar.vue';
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
@@ -272,7 +263,6 @@ import ImageNode from '@/components/nodes/ImageNode.vue';
 import LayerNode from '@/components/nodes/LayerNode.vue';
 import PromptNode from '@/components/nodes/PromptNode.vue';
 import VideoNode from '@/components/nodes/VideoNode.vue';
-import SplitNode from '@/components/nodes/SplitNode.vue';
 import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
 
 // 注册节点类型
@@ -284,19 +274,21 @@ const nodeTypes = {
     layer: markRaw(LayerNode),
     prompt: markRaw(PromptNode),
     video: markRaw(VideoNode),
-    split: markRaw(SplitNode),
     layerSeparation: markRaw(LayerSeparationNode),
 };
 
-// 初始节点数据
-const elements = ref([
+// 初始节点数据（默认一个提示词节点）
+const nodes = ref([
     {
         id: '1',
-        type: 'dream', // 对应 nodeTypes key
+        type: 'prompt',
         position: { x: 250, y: 100 },
-        data: { label: '初始节点' },
+        data: { text: '' },
     },
 ]);
+
+// 初始边数据
+const edges = ref([]);
 
 // 撤销/重做栈管理
 const undoStack = ref<any[]>([]);
@@ -307,16 +299,16 @@ const MAX_UNDO_STACK_SIZE = 50; // 最大撤销栈大小
 const saveState = () => {
     // 清除重做栈
     redoStack.value = [];
-    
+
     // 保存当前状态
     const currentState = {
         nodes: JSON.parse(JSON.stringify(getNodes.value)),
         edges: JSON.parse(JSON.stringify(getEdges.value))
     };
-    
+
     // 添加到撤销栈
     undoStack.value.push(currentState);
-    
+
     // 限制栈大小
     if (undoStack.value.length > MAX_UNDO_STACK_SIZE) {
         undoStack.value.shift();
@@ -329,14 +321,14 @@ const undo = () => {
         ElMessage.info('没有可撤销的操作');
         return;
     }
-    
+
     // 保存当前状态到重做栈
     const currentState = {
         nodes: JSON.parse(JSON.stringify(getNodes.value)),
         edges: JSON.parse(JSON.stringify(getEdges.value))
     };
     redoStack.value.push(currentState);
-    
+
     // 从撤销栈弹出上一个状态
     const previousState = undoStack.value.pop();
     if (previousState) {
@@ -352,14 +344,14 @@ const redo = () => {
         ElMessage.info('没有可重做的操作');
         return;
     }
-    
+
     // 保存当前状态到撤销栈
     const currentState = {
         nodes: JSON.parse(JSON.stringify(getNodes.value)),
         edges: JSON.parse(JSON.stringify(getEdges.value))
     };
     undoStack.value.push(currentState);
-    
+
     // 从重做栈弹出下一个状态
     const nextState = redoStack.value.pop();
     if (nextState) {
@@ -371,9 +363,76 @@ const redo = () => {
 
 
 
-const { addNodes, addEdges, getEdges, getNodes, setNodes, setEdges, removeNodes, findNode, screenToFlowCoordinate, viewport } = useVueFlow();
 const router = useRouter();
 const route = useRoute();
+const userStore = useUserStore();
+
+const showApplyCreditsModal = ref(false);
+const applyCreditsForm = reactive({ amount: 10, reason: '' });
+const applyCreditsLoading = ref(false);
+const handleApplyCredits = async () => {
+    applyCreditsLoading.value = true;
+    try {
+        await applyCredits(applyCreditsForm.amount, applyCreditsForm.reason);
+        ElMessage.success('申请已提交，请等待管理员审核');
+        showApplyCreditsModal.value = false;
+        applyCreditsForm.amount = 10;
+        applyCreditsForm.reason = '';
+    } catch {
+        // error handled by request interceptor
+    } finally {
+        applyCreditsLoading.value = false;
+    }
+};
+const { addNodes, addEdges, getEdges, getNodes, setNodes, setEdges, removeNodes, findNode, screenToFlowCoordinate, viewport, fitView } = useVueFlow();
+/** 从「我的项目」进入时的模板 id，保存时覆盖该模板；否则保存为新项目 */
+const currentTemplateId = ref<number | null>(null);
+/** 当前打开的模板所属用户 id，与当前用户一致时保存为覆盖 */
+const templateOwnerId = ref<number | null>(null);
+const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
+const canvasWrapperRef = ref<HTMLElement | null>(null);
+/** 当前编辑对应的历史记录 id：从历史打开时设为该 id，首次自动保存后回填，后续保存均覆盖此条 */
+const currentHistoryId = ref<number | null>(null);
+
+// 截取画布作为封面图，上传后返回 URL；失败返回 null
+const captureCanvasCover = async (): Promise<string | null> => {
+    await nextTick();
+    let targetEl: HTMLElement | null = null;
+    const flowInstance = vueFlowRef.value;
+    const flowEl = flowInstance && typeof flowInstance === 'object' && (flowInstance as any).$el;
+    if (flowEl) {
+        const viewport = flowEl.querySelector?.('.vue-flow__viewport');
+        targetEl = (viewport as HTMLElement) || flowEl;
+    }
+    if (!targetEl && canvasWrapperRef.value) targetEl = canvasWrapperRef.value;
+    if (!targetEl) return null;
+    try {
+        const canvas = await html2canvas(targetEl, {
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#1b1c21',
+            scale: 0.5,
+            logging: false
+        });
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png', 0.8));
+        if (!blob) return null;
+        const file = new File([blob], 'workflow-cover.png', { type: 'image/png' });
+        const res: any = await uploadImage(file);
+        const url = res?.data?.url;
+        if (!url) return null;
+        return url.startsWith('http') ? url : `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+    } catch (e) {
+        console.warn('画布截图失败', e);
+        return null;
+    }
+};
+
+// 若 workflow 没有封面则用画布截图作为封面（会修改 workflowData）
+const ensureWorkflowCover = async (workflowData: { nodes: any[]; edges: any[]; cover_image?: string }) => {
+    if (workflowData.cover_image) return;
+    const url = await captureCanvasCover();
+    if (url) workflowData.cover_image = url;
+};
 
 // 节点尺寸映射（根据实际节点大小）
 const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
@@ -405,28 +464,32 @@ const calculateOptimalPosition = (
     const dimensions = NODE_DIMENSIONS[nodeType] || { width: 300, height: 400 };
     const gridWidth = dimensions.width + HORIZONTAL_PADDING;
     const gridHeight = dimensions.height + VERTICAL_PADDING;
-    
+
     // 获取所有现有节点
     const existingNodes = getNodes.value;
-    
+
     // 确定搜索起始位置
     let startX: number;
     let startY: number;
-    
+
     if (preferredPosition) {
         // 如果有首选位置（如鼠标位置），从该位置开始搜索
         startX = preferredPosition.x;
         startY = preferredPosition.y;
     } else {
-        // 否则从画布中心开始（使用默认位置）
-        startX = 400;
-        startY = 300;
+        // 否则使用鼠标当前位置作为起始位置，确保节点在视口内
+        // 获取鼠标当前位置
+        const mousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        // 转换为画布坐标
+        const canvasPosition = screenToFlowCoordinate(mousePosition);
+        startX = canvasPosition.x;
+        startY = canvasPosition.y;
     }
-    
+
     // 对齐到网格
     const gridStartX = Math.floor(startX / gridWidth) * gridWidth;
     const gridStartY = Math.floor(startY / gridHeight) * gridHeight;
-    
+
     // 碰撞检测函数
     const checkCollision = (x: number, y: number): boolean => {
         const newNodeRect = {
@@ -435,7 +498,7 @@ const calculateOptimalPosition = (
             right: x + dimensions.width,
             bottom: y + dimensions.height
         };
-        
+
         for (const node of existingNodes) {
             const nodeDim = NODE_DIMENSIONS[node.type || 'dream'] || { width: 300, height: 400 };
             const nodeRect = {
@@ -444,7 +507,7 @@ const calculateOptimalPosition = (
                 right: node.position.x + nodeDim.width,
                 bottom: node.position.y + nodeDim.height
             };
-            
+
             // 矩形碰撞检测（带安全边距）
             const padding = 20;
             if (
@@ -458,14 +521,14 @@ const calculateOptimalPosition = (
         }
         return false; // 无碰撞
     };
-    
+
     // 螺旋搜索算法：从起始位置开始，按螺旋方式向外搜索
     const maxRadius = 20; // 最大搜索半径（网格单位）
-    
+
     for (let radius = 0; radius <= maxRadius; radius++) {
         // 搜索当前半径的所有位置
         const positions: { x: number; y: number }[] = [];
-        
+
         if (radius === 0) {
             positions.push({ x: gridStartX, y: gridStartY });
         } else {
@@ -482,7 +545,7 @@ const calculateOptimalPosition = (
                 }
             }
         }
-        
+
         // 检查每个位置
         for (const pos of positions) {
             if (!checkCollision(pos.x, pos.y)) {
@@ -490,14 +553,48 @@ const calculateOptimalPosition = (
             }
         }
     }
-    
+
     // 如果所有位置都被占用，返回起始位置（用户需要手动调整）
     return { x: gridStartX, y: gridStartY };
 };
 
-// 返回首页
+// 封装一次保存当前工作流的逻辑：离开编辑器页面时统一调用
+const saveCurrentWorkflowBeforeLeave = async () => {
+    const currentNodes = getNodes.value;
+    if (currentNodes.length === 0) return;
+
+    const workflowData: { nodes: any[]; edges: any[]; cover_image?: string } = {
+        nodes: currentNodes,
+        edges: getEdges.value
+    };
+    await ensureWorkflowCover(workflowData);
+
+    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+    const isOwnTemplate =
+        currentTemplateId.value != null &&
+        templateOwnerId.value != null &&
+        myId != null &&
+        templateOwnerId.value === myId;
+
+    if (isOwnTemplate) {
+        // 从「我的工作流」进入的模板：更新原模板
+        await updateTemplate(currentTemplateId.value!, {
+            workflowData,
+            coverImage: workflowData.cover_image
+        });
+    } else if (currentHistoryId.value != null) {
+        // 从历史记录进入：更新历史记录
+        await autoSaveHistory(workflowData, currentHistoryId.value);
+    } else {
+        // 新建项目：创建新的历史记录
+        const res: any = await autoSaveHistory(workflowData);
+        if (res?.data?.id != null) currentHistoryId.value = res.data.id;
+    }
+};
+
+// 返回上一页：只负责路由返回，真正的保存逻辑在 onBeforeRouteLeave 中统一处理
 const handleGoBack = () => {
-    router.push('/');
+    router.back();
 };
 
 // 模板相关
@@ -527,7 +624,7 @@ const getLastImageFromWorkflow = (): string => {
             }
             return b.position.y - a.position.y;
         });
-    
+
     if (imageNodes.length > 0 && imageNodes[0]) {
         const lastImageUrl = imageNodes[0].data?.imageUrl;
         if (!lastImageUrl) return '';
@@ -550,8 +647,8 @@ const selectCoverImage = () => {
         .filter(node => node.type === 'image' && node.data?.imageUrl)
         .map(node => {
             const url = node.data.imageUrl;
-            const fullUrl = url.startsWith('http') 
-                ? url 
+            const fullUrl = url.startsWith('http')
+                ? url
                 : url.startsWith('/uploads/')
                     ? `${window.location.origin}${url}`
                     : `${window.location.origin}/uploads/${url}`;
@@ -561,18 +658,18 @@ const selectCoverImage = () => {
                 originalUrl: url
             };
         });
-    
+
     if (imageNodes.length === 0) {
         ElMessage.warning('工作流中没有图片节点');
         return;
     }
-    
+
     // 使用 ElMessageBox 显示图片选择对话框
     ElMessageBox({
         title: '选择封面图片',
         message: h('div', { style: 'max-height: 500px; overflow-y: auto;' }, [
             h('div', { style: 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px;' },
-                imageNodes.map(img => 
+                imageNodes.map(img =>
                     h('div', {
                         style: 'cursor: pointer; border: 2px solid #ddd; border-radius: 4px; overflow: hidden;',
                         onClick: () => {
@@ -597,8 +694,13 @@ const showHistoryDialog = ref(false);
 const histories = ref<WorkflowHistory[]>([]);
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
 
-// Space 按住才允许拖拽平移画布
+// Space 按住才允许用左键拖拽平移画布；中键始终可以拖拽
 const isSpacePressed = ref(false);
+// panOnDrag 接受鼠标按键编号：0=左键, 1=中键, 2=右键
+// 需求：中键一直能拖；按住空格时，左键也能拖
+const panOnDrag = computed(() =>
+    isSpacePressed.value ? [0, 1] : [1]
+);
 
 // 右键菜单状态
 const contextMenuVisible = ref(false);
@@ -614,16 +716,16 @@ const didConnect = ref(false);
 // 连接验证函数：增强验证逻辑
 const isValidConnection = (connection: Connection) => {
     console.log('连接验证:', connection);
-    
+
     // 不允许自己连接自己
     if (connection.source === connection.target) {
         return false;
     }
-    
+
     // 获取源节点和目标节点
     const sourceNode = findNode(connection.source);
     const targetNode = findNode(connection.target);
-    
+
     if (!sourceNode || !targetNode) {
         return false;
     }
@@ -639,7 +741,7 @@ const isValidConnection = (connection: Connection) => {
         ElMessage.warning('该节点不支持作为输入被连接');
         return false;
     }
-    
+
     // 拆分节点作为 target 的限制：只接受图片节点的输入
     if (targetNode.type === 'split') {
         if (sourceNode.type !== 'image') {
@@ -648,7 +750,7 @@ const isValidConnection = (connection: Connection) => {
         }
         return true;
     }
-    
+
     // 如果目标节点是 DreamNode，需要检查连接限制（DreamNode 只有一个 target handle）
     if (targetNode.type === 'dream') {
         // 限制：只允许 prompt / image 作为输入
@@ -702,7 +804,7 @@ const isValidConnection = (connection: Connection) => {
 
         return true;
     }
-    
+
     // 其他类型的连接允许（如 DreamNode 输出到 ImageNode）
     return true;
 };
@@ -711,17 +813,17 @@ const isValidConnection = (connection: Connection) => {
 const onConnect = (connection: Connection) => {
     console.log('连接成功:', connection);
     didConnect.value = true;
-    
+
     if (connection.source && connection.target) {
         // 检查是否已存在相同的连接
         const existingEdges = getEdges.value;
         const duplicate = existingEdges.find(
-            edge => edge.source === connection.source && 
-                    edge.target === connection.target &&
-                    edge.sourceHandle === connection.sourceHandle &&
-                    edge.targetHandle === connection.targetHandle
+            edge => edge.source === connection.source &&
+                edge.target === connection.target &&
+                edge.sourceHandle === connection.sourceHandle &&
+                edge.targetHandle === connection.targetHandle
         );
-        
+
         if (!duplicate) {
             // 使用 addEdges API 添加连接
             addEdges({
@@ -733,10 +835,10 @@ const onConnect = (connection: Connection) => {
                 type: 'default',
                 animated: true
             });
-            
+
             console.log('已添加连接线');
             ElMessage.success('节点连接成功');
-            
+
             // 保存状态到撤销栈
             saveState();
         } else {
@@ -778,38 +880,43 @@ const handleDragOver = (event: DragEvent) => {
     }
 };
 
+// 支持的图片格式
+const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
+const isSupportedImageFile = (file: File) => file.type && SUPPORTED_IMAGE_TYPES.includes(file.type);
+
 const handleDrop = async (event: DragEvent) => {
     event.preventDefault();
     isDragging.value = false;
-    
+
     if (!event.dataTransfer) return;
-    
-    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-    
+
+    const allFiles = Array.from(event.dataTransfer.files);
+    const files = allFiles.filter(isSupportedImageFile);
+
     if (files.length === 0) {
-        ElMessage.warning('请拖放图片文件');
+        ElMessage.warning(allFiles.length > 0 ? '不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片' : '请拖放图片文件');
         return;
     }
-    
+
     // 获取鼠标位置并转换为画布坐标
     const position = screenToFlowCoordinate({
         x: event.clientX,
         y: event.clientY
     });
-    
+
     // 上传文件并创建节点
     try {
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             if (!file) continue;
-            
+
             const uploadRes: any = await uploadImage(file);
-            
+
             if (uploadRes.data && uploadRes.data.url) {
                 const imageUrl = uploadRes.data.url.startsWith('http')
                     ? uploadRes.data.url
                     : `${window.location.origin}${uploadRes.data.url}`;
-                
+
                 // 创建 ImageNode
                 const nodeId = `image_node_${Date.now()}_${i}`;
                 addNodes({
@@ -826,7 +933,7 @@ const handleDrop = async (event: DragEvent) => {
                 });
             }
         }
-        
+
         ElMessage.success(`成功创建 ${files.length} 个图片节点`);
     } catch (error: any) {
         console.error('上传失败:', error);
@@ -854,14 +961,13 @@ const handleCanvasContextMenu = (event: MouseEvent) => {
     contextMenuVisible.value = true;
 };
 
-// 插入节点函数
+// 插入节点函数（右键添加时放在右键位置，允许重合）
 const insertPromptNode = () => {
-    const preferredPosition = screenToFlowCoordinate({
+    const position = screenToFlowCoordinate({
         x: contextMenuPosition.value.x,
         y: contextMenuPosition.value.y
     });
-    const position = calculateOptimalPosition('prompt', preferredPosition);
-    
+
     const nodeId = `prompt_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -869,7 +975,7 @@ const insertPromptNode = () => {
         position,
         data: { text: '' }
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -883,12 +989,15 @@ const insertImageNode = () => {
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
+        if (!isSupportedImageFile(file)) {
+            ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
+            return;
+        }
 
-        const preferredPosition = screenToFlowCoordinate({
+        const position = screenToFlowCoordinate({
             x: contextMenuPosition.value.x,
             y: contextMenuPosition.value.y
         });
-        const position = calculateOptimalPosition('image', preferredPosition);
 
         try {
             const uploadRes: any = await uploadImage(file);
@@ -908,7 +1017,7 @@ const insertImageNode = () => {
                     }
                 });
                 ElMessage.success('已插入图片节点');
-                
+
                 // 保存状态到撤销栈
                 saveState();
             } else {
@@ -924,12 +1033,11 @@ const insertImageNode = () => {
 };
 
 const insertDreamNode = () => {
-    const preferredPosition = screenToFlowCoordinate({
+    const position = screenToFlowCoordinate({
         x: contextMenuPosition.value.x,
         y: contextMenuPosition.value.y
     });
-    const position = calculateOptimalPosition('dream', preferredPosition);
-    
+
     const nodeId = `dream_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -937,18 +1045,17 @@ const insertDreamNode = () => {
         position,
         data: {}
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
 
 const insertVideoNode = () => {
-    const preferredPosition = screenToFlowCoordinate({
+    const position = screenToFlowCoordinate({
         x: contextMenuPosition.value.x,
         y: contextMenuPosition.value.y
     });
-    const position = calculateOptimalPosition('video', preferredPosition);
-    
+
     const nodeId = `video_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -956,37 +1063,17 @@ const insertVideoNode = () => {
         position,
         data: {}
     });
-    
-    // 保存状态到撤销栈
-    saveState();
-};
 
-const insertSplitNode = () => {
-    const preferredPosition = screenToFlowCoordinate({
-        x: contextMenuPosition.value.x,
-        y: contextMenuPosition.value.y
-    });
-    const position = calculateOptimalPosition('split', preferredPosition);
-    
-    const nodeId = `split_node_${Date.now()}`;
-    addNodes({
-        id: nodeId,
-        type: 'split',
-        position,
-        data: {}
-    });
-    
     // 保存状态到撤销栈
     saveState();
 };
 
 const insertLayerSeparationNode = () => {
-    const preferredPosition = screenToFlowCoordinate({
+    const position = screenToFlowCoordinate({
         x: contextMenuPosition.value.x,
         y: contextMenuPosition.value.y
     });
-    const position = calculateOptimalPosition('layerSeparation', preferredPosition);
-    
+
     const nodeId = `layer_separation_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -994,10 +1081,12 @@ const insertLayerSeparationNode = () => {
         position,
         data: {}
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
+
+
 
 const handleAddGroup = () => {
     ElMessage.info('添加组功能待实现');
@@ -1014,7 +1103,7 @@ const addPromptNodeFromToolbar = () => {
         position,
         data: { text: '' },
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -1029,6 +1118,10 @@ const addImageNodeFromToolbar = () => {
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
+        if (!isSupportedImageFile(file)) {
+            ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
+            return;
+        }
 
         const position = calculateOptimalPosition('image');
 
@@ -1050,7 +1143,7 @@ const addImageNodeFromToolbar = () => {
                     },
                 });
                 ElMessage.success('已添加图片节点');
-                
+
                 // 保存状态到撤销栈
                 saveState();
             } else {
@@ -1126,8 +1219,65 @@ const handleConnectEnd = (event: any) => {
 // 连接到图片节点
 const handleConnectToImage = () => {
     if (!pendingConnection.value) return;
+
+    const sourceNode = findNode(pendingConnection.value.source);
+    let position: { x: number; y: number };
+
+    // 优先使用鼠标位置（连接线末端的位置）
+    const mousePosition = pendingConnection.value.position;
     
-    const position = calculateOptimalPosition('dream', pendingConnection.value.position);
+    // 检查鼠标位置是否可用（简单碰撞检测）
+    const dimensions = NODE_DIMENSIONS['dream'] || { width: 300, height: 400 };
+    const checkCollisionAtPosition = (x: number, y: number): boolean => {
+        const newNodeRect = {
+            left: x,
+            top: y,
+            right: x + dimensions.width,
+            bottom: y + dimensions.height
+        };
+
+        for (const node of getNodes.value) {
+            if (node.id === pendingConnection.value!.source) continue; // 跳过源节点
+            const nodeDim = NODE_DIMENSIONS[node.type || 'dream'] || { width: 300, height: 400 };
+            const nodeRect = {
+                left: node.position.x,
+                top: node.position.y,
+                right: node.position.x + nodeDim.width,
+                bottom: node.position.y + nodeDim.height
+            };
+
+            const padding = 20;
+            if (
+                newNodeRect.left < nodeRect.right + padding &&
+                newNodeRect.right > nodeRect.left - padding &&
+                newNodeRect.top < nodeRect.bottom + padding &&
+                newNodeRect.bottom > nodeRect.top - padding
+            ) {
+                return true; // 发生碰撞
+            }
+        }
+        return false; // 无碰撞
+    };
+
+    // 如果鼠标位置可用，直接使用；否则使用源节点右侧的位置
+    if (!checkCollisionAtPosition(mousePosition.x, mousePosition.y)) {
+        position = mousePosition;
+    } else if (sourceNode) {
+        // 使用源节点右侧的位置
+        const sourceNodeDim = NODE_DIMENSIONS[sourceNode.type || 'dream'] || { width: 300, height: 400 };
+        position = {
+            x: sourceNode.position.x + sourceNodeDim.width + 100,
+            y: sourceNode.position.y
+        };
+        // 如果源节点右侧位置也有碰撞，使用 calculateOptimalPosition
+        if (checkCollisionAtPosition(position.x, position.y)) {
+            position = calculateOptimalPosition('dream', mousePosition);
+        }
+    } else {
+        // 回退到 calculateOptimalPosition
+        position = calculateOptimalPosition('dream', mousePosition);
+    }
+
     const nodeId = `dream_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -1135,13 +1285,12 @@ const handleConnectToImage = () => {
         position,
         data: {}
     });
-    
+
     // 建立连接
-    const sourceNode = findNode(pendingConnection.value.source);
     if (sourceNode) {
         const sourceHandle = pendingConnection.value.sourceHandle || 'source';
         const targetHandle = 'target';
-        
+
         addEdges({
             id: `edge-${pendingConnection.value.source}-${nodeId}-${Date.now()}`,
             source: pendingConnection.value.source,
@@ -1152,10 +1301,10 @@ const handleConnectToImage = () => {
             animated: true
         });
     }
-    
+
     pendingConnection.value = null;
     ElMessage.success('已创建生图节点并建立连接');
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -1163,8 +1312,65 @@ const handleConnectToImage = () => {
 // 连接到视频节点
 const handleConnectToVideo = () => {
     if (!pendingConnection.value) return;
+
+    const sourceNode = findNode(pendingConnection.value.source);
+    let position: { x: number; y: number };
+
+    // 优先使用鼠标位置（连接线末端的位置）
+    const mousePosition = pendingConnection.value.position;
     
-    const position = calculateOptimalPosition('video', pendingConnection.value.position);
+    // 检查鼠标位置是否可用（简单碰撞检测）
+    const dimensions = NODE_DIMENSIONS['video'] || { width: 300, height: 400 };
+    const checkCollisionAtPosition = (x: number, y: number): boolean => {
+        const newNodeRect = {
+            left: x,
+            top: y,
+            right: x + dimensions.width,
+            bottom: y + dimensions.height
+        };
+
+        for (const node of getNodes.value) {
+            if (node.id === pendingConnection.value!.source) continue; // 跳过源节点
+            const nodeDim = NODE_DIMENSIONS[node.type || 'video'] || { width: 300, height: 400 };
+            const nodeRect = {
+                left: node.position.x,
+                top: node.position.y,
+                right: node.position.x + nodeDim.width,
+                bottom: node.position.y + nodeDim.height
+            };
+
+            const padding = 20;
+            if (
+                newNodeRect.left < nodeRect.right + padding &&
+                newNodeRect.right > nodeRect.left - padding &&
+                newNodeRect.top < nodeRect.bottom + padding &&
+                newNodeRect.bottom > nodeRect.top - padding
+            ) {
+                return true; // 发生碰撞
+            }
+        }
+        return false; // 无碰撞
+    };
+
+    // 如果鼠标位置可用，直接使用；否则使用源节点右侧的位置
+    if (!checkCollisionAtPosition(mousePosition.x, mousePosition.y)) {
+        position = mousePosition;
+    } else if (sourceNode) {
+        // 使用源节点右侧的位置
+        const sourceNodeDim = NODE_DIMENSIONS[sourceNode.type || 'video'] || { width: 300, height: 400 };
+        position = {
+            x: sourceNode.position.x + sourceNodeDim.width + 100,
+            y: sourceNode.position.y
+        };
+        // 如果源节点右侧位置也有碰撞，使用 calculateOptimalPosition
+        if (checkCollisionAtPosition(position.x, position.y)) {
+            position = calculateOptimalPosition('video', mousePosition);
+        }
+    } else {
+        // 回退到 calculateOptimalPosition
+        position = calculateOptimalPosition('video', mousePosition);
+    }
+
     const nodeId = `video_node_${Date.now()}`;
     addNodes({
         id: nodeId,
@@ -1172,21 +1378,23 @@ const handleConnectToVideo = () => {
         position,
         data: {}
     });
-    
+
     // 建立连接
-    addEdges({
-        id: `edge-${pendingConnection.value.source}-${nodeId}-${Date.now()}`,
-        source: pendingConnection.value.source,
-        target: nodeId,
-        sourceHandle: pendingConnection.value.sourceHandle || 'source',
-        targetHandle: 'target',
-        type: 'default',
-        animated: true
-    });
-    
+    if (sourceNode) {
+        addEdges({
+            id: `edge-${pendingConnection.value.source}-${nodeId}-${Date.now()}`,
+            source: pendingConnection.value.source,
+            target: nodeId,
+            sourceHandle: pendingConnection.value.sourceHandle || 'source',
+            targetHandle: 'target',
+            type: 'default',
+            animated: true
+        });
+    }
+
     pendingConnection.value = null;
     ElMessage.success('已创建视频节点并建立连接');
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -1201,7 +1409,7 @@ const addNode = () => {
         position,
         data: { label: `节点 ${id}` },
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -1215,7 +1423,7 @@ const addUpscaleNode = () => {
         position,
         data: {},
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
@@ -1229,24 +1437,12 @@ const addExtendNode = () => {
         position,
         data: {},
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
 
-const addSplitNode = () => {
-    const position = calculateOptimalPosition('split');
-    const id = Date.now().toString();
-    addNodes({
-        id,
-        type: 'split',
-        position,
-        data: {},
-    });
-    
-    // 保存状态到撤销栈
-    saveState();
-};
+
 
 const addLayerSeparationNode = () => {
     const position = calculateOptimalPosition('layerSeparation');
@@ -1257,12 +1453,12 @@ const addLayerSeparationNode = () => {
         position,
         data: {},
     });
-    
+
     // 保存状态到撤销栈
     saveState();
 };
 
-// 保存模板
+// 保存模板：进入自己的项目则覆盖，进入别人的项目则另存为自己的
 const handleSaveTemplate = async () => {
     if (!saveForm.value.name.trim()) {
         ElMessage.warning('请输入模板名称');
@@ -1274,23 +1470,32 @@ const handleSaveTemplate = async () => {
         return;
     }
 
+    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+    const isOwn = currentTemplateId.value != null && templateOwnerId.value != null && myId != null && templateOwnerId.value === myId;
+
     saving.value = true;
     try {
         const workflowData = {
             nodes: getNodes.value,
             edges: getEdges.value
         };
-
-        await saveTemplate({
+        const payload = {
             name: saveForm.value.name,
             description: saveForm.value.description,
             workflowData,
             isPublic: saveForm.value.isPublic,
             coverImage: saveForm.value.coverImage,
             category: saveForm.value.category
-        });
+        };
 
-        ElMessage.success('模板保存成功');
+        if (isOwn) {
+            await updateTemplate(currentTemplateId.value!, payload);
+            ElMessage.success('模板已更新');
+        } else {
+            await saveTemplate(payload);
+            ElMessage.success('已保存为新项目');
+        }
+
         showSaveDialog.value = false;
         saveForm.value = { name: '', description: '', isPublic: false, coverImage: '', category: '' };
         loadTemplates();
@@ -1416,9 +1621,10 @@ const startAutoSave = () => {
                 edges: getEdges.value
             };
 
-            // 只有在有节点时才保存
+            // 只有在有节点时才保存；传入 currentHistoryId 则覆盖原记录，否则新建并在响应后回填 id
             if (workflowData.nodes.length > 0) {
-                await autoSaveHistory(workflowData);
+                const res: any = await autoSaveHistory(workflowData, currentHistoryId.value ?? undefined);
+                if (res?.data?.id != null && currentHistoryId.value == null) currentHistoryId.value = res.data.id;
                 console.log('工作流自动保存成功');
             }
         } catch (error: any) {
@@ -1437,17 +1643,17 @@ const showHistoryDialogHandler = () => {
 const handleKeyDown = (event: KeyboardEvent) => {
     // 检查是否在输入框、文本域或可编辑元素中
     const target = event.target as HTMLElement;
-    const isInputElement = target.tagName === 'INPUT' || 
-                          target.tagName === 'TEXTAREA' || 
-                          target.isContentEditable ||
-                          target.closest('input, textarea, [contenteditable="true"]');
+    const isInputElement = target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.closest('input, textarea, [contenteditable="true"]');
 
     // Space: 按住空格启用画布拖拽（仅在非输入状态）
     if (event.code === 'Space' && !isInputElement) {
         event.preventDefault(); // 防止页面滚动
         isSpacePressed.value = true;
     }
-    
+
     // Ctrl+S 或 Cmd+S: 保存模板
     if ((event.ctrlKey || event.metaKey) && event.key === 's') {
         event.preventDefault();
@@ -1467,42 +1673,36 @@ const handleKeyDown = (event: KeyboardEvent) => {
             const nodeIds = selectedNodes.map(node => node.id);
             removeNodes(nodeIds);
             ElMessage.success(`已删除 ${selectedNodes.length} 个节点`);
-            
+
             // 保存状态到撤销栈
             saveState();
         }
     }
-    
+
     // 快捷键：T - 插入提示词节点
     if (event.key === 't' && !isInputElement) {
         event.preventDefault();
         insertPromptNode();
     }
-    
+
     // 快捷键：I - 插入图片节点
     if (event.key === 'i' && !isInputElement) {
         event.preventDefault();
         insertImageNode();
     }
-    
+
     // 快捷键：G - 插入生图节点
     if (event.key === 'g' && !isInputElement) {
         event.preventDefault();
         insertDreamNode();
     }
-    
+
     // 快捷键：V - 插入视频节点
     if (event.key === 'v' && !isInputElement) {
         event.preventDefault();
         insertVideoNode();
     }
-    
-    // 快捷键：S - 插入拆分节点
-    if (event.key === 's' && !isInputElement) {
-        event.preventDefault();
-        insertSplitNode();
-    }
-    
+
     // 快捷键：L - 插入图层分离节点
     if (event.key === 'l' && !isInputElement) {
         event.preventDefault();
@@ -1529,26 +1729,71 @@ const handleKeyUp = (event: KeyboardEvent) => {
     }
 };
 
+// 路由离开钩子：无论通过哪种方式离开编辑器页面，都尝试保存一次
+onBeforeRouteLeave(async (_to, _from, next) => {
+    try {
+        await saveCurrentWorkflowBeforeLeave();
+    } catch (error: any) {
+        console.error('离开编辑器前保存失败:', error);
+        // 不阻塞导航，只提示错误（控制台），用户可从历史记录恢复
+    } finally {
+        next();
+    }
+});
+
 onMounted(async () => {
+    userStore.fetchCredits();
     // 启动自动保存
     startAutoSave();
 
     // 绑定快捷键
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    
+
     // 处理URL参数
     const query = route.query;
-    
-    // 如果有id参数，加载模板
+
+    // 如果有 historyId 参数，加载自动保存的历史（后续保存将覆盖此条）
+    if (query.historyId) {
+        try {
+            const historyId = parseInt(query.historyId as string);
+            if (!isNaN(historyId)) {
+                currentHistoryId.value = historyId;
+                const res: any = await getHistory(historyId);
+                const workflowData = res.data?.workflow_data;
+                if (workflowData?.nodes && workflowData?.edges) {
+                    setNodes(workflowData.nodes);
+                    setEdges(workflowData.edges);
+                    ElMessage.success('已恢复自动保存的工作流');
+                } else {
+                    ElMessage.warning('该历史记录数据不完整');
+                }
+                return;
+            }
+        } catch (error: any) {
+            console.error('加载历史失败:', error);
+        }
+    }
+
+    // 如果有id参数，加载模板（记下是否为自己的项目，保存时覆盖或另存）
     if (query.id) {
         try {
             const templateId = parseInt(query.id as string);
             if (!isNaN(templateId)) {
                 const res: any = await getTemplate(templateId);
-                const workflowData = res.data.workflow_data;
-                
-                if (workflowData.nodes && workflowData.edges) {
+                const data = res.data;
+                const workflowData = data.workflow_data;
+                const ownerId = data.user_id != null ? Number(data.user_id) : null;
+                const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+                if (ownerId != null && myId != null && ownerId === myId) {
+                    currentTemplateId.value = templateId;
+                    templateOwnerId.value = ownerId;
+                } else {
+                    currentTemplateId.value = null;
+                    templateOwnerId.value = null;
+                }
+
+                if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
                     ElMessage.success('模板加载成功');
@@ -1562,12 +1807,12 @@ onMounted(async () => {
             // 如果加载失败，继续处理其他参数
         }
     }
-    
+
     // 如果有prompt参数或imageUrls参数，创建节点并设置提示词和图片
     if (query.prompt || query.imageUrls || query.imageUrl) {
         const promptText = (query.prompt as string) || '';
         const model = (query.model as string) || 'dream';
-        
+
         // 处理图片URL（支持多个，逗号分隔）
         let imageUrls: string[] = [];
         if (query.imageUrls) {
@@ -1576,29 +1821,31 @@ onMounted(async () => {
             // 兼容旧的单个imageUrl参数
             imageUrls = [(query.imageUrl as string)];
         }
-        
+
         // 清除初始节点
         setNodes([]);
         setEdges([]);
-        
-        const baseX = 100;
-        const baseY = 200;
+
+        // 基准坐标：图片列在左侧，生图节点居中，提示词节点在左下角
+        const baseX = 60;
+        const baseY = 80;
         const imageNodeHeight = NODE_DIMENSIONS.image?.height || 300;
-        const verticalSpacing = imageNodeHeight + VERTICAL_PADDING; // 360 (节点高度 + 间距)
-        const horizontalSpacing = 450; // 水平间距（增加间距避免重叠）
+        // 再次压缩纵向和横向间距，让 4~5 张图也能尽量一屏展示
+        const verticalSpacing = imageNodeHeight + 8; // 更紧凑的纵向间距
+        const horizontalSpacing = 320; // 更近的水平间距
         const imageNodeIds: string[] = [];
         let promptNodeId: string | null = null;
         let dreamNodeId: string | null = null;
-        
-        // 创建图片节点（在左侧，垂直排列）
+
+        // 创建图片节点（在左侧一列，垂直排列）
         imageUrls.forEach((imageUrl, index) => {
             const fullImageUrl = imageUrl.startsWith('http')
                 ? imageUrl
                 : `${window.location.origin}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
-            
+
             const nodeId = `image_node_${Date.now()}_${index}`;
             imageNodeIds.push(nodeId);
-            
+
             addNodes({
                 id: nodeId,
                 type: 'image',
@@ -1612,76 +1859,56 @@ onMounted(async () => {
                 }
             });
         });
-        
-        // 计算中间列和右侧列的Y坐标（真正的中心对齐）
-        // 计算所有图片节点的总高度和中心位置
+
+        // 计算所有图片节点的总高度和中心位置，用于垂直居中生图节点
         let centerY = baseY;
         if (imageUrls.length > 0) {
-            const totalHeight = imageUrls.length * imageNodeHeight + (imageUrls.length - 1) * VERTICAL_PADDING;
+            const totalHeight = imageUrls.length * imageNodeHeight + (imageUrls.length - 1) * (verticalSpacing - imageNodeHeight);
             const firstNodeTop = baseY;
             centerY = firstNodeTop + totalHeight / 2;
-            
-            // 调整中心位置，使其对齐到节点中心（而不是顶部）
-            const promptNodeHeight = NODE_DIMENSIONS.prompt?.height || 400;
-            const dreamNodeHeight = NODE_DIMENSIONS.dream?.height || 500;
-            
-            // 如果有提示词节点，使用提示词节点高度的一半来调整
-            if (promptText.trim()) {
-                centerY = centerY - promptNodeHeight / 2;
-            } else {
-                // 如果没有提示词节点，使用生图节点高度的一半来调整
-                centerY = centerY - dreamNodeHeight / 2;
-            }
         }
-        
-        // 创建提示词节点（在中间，如果有提示词）
+
+        // 创建提示词节点（放在左侧底部一行，而不是中间一列）
         if (promptText.trim()) {
             promptNodeId = `prompt_node_${Date.now()}`;
-            
+
             addNodes({
                 id: promptNodeId,
                 type: 'prompt',
                 position: {
-                    x: baseX + horizontalSpacing,
-                    y: centerY
+                    x: baseX,
+                    // 放在图片列下方一行
+                    y: baseY + imageUrls.length * verticalSpacing + VERTICAL_PADDING
                 },
                 data: {
                     text: promptText.trim()
                 }
             });
         }
-        
-        // 创建生图节点（在右侧）
+
+        // 创建生图节点（在图片列右侧，垂直方向与图片整体居中对齐）
         dreamNodeId = `dream_node_${Date.now()}`;
         const nodeData: any = {
             label: '生图节点',
         };
-        
+
         // 根据model设置apiType
         if (model === 'nano') {
             nodeData.apiType = 'nano';
         } else {
             nodeData.apiType = 'dream';
         }
-        
-        // 如果没有提示词节点，需要重新计算生图节点的Y坐标
-        let dreamNodeY = centerY;
-        if (!promptText.trim() && imageUrls.length > 0) {
-            const dreamNodeHeight = NODE_DIMENSIONS.dream?.height || 500;
-            const totalHeight = imageUrls.length * imageNodeHeight + (imageUrls.length - 1) * VERTICAL_PADDING;
-            dreamNodeY = baseY + totalHeight / 2 - dreamNodeHeight / 2;
-        }
-        
+
         addNodes({
             id: dreamNodeId,
             type: 'dream',
             position: {
-                x: baseX + horizontalSpacing * (promptText.trim() ? 2 : 1),
-                y: dreamNodeY
+                x: baseX + horizontalSpacing,
+                y: centerY - (NODE_DIMENSIONS.dream?.height || 500) / 2
             },
             data: nodeData
         });
-        
+
         // 创建连接：所有图片节点连接到生图节点
         imageNodeIds.forEach(imageNodeId => {
             addEdges({
@@ -1692,7 +1919,7 @@ onMounted(async () => {
                 targetHandle: 'target'
             });
         });
-        
+
         // 创建连接：提示词节点连接到生图节点
         if (promptNodeId) {
             addEdges({
@@ -1703,9 +1930,21 @@ onMounted(async () => {
                 targetHandle: 'target'
             });
         }
-        
+
+        // 自动适配到一屏内
+        await nextTick();
+        try {
+            // 减小 padding，让内容更“贴边”一点，尽量塞进一屏
+            fitView({ padding: 0.08 });
+        } catch (e) {
+            console.warn('fitView 失败:', e);
+        }
+
         ElMessage.success(`已创建 ${imageUrls.length} 个图片节点${promptText.trim() ? '、1 个提示词节点' : ''}和 1 个生图节点，并已自动连接`);
+        return;
     }
+
+    // 无 URL 参数时：视为新建/进入新项目，使用默认初始节点（一个提示词节点），不恢复上次工作流
 });
 
 // 组件卸载时清理定时器和事件监听
@@ -1740,9 +1979,49 @@ onUnmounted(() => {
     color: #409eff;
 }
 
+.workflow-header-float {
+    position: fixed;
+    top: 10px;
+    right: 16px;
+    z-index: 30;
+}
+
+.workflow-user-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: rgba(39, 40, 47, 0.95);
+    border-radius: 20px;
+    border: 1px solid #404040;
+}
+
+.workflow-avatar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-weight: 600;
+}
+
+.workflow-user-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.workflow-username {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.workflow-credits {
+    font-size: 11px;
+    color: #a0a0a0;
+}
+
 .canvas-wrapper {
     flex: 1;
-    background: #f5f5f5;
+    background: #1b1c21;
     overflow: hidden;
     min-height: 0;
     position: relative;
@@ -1760,15 +2039,16 @@ onUnmounted(() => {
     z-index: 20;
     padding: 16px 8px;
     width: 64px;
-    background: #ffffff;
-    border-radius: 10px;
-    border: 1px solid #e0e0e0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    background: #27282f;
+    border-radius: 20px;
+    border: 1px solid #404040;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .side-toolbar :deep(.el-button) {
     box-shadow: none;
-    margin-left: 0 !important; /* 覆盖 Element Plus 默认的相邻按钮左间距，避免水平偏移 */
+    margin-left: 0 !important;
+    /* 覆盖 Element Plus 默认的相邻按钮左间距，避免水平偏移 */
 }
 
 .side-group {
@@ -1792,8 +2072,8 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    border: 1px solid #e5e5e5;
-    background-color: #fff;
-    color: #606266;
+    border: 1px solid #3b3d48;
+    background-color: #393c45;
+    color: #e0e0e0;
 }
 </style>

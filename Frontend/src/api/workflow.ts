@@ -2,15 +2,19 @@ import request from '@/utils/request';
 
 export interface WorkflowTemplate {
   id: number;
+  user_id?: number;
   name: string;
   description?: string;
   workflow_data: any;
   is_public: number;
+  is_favorite?: number;
   usage_count: number;
   created_at: string;
   updated_at: string;
   cover_image?: string;
   author_name?: string;
+  expires_at?: string;
+  category?: string;
 }
 
 export const saveTemplate = (data: {
@@ -18,6 +22,7 @@ export const saveTemplate = (data: {
   workflowData: any;
   description?: string;
   isPublic?: boolean;
+  isFavorite?: boolean;
   coverImage?: string;
   category: string;
 }) => {
@@ -37,6 +42,8 @@ export const updateTemplate = (id: number, data: {
   description?: string;
   workflowData?: any;
   isPublic?: boolean;
+  isFavorite?: boolean;
+  coverImage?: string;
   category?: string;
 }) => {
   return request.put<{ message: string; data: WorkflowTemplate }>(`/workflow/template/${id}`, data);
@@ -49,14 +56,20 @@ export const deleteTemplate = (id: number) => {
 // 工作流历史相关
 export interface WorkflowHistory {
   id: number;
-  workflow_data: any;
+  workflow_data?: any;
   snapshot_name?: string;
   created_at: string;
+  updated_at?: string;
+  is_public?: number;
+  is_favorite?: number;
+  /** 列表接口会解析 workflow_data 后返回的封面图 URL */
+  cover_image?: string;
 }
 
-export const autoSaveHistory = (workflowData: any) => {
+export const autoSaveHistory = (workflowData: any, historyId?: number) => {
   return request.post<{ message: string; data: WorkflowHistory }>('/workflow/history/auto-save', {
-    workflowData
+    workflowData,
+    ...(historyId != null ? { historyId } : {})
   });
 };
 
@@ -68,6 +81,10 @@ export const getHistoryList = (limit?: number) => {
 
 export const getHistory = (id: number) => {
   return request.get<{ message: string; data: WorkflowHistory }>(`/workflow/history/${id}`);
+};
+
+export const updateHistory = (id: number, data: { isPublic?: boolean; isFavorite?: boolean }) => {
+  return request.put<{ message: string; data: WorkflowHistory }>(`/workflow/history/${id}`, data);
 };
 
 export const deleteHistory = (id: number) => {

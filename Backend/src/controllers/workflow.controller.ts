@@ -8,7 +8,7 @@ const historyService = new WorkflowHistoryService();
 export const saveTemplate = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { name, workflowData, description, isPublic, coverImage, category } = req.body;
+        const { name, workflowData, description, isPublic, coverImage, category, isFavorite } = req.body;
 
         if (!name || !workflowData) {
             return res.status(400).json({ message: "模板名称和工作流数据不能为空" });
@@ -25,7 +25,8 @@ export const saveTemplate = async (req: Request, res: Response) => {
             description,
             isPublic || false,
             coverImage,
-            category
+            category,
+            isFavorite || false
         );
 
         return res.status(200).json({
@@ -40,7 +41,7 @@ export const saveTemplate = async (req: Request, res: Response) => {
 export const getTemplates = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const templates = await workflowService.getUserTemplates(userId, true);
+        const templates = await workflowService.getUserTemplates(userId, false);
 
         return res.status(200).json({
             message: "获取成功",
@@ -96,13 +97,15 @@ export const updateTemplate = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "无效的模板ID" });
         }
         const templateId = parseInt(idParam);
-        const { name, description, workflowData, isPublic, category } = req.body;
+        const { name, description, workflowData, isPublic, isFavorite, coverImage, category } = req.body;
 
         const template = await workflowService.updateTemplate(templateId, userId, {
             name,
             description,
             workflow_data: workflowData,
             is_public: isPublic,
+            is_favorite: isFavorite,
+            cover_image: coverImage,
             category
         });
 
@@ -119,13 +122,14 @@ export const updateTemplate = async (req: Request, res: Response) => {
 export const autoSaveHistory = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { workflowData } = req.body;
+        const { workflowData, historyId } = req.body;
 
         if (!workflowData) {
             return res.status(400).json({ message: "工作流数据不能为空" });
         }
 
-        const history = await historyService.autoSave(userId, workflowData);
+        const id = historyId != null ? parseInt(String(historyId), 10) : undefined;
+        const history = await historyService.autoSave(userId, workflowData, Number.isNaN(id) ? undefined : id);
 
         return res.status(200).json({
             message: "自动保存成功",
@@ -139,7 +143,8 @@ export const autoSaveHistory = async (req: Request, res: Response) => {
 export const getHistoryList = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const limit = parseInt(req.query.limit as string) || 20;
+        const limitParam = req.query.limit as string | undefined;
+        const limit = limitParam === '' || limitParam === undefined ? 100 : parseInt(limitParam) || 20;
 
         const histories = await historyService.getHistoryList(userId, limit);
 
@@ -165,6 +170,30 @@ export const getHistory = async (req: Request, res: Response) => {
 
         return res.status(200).json({
             message: "获取成功",
+            data: history
+        });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+export const updateHistory = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        const idParam = req.params.id;
+        if (!idParam || Array.isArray(idParam)) {
+            return res.status(400).json({ message: "无效的历史记录ID" });
+        }
+        const historyId = parseInt(idParam);
+        const { isPublic, isFavorite } = req.body;
+
+        const history = await historyService.updateHistory(historyId, userId, {
+            isPublic,
+            isFavorite
+        });
+
+        return res.status(200).json({
+            message: "更新成功",
             data: history
         });
     } catch (error: any) {

@@ -11,7 +11,7 @@
             @mouseenter="handleImageMouseEnter"
             @mouseleave="handleImageMouseLeave"
         >
-            <div class="section-title">● 图片</div>
+            <div class="section-title"><span class="title-dot"></span>图片</div>
             <!-- 加载中占位 -->
             <div v-if="isLoading" class="image-slot loading-slot"></div>
             <!-- 实际图片 -->
@@ -429,11 +429,11 @@ const handleDownloadOriginal = () => {
 
 <style scoped>
 .image-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 240px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
@@ -465,14 +465,25 @@ const handleDownloadOriginal = () => {
 /* 节点标题已移除，保留样式以防其他地方使用 */
 
 .section-title {
-    font-size: 12px;
-    color: #666;
+    font-size: 13px;
+    color: #e0e0e0;
     margin-bottom: 8px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-title .title-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #67c23a;
+    flex-shrink: 0;
 }
 
 .image-content {
-    padding: 12px;
+    padding: 14px 16px;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -481,14 +492,14 @@ const handleDownloadOriginal = () => {
 }
 
 .image-content:hover {
-    background: #f8f9fa;
+    background: transparent;
 }
 
 .img-preview {
     width: 100%;
     display: block;
-    border-radius: 4px;
-    border: 1px solid #eee;
+    border-radius: 8px;
+    border: 1px solid #404040;
     object-fit: contain;
     transition: transform 0.2s, box-shadow 0.2s;
 }
@@ -558,14 +569,17 @@ const handleDownloadOriginal = () => {
     align-items: center;
     width: 100%;
     min-height: 150px;
-    background: #f5f5f5;
+    background: #25262b;
+    border-radius: 8px;
+    border: 1px solid #404040;
 }
 
 .loading-slot {
-    background: linear-gradient(90deg, #f0f0f0 0%, #e5e5e5 50%, #f0f0f0 100%);
+    background: linear-gradient(90deg, #25262b 0%, #2d2e34 50%, #25262b 100%);
     background-size: 200% 100%;
     animation: shimmer 1.2s ease-in-out infinite;
-    border-radius: 4px;
+    border-radius: 8px;
+    border: 1px solid #404040;
 }
 
 @keyframes shimmer {
@@ -684,11 +698,14 @@ const handleDownloadOriginal = () => {
 .fullscreen-preview-container {
     width: 100vw !important;
     height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     cursor: pointer;
     position: relative;
+    overflow: hidden !important;
 }
 
 .fullscreen-image {

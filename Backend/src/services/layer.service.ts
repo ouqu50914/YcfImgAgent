@@ -3,12 +3,18 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { pipeline } from 'stream/promises';
+import { CreditService } from './credit.service';
 
 export class LayerService {
+    private creditService = new CreditService();
+
     /**
      * 拆分图片图层（使用Seedream API实现）
      */
     async splitImage(userId: number, imageUrl: string) {
+        const cost = this.creditService.calcCost('dream', 'layer_split');
+        await this.creditService.deductCredits(userId, cost, { operationType: 'layer_split', apiType: 'dream' });
+
         const ARK_API_KEY = process.env.SEED_ARK_API_KEY;
         const MODEL_ID = process.env.SEED_ARK_MODEL_ID || "ep-20260129215218-w29ps";
         const BASE_URL = "https://ark.cn-beijing.volces.com";
@@ -81,6 +87,7 @@ export class LayerService {
                 layerCount: layers.length
             };
         } catch (error: any) {
+            await this.creditService.addCredits(userId, cost);
             const errInfo = error.response?.data || error.message;
             console.error("❌ [LayerService] 图层分离失败", typeof errInfo === 'object' ? JSON.stringify(errInfo) : errInfo);
             throw new Error(`图层分离失败: ${error.message}`);

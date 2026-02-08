@@ -1,68 +1,80 @@
 <template>
   <div class="sidebar-container">
     <div class="sidebar-nav">
-      <div 
-        class="nav-item"
-        :class="{ active: currentRoute === '/workflow' && !routeQuery }"
-        @click="handleNavClick('/workflow')"
-        title="新建工作流"
-      >
-        <el-icon :size="24"><Plus /></el-icon>
-      </div>
-      <div 
-        class="nav-item"
-        :class="{ active: currentRoute === '/home' || currentRoute === '/' }"
-        @click="handleNavClick('/home')"
-        title="首页"
-      >
-        <el-icon :size="24"><House /></el-icon>
-      </div>
-      <div 
-        class="nav-item"
-        :class="{ active: currentRoute === '/workflow-plaza' }"
-        @click="handleNavClick('/workflow-plaza')"
-        title="我的工作流"
-      >
-        <el-icon :size="24"><Folder /></el-icon>
-      </div>
-      <div 
-        class="nav-item"
-        :class="{ active: currentRoute === '/workflow-plaza' && isPublic }"
-        @click="handleNavClick('/workflow-plaza', { public: true })"
-        title="模板库"
-      >
-        <el-icon :size="24"><Document /></el-icon>
-      </div>
-      <div 
-        class="nav-item"
-        :class="{ active: currentRoute === '/profile' }"
-        @click="handleNavClick('/profile')"
-        title="设置"
-      >
-        <el-icon :size="24"><Setting /></el-icon>
-      </div>
-      <div 
-        v-if="isAdmin"
-        class="nav-item"
-        :class="{ active: currentRoute === '/admin' }"
-        @click="handleNavClick('/admin')"
-        title="后台管理"
-      >
-        <el-icon :size="24"><UserFilled /></el-icon>
-      </div>
+      <el-tooltip content="新建工作流" placement="right">
+        <div 
+          class="nav-item"
+          :class="{ active: currentRoute === '/workflow' && !routeQuery }"
+          @click="handleNavClick('/workflow')"
+        >
+          <el-icon :size="24"><Plus /></el-icon>
+        </div>
+      </el-tooltip>
+
+      <el-tooltip content="首页" placement="right">
+        <div 
+          class="nav-item"
+          :class="{ active: currentRoute === '/' }"
+          @click="handleNavClick('/')"
+        >
+          <el-icon :size="24"><House /></el-icon>
+        </div>
+      </el-tooltip>
+
+      <el-tooltip content="我的工作流" placement="right">
+        <div 
+          class="nav-item"
+          :class="{ active: currentRoute === '/workflow-plaza' && !isPublic }"
+          @click="handleNavClick('/workflow-plaza')"
+        >
+          <el-icon :size="24"><Folder /></el-icon>
+        </div>
+      </el-tooltip>
+
+      <el-tooltip content="模板库" placement="right">
+        <div 
+          class="nav-item"
+          :class="{ active: currentRoute === '/workflow-plaza' && isPublic }"
+          @click="handleNavClick('/workflow-plaza', { public: true })"
+        >
+          <el-icon :size="24"><Collection /></el-icon>
+        </div>
+      </el-tooltip>
+
+      <el-tooltip content="操作手册" placement="right">
+        <div 
+          class="nav-item"
+          @click="openHelpDoc"
+        >
+          <el-icon :size="24"><QuestionFilled /></el-icon>
+        </div>
+      </el-tooltip>
+
+      <el-tooltip v-if="isAdmin" content="管理中心" placement="right">
+        <div 
+          class="nav-item"
+          :class="{ active: currentRoute === '/admin' }"
+          @click="handleNavClick('/admin')"
+        >
+          <el-icon :size="24"><Setting /></el-icon>
+        </div>
+      </el-tooltip>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { Plus, House, Folder, Document, Setting, UserFilled } from '@element-plus/icons-vue';
+import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
+import { getHelpDocUrlForClient } from '@/api/user';
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
+const helpDocUrl = ref<string | null>(null);
 
 const currentRoute = computed(() => route.path);
 const routeQuery = computed(() => route.query.id);
@@ -79,6 +91,24 @@ const handleNavClick = (path: string, query?: any) => {
     router.push(path);
   }
 };
+
+const openHelpDoc = () => {
+  if (helpDocUrl.value) {
+    window.open(helpDocUrl.value, '_blank');
+  } else {
+    ElMessage.warning('暂未配置操作手册链接');
+  }
+};
+
+onMounted(async () => {
+  try {
+    const res = (await getHelpDocUrlForClient()) as unknown as { url: string | null };
+    helpDocUrl.value = res.url || null;
+  } catch (error: any) {
+    // 不阻塞主功能，仅在控制台输出
+    console.error('获取操作手册链接失败', error);
+  }
+});
 </script>
 
 <style scoped>

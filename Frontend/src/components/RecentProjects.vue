@@ -2,6 +2,7 @@
   <div class="recent-projects-container">
     <div class="section-header">
       <h3 class="section-title">最近项目</h3>
+      <router-link to="/workflow-plaza" class="more-link">MORE</router-link>
     </div>
     <div class="projects-scroll">
       <div 
@@ -30,7 +31,17 @@
         </div>
         <div class="project-info">
           <div class="project-name">{{ project.name || '未命名工作流' }}</div>
-          <div class="project-time">{{ formatTime(project.updated_at || project.created_at) }}</div>
+          <div class="project-meta">
+            <span class="project-time">{{ formatTime((project.updated_at || project.created_at) || '') }}</span>
+            <el-button
+              type="danger"
+              link
+              size="small"
+              @click.stop="handleDelete(project)"
+            >
+              删除
+            </el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -40,8 +51,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Picture } from '@element-plus/icons-vue';
-import { getTemplates, type WorkflowTemplate } from '@/api/workflow';
+import { getTemplates, getHistoryList, deleteTemplate, deleteHistory, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 
 const router = useRouter();
 const projects = ref<Array<{
@@ -50,6 +62,7 @@ const projects = ref<Array<{
   preview?: string;
   created_at?: string;
   updated_at?: string;
+  source?: 'template' | 'history';
 }>>([]);
 
 const getImageUrl = (url: string) => {
@@ -88,39 +101,97 @@ const handleNewProject = () => {
 };
 
 const handleProjectClick = (project: any) => {
-  if (project.id) {
+  if (project.id == null) return;
+  if (project.source === 'history') {
+    router.push(`/workflow?historyId=${project.id}`);
+  } else {
     router.push(`/workflow?id=${project.id}`);
   }
 };
 
+const handleDelete = async (project: any) => {
+  if (project.id == null) return;
+  try {
+    await ElMessageBox.confirm('删除后关联的上传图片也会删除，确定删除？', '确认删除', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    });
+    if (project.source === 'history') {
+      await deleteHistory(project.id);
+    } else {
+      await deleteTemplate(project.id);
+    }
+    ElMessage.success('已删除');
+    loadProjects();
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.message || '删除失败');
+    }
+  }
+};
+
+function getPreviewFromWorkflowData(workflowData: any): string | undefined {
+  if (!workflowData || typeof workflowData !== 'object') return undefined;
+  // 优先使用自动保存时生成的编辑器截图封面
+  if (workflowData.cover_image) return workflowData.cover_image;
+  const nodes = workflowData.nodes || [];
+  const imageNode = nodes.find((node: any) =>
+    node.type === 'image' && (node.data?.imageUrl || node.data?.image_url)
+  );
+  return imageNode ? (imageNode.data?.imageUrl || imageNode.data?.image_url) : undefined;
+}
+
 const loadProjects = async () => {
   try {
-    const res: any = await getTemplates();
-    if (res.data && Array.isArray(res.data)) {
-      projects.value = res.data.slice(0, 4).map((item: WorkflowTemplate) => {
-        let preview: string | undefined = undefined;
-        
-        if (item.cover_image) {
-          preview = item.cover_image;
-        } else if (item.workflow_data && typeof item.workflow_data === 'object') {
-          const nodes = item.workflow_data.nodes || [];
-          const imageNode = nodes.find((node: any) => 
-            node.type === 'image' && (node.data?.imageUrl || node.data?.image_url)
-          );
-          if (imageNode) {
-            preview = imageNode.data?.imageUrl || imageNode.data?.image_url;
-          }
-        }
-        
-        return {
+    const [templatesRes, historyRes] = await Promise.all([
+      getTemplates(),
+      getHistoryList(5),
+    ]);
+    const list: Array<{
+      id: number;
+      name: string;
+      preview?: string;
+      created_at?: string;
+      updated_at?: string;
+      source: 'template' | 'history';
+      _sortTime: number;
+    }> = [];
+    if (templatesRes.data && Array.isArray(templatesRes.data)) {
+      for (const item of templatesRes.data as WorkflowTemplate[]) {
+        let preview: string | undefined;
+        if (item.cover_image) preview = item.cover_image;
+        else preview = getPreviewFromWorkflowData(item.workflow_data);
+        const t = new Date(item.updated_at || item.created_at || 0).getTime();
+        list.push({
           id: item.id,
-          name: item.name,
+          name: item.name || '未命名工作流',
           preview,
           created_at: item.created_at,
           updated_at: item.updated_at,
-        };
-      });
+          source: 'template',
+          _sortTime: t,
+        });
+      }
     }
+    if (historyRes.data && Array.isArray(historyRes.data)) {
+      for (const item of historyRes.data as WorkflowHistory[]) {
+        const t = new Date(item.created_at || 0).getTime();
+        // 列表接口已返回 cover_image；若无则尝试从 workflow_data 解析（可能为字符串）
+        const preview = item.cover_image ?? (typeof item.workflow_data === 'object' ? getPreviewFromWorkflowData(item.workflow_data) : undefined);
+        list.push({
+          id: item.id,
+          name: item.snapshot_name || `自动保存 ${formatTime(item.created_at)}`,
+          preview,
+          created_at: item.created_at,
+          updated_at: item.created_at,
+          source: 'history',
+          _sortTime: t,
+        });
+      }
+    }
+    list.sort((a, b) => b._sortTime - a._sortTime);
+    projects.value = list.slice(0, 5).map(({ _sortTime, ...rest }) => rest);
   } catch (error) {
     console.error('加载最近项目失败:', error);
   }
@@ -139,10 +210,14 @@ defineExpose({
 .recent-projects-container {
   width: 100%;
   margin-bottom: 40px;
+  overflow: visible;
 }
 
 .section-header {
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .section-title {
@@ -152,11 +227,22 @@ defineExpose({
   margin: 0;
 }
 
+.more-link {
+  font-size: 14px;
+  color: #409eff;
+  text-decoration: none;
+}
+
+.more-link:hover {
+  text-decoration: underline;
+}
+
+/* 上内边距留出空间，避免卡片 hover 上浮时被裁切 */
 .projects-scroll {
   display: flex;
   gap: 16px;
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding: 12px 0 8px 0;
   scrollbar-width: thin;
   scrollbar-color: #c0c4cc #f5f5f5;
 }
@@ -187,19 +273,22 @@ defineExpose({
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 0;
 }
 
 .project-card:hover {
   border-color: #409eff;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
-  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(64, 158, 255, 0.2);
+  transform: translateY(-6px);
+  z-index: 1;
 }
 
 .new-project-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #c0c4cc;
   border: none;
   color: #fff;
   display: flex;
@@ -260,6 +349,13 @@ defineExpose({
   gap: 4px;
 }
 
+.project-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .project-name {
   font-size: 14px;
   font-weight: 500;
@@ -272,5 +368,7 @@ defineExpose({
 .project-time {
   font-size: 12px;
   color: #909399;
+  flex: 1;
+  min-width: 0;
 }
 </style>

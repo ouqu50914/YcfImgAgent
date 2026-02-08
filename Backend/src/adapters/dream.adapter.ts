@@ -5,6 +5,12 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
 
+// 【修复】创建禁用代理的axios实例，确保Dream API（火山引擎）不使用代理
+// Nano API（Google）会使用undici的全局代理，不影响此实例
+const axiosNoProxy = axios.create({
+    proxy: false
+});
+
 export class DreamAdapter implements AiProvider {
 
 // 1. 主入口方法
@@ -95,7 +101,7 @@ async generateImage(params: GenerateParams, apiKey: string, apiUrl: string): Pro
 
     try {
         console.log(`[DreamAPI] 发送单图API请求...`);
-        const response = await axios.post(url, requestBody, {
+        const response = await axiosNoProxy.post(url, requestBody, {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${ARK_API_KEY}`
@@ -296,7 +302,7 @@ private async generateImagesInParallel(
             let imageBuffer: Buffer;
             if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
                 // 远程URL，需要下载
-                const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+                const response = await axiosNoProxy.get(imageUrl, { responseType: 'arraybuffer' });
                 imageBuffer = Buffer.from(response.data);
             } else {
                 // 本地文件路径
@@ -455,7 +461,7 @@ private async generateImagesInParallel(
         const filePath = path.join(uploadDir, fileName);
 
         // 下载流
-        const response = await axios.get(remoteUrl, { responseType: 'stream' });
+        const response = await axiosNoProxy.get(remoteUrl, { responseType: 'stream' });
 
         // 写入文件
         await pipeline(response.data, fs.createWriteStream(filePath));
@@ -564,7 +570,7 @@ private async generateImagesInParallel(
                 watermark: false,
             };
 
-            const response = await axios.post(url, requestBody, {
+            const response = await axiosNoProxy.post(url, requestBody, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${ARK_API_KEY}`
@@ -673,7 +679,7 @@ private async generateImagesInParallel(
                 watermark: false,
             };
 
-            const response = await axios.post(url, requestBody, {
+            const response = await axiosNoProxy.post(url, requestBody, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${ARK_API_KEY}`
@@ -750,7 +756,7 @@ private async generateImagesInParallel(
                 watermark: false,
             };
 
-            const response = await axios.post(url, requestBody, {
+            const response = await axiosNoProxy.post(url, requestBody, {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${ARK_API_KEY}`
@@ -834,7 +840,7 @@ private async generateImagesInParallel(
         if (downloadUrl.startsWith('http')) {
             try {
                 console.log(`[DreamAPI] 从网络下载图片: ${downloadUrl}`);
-                const response = await axios.get(downloadUrl, {
+                const response = await axiosNoProxy.get(downloadUrl, {
                     responseType: 'stream',
                     timeout: 30000,
                     maxRedirects: 5,
@@ -851,7 +857,7 @@ private async generateImagesInParallel(
                 if (downloadUrl !== imageUrl && imageUrl.startsWith('http')) {
                     console.log(`[DreamAPI] 尝试使用原始URL下载: ${imageUrl}`);
                     try {
-                        const response = await axios.get(imageUrl, {
+                        const response = await axiosNoProxy.get(imageUrl, {
                             responseType: 'stream',
                             timeout: 30000
                         });

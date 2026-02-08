@@ -22,6 +22,12 @@ export class WorkflowTemplate {
     @Column({ type: 'tinyint', default: 0, comment: '是否公开：0-私有，1-公开' })
     is_public!: number;
 
+    @Column({ type: 'tinyint', default: 0, comment: '是否收藏：0-否，1-是（公开或收藏的 14 天后过期删除）' })
+    is_favorite!: number;
+
+    @Column({ type: 'datetime', nullable: true, comment: '过期时间：公开或收藏后 14 天' })
+    expires_at?: Date;
+
     @Column({ type: 'int', default: 0, comment: '使用次数' })
     usage_count!: number;
 

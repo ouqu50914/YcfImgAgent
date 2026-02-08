@@ -1,10 +1,13 @@
 <template>
     <div class="dream-node">
+        <!-- 顶部标题（与参考图一致） -->
+        <div class="node-header">
+            <span>模型参数</span>
+        </div>
         <!-- 内容区域 -->
         <div class="node-content">
             <!-- 右侧：参数设置 -->
             <div class="params-section">
-                <div class="section-title">模型参数</div>
                 
                 <!-- 模型选择 -->
                 <div class="param-item">
@@ -70,9 +73,10 @@
                     size="default"
                     class="execute-btn"
                     :loading="loading"
+                    :disabled="!canExecute"
                     @click="handleGenerate"
                 >
-                    {{ isExecuted ? '再次执行' : '执行' }}
+                    {{ executeButtonText }}
                 </el-button>
             </div>
         </div>
@@ -83,10 +87,10 @@
             type="target" 
             :position="Position.Left" 
             :style="{ 
-                background: '#555', 
+                background: '#409eff', 
                 width: '12px', 
                 height: '12px', 
-                border: '2px solid white',
+                border: '2px solid #1a1a1a',
                 borderRadius: '50%',
                 cursor: 'crosshair',
                 top: '50%'
@@ -136,6 +140,8 @@ import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
 import { generateImage } from '../../api/image';
 import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
+import { useUserStore } from '@/store/user';
+import { getCreditCost } from '@/utils/credits';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -146,6 +152,22 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
+const userStore = useUserStore();
+
+// 积分：普通用户需要校验
+const executeCost = computed(() => {
+    const q = apiType.value === 'nano' && !quality.value ? '2K' : quality.value;
+    return getCreditCost(apiType.value, 'generate', { quality: q || '2K', imageCount: numImages.value });
+});
+const canExecute = computed(() => {
+    if (userStore.userInfo?.role === 1) return true;
+    return (userStore.userInfo?.credits ?? 0) >= executeCost.value;
+});
+const executeButtonText = computed(() => {
+    const base = isExecuted.value ? '再次执行' : '执行';
+    if (userStore.userInfo?.role === 1) return base;
+    return `${base} (消耗 ${executeCost.value} 积分)`;
+});
 
 // 统一的模型选择：dream 或 nano:model-name 格式
 const selectedModel = ref<string>(props.data?.apiType === 'nano' 
@@ -332,6 +354,10 @@ const currentNode = computed(() => {
 
 // 生成图片
 const handleGenerate = async () => {
+    if (!canExecute.value) {
+        ElMessage.warning('积分不足，请向超级管理员申请');
+        return;
+    }
     loading.value = true;
     try {
         // 1. 从连接读取数据
@@ -454,6 +480,7 @@ const handleGenerate = async () => {
                 
                 console.log(`👉 成功生成 ${fullUrls.length} 张图片:`, fullUrls);
                 ElMessage.success(`成功生成 ${fullUrls.length} 张图片！`);
+                userStore.fetchCredits();
                 
                 // 标记节点为已执行（下次显示“再次执行”）
                 isExecuted.value = true;
@@ -472,6 +499,7 @@ const handleGenerate = async () => {
                 props.data.imageUrl = res.data.image_url;
                 console.log('👉 完整图片URL:', url);
                 ElMessage.success('图片生成成功！');
+                userStore.fetchCredits();
                 
                 // 标记节点为已执行（下次显示“再次执行”）
                 isExecuted.value = true;
@@ -632,11 +660,11 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
 
 <style scoped>
 .dream-node {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 30px;
     width: 280px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
@@ -654,13 +682,22 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
     pointer-events: auto;
 }
 
-/* 节点标题已移除，保留样式以防其他地方使用 */
+.node-header {
+    background: #3a3a3f;
+    color: #e0e0e0;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 1px solid #404040;
+    border-radius: 30px 30px 0 0;
+}
 
 .node-content {
     display: flex;
     flex-direction: column;
-    padding: 12px;
-    border-bottom: 1px solid #eee;
+    padding: 14px 16px;
+    border-bottom: 1px solid #404040;
+    color: #e0e0e0;
 }
 
 .params-section {
@@ -706,7 +743,7 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
 
 .param-label {
     font-size: 12px;
-    color: #909399;
+    color: #b0b0b0;
     flex: 0 0 auto;
     min-width: 72px;
 }
@@ -714,6 +751,22 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
 .param-select {
     width: 132px;
     margin-bottom: 0;
+}
+
+.param-select :deep(.el-input__wrapper) {
+    background: #393c45;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #555;
+}
+
+.param-select :deep(.el-input__wrapper:hover) {
+    border-color: #409eff;
+}
+
+.param-select :deep(.el-input__wrapper.is-focus) {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }
 
 .model-select {
@@ -814,11 +867,14 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
 .fullscreen-preview-container {
     width: 100vw !important;
     height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     cursor: pointer;
     position: relative;
+    overflow: hidden !important;
 }
 
 .fullscreen-image {
