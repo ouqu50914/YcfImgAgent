@@ -11,7 +11,10 @@
             @mouseenter="handleImageMouseEnter"
             @mouseleave="handleImageMouseLeave"
         >
-            <div class="section-title"><span class="title-dot"></span>图片</div>
+            <div class="section-title">
+                <span class="title-dot"></span>
+                <span>{{ displayAlias }}</span>
+            </div>
             <!-- 加载中占位 -->
             <div v-if="isLoading" class="image-slot loading-slot"></div>
             <!-- 实际图片 -->
@@ -163,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
@@ -172,6 +175,11 @@ import { ElMessage } from 'element-plus';
 defineEmits<{
     updateNodeInternals: [];
 }>();
+
+type ImageAliasStore = {
+    getOrCreateAlias: (imageKey: string) => string;
+    getAllAliases: () => { key: string; alias: string }[];
+};
 
 const props = defineProps<NodeProps>();
 
@@ -182,6 +190,11 @@ const isLoading = ref(!!props.data?.isLoading);
 const showActionMenu = ref(false);
 const creatingLayerNode = ref(false);
 const showFullscreenPreview = ref(false);
+
+const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
+const imageAlias = ref<string>(props.data?.imageAlias || '');
+
+const displayAlias = computed(() => imageAlias.value || '图片');
 
 // 计算当前节点位置
 const currentNode = computed(() => {
@@ -194,6 +207,10 @@ watch(
     (val) => {
         if (val) {
             imageUrl.value = val;
+            // 当占位节点异步填充 imageUrl 时，为其补全别名
+            if (!imageAlias.value) {
+                ensureAliasFromStore();
+            }
         }
     }
 );
@@ -204,6 +221,25 @@ watch(
         isLoading.value = !!val;
     }
 );
+
+watch(
+    () => props.data?.imageAlias,
+    (val) => {
+        if (typeof val === 'string' && val && val !== imageAlias.value) {
+            imageAlias.value = val;
+        }
+    }
+);
+
+const ensureAliasFromStore = () => {
+    if (!imageAliasStore) return;
+    const key = (props.data as any)?.imageKey || (props.data as any)?.originalImageUrl || (props.data as any)?.imageUrl;
+    if (!key) return;
+    const alias = imageAliasStore.getOrCreateAlias(key);
+    imageAlias.value = alias;
+    (props.data as any).imageAlias = alias;
+    (props.data as any).imageKey = key;
+};
 
 // 确保从来源生图节点到当前图片节点有一条连线（防止外部逻辑覆盖了 edges）
 const ensureEdgeFromSource = () => {
@@ -229,6 +265,7 @@ const ensureEdgeFromSource = () => {
 };
 
 onMounted(() => {
+    ensureAliasFromStore();
     ensureEdgeFromSource();
 });
 

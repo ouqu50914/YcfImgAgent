@@ -290,6 +290,74 @@ const nodes = ref([
 // 初始边数据
 const edges = ref([]);
 
+// 图片别名：按工作流范围自增（图1、图2...）
+type ImageAliasStore = {
+    getOrCreateAlias: (imageKey: string) => string;
+    getAllAliases: () => { key: string; alias: string }[];
+};
+
+const imageAliasCounter = ref(0);
+const imageAliasMap = ref<Record<string, string>>({});
+
+const getOrCreateImageAlias = (imageKey: string): string => {
+    if (!imageKey) return '';
+    const existing = imageAliasMap.value[imageKey];
+    if (existing) return existing;
+    const nextIndex = imageAliasCounter.value + 1;
+    const alias = `图${nextIndex}`;
+    imageAliasCounter.value = nextIndex;
+    imageAliasMap.value = {
+        ...imageAliasMap.value,
+        [imageKey]: alias,
+    };
+    return alias;
+};
+
+const getAllImageAliases = () => {
+    return Object.entries(imageAliasMap.value).map(([key, alias]) => ({ key, alias }));
+};
+
+const restoreImageAliasStateFromWorkflow = (workflowData: any) => {
+    if (workflowData && typeof workflowData === 'object') {
+        if (typeof workflowData.imageAliasCounter === 'number') {
+            imageAliasCounter.value = workflowData.imageAliasCounter;
+        }
+        if (workflowData.imageAliasMap && typeof workflowData.imageAliasMap === 'object') {
+            imageAliasMap.value = { ...workflowData.imageAliasMap };
+            return;
+        }
+    }
+
+    // 兼容旧数据：从节点里推导已有别名
+    const currentNodes = workflowData?.nodes || getNodes.value;
+    const map: Record<string, string> = {};
+    let maxIndex = 0;
+    for (const node of currentNodes || []) {
+        if (node.type !== 'image') continue;
+        const data = node.data || {};
+        const alias: string | undefined = data.imageAlias;
+        const key: string | undefined = data.originalImageUrl || data.imageUrl;
+        if (!alias || !key) continue;
+        if (!map[key]) {
+            map[key] = alias;
+            const match = alias.match(/^图(\d+)$/);
+            if (match) {
+                const n = Number(match[1]);
+                if (!Number.isNaN(n)) {
+                    maxIndex = Math.max(maxIndex, n);
+                }
+            }
+        }
+    }
+    imageAliasMap.value = map;
+    imageAliasCounter.value = maxIndex;
+};
+
+provide<ImageAliasStore>('imageAliasStore', {
+    getOrCreateAlias: getOrCreateImageAlias,
+    getAllAliases: getAllImageAliases,
+});
+
 // 撤销/重做栈管理
 const undoStack = ref<any[]>([]);
 const redoStack = ref<any[]>([]);
@@ -427,9 +495,18 @@ const captureCanvasCover = async (): Promise<string | null> => {
     }
 };
 
-// 若 workflow 没有封面则用画布截图作为封面（会修改 workflowData）
+// 若 workflow 没有封面则优先使用最后一张图片作为封面；若没有图片，再尝试画布截图（会修改 workflowData）
 const ensureWorkflowCover = async (workflowData: { nodes: any[]; edges: any[]; cover_image?: string }) => {
     if (workflowData.cover_image) return;
+
+    // 1. 优先使用工作流中的最后一张图片
+    const lastImage = getLastImageFromWorkflow();
+    if (lastImage) {
+        workflowData.cover_image = lastImage;
+        return;
+    }
+
+    // 2. 若没有图片，则尝试对画布截图
     const url = await captureCanvasCover();
     if (url) workflowData.cover_image = url;
 };
@@ -596,6 +673,7 @@ const saveCurrentWorkflowBeforeLeave = async () => {
 const handleGoBack = () => {
     router.back();
 };
+
 
 // 模板相关
 const showSaveDialog = ref(false);
@@ -913,9 +991,12 @@ const handleDrop = async (event: DragEvent) => {
             const uploadRes: any = await uploadImage(file);
 
             if (uploadRes.data && uploadRes.data.url) {
-                const imageUrl = uploadRes.data.url.startsWith('http')
-                    ? uploadRes.data.url
-                    : `${window.location.origin}${uploadRes.data.url}`;
+                const originalUrl: string = uploadRes.data.url;
+                const imageUrl = originalUrl.startsWith('http')
+                    ? originalUrl
+                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                const imageKey: string = uploadRes.data.filename || originalUrl;
+                const alias = getOrCreateImageAlias(imageKey);
 
                 // 创建 ImageNode
                 const nodeId = `image_node_${Date.now()}_${i}`;
@@ -927,8 +1008,11 @@ const handleDrop = async (event: DragEvent) => {
                         y: position.y + i * 20
                     },
                     data: {
-                        imageUrl: imageUrl,
-                        originalImageUrl: uploadRes.data.url
+                        imageUrl,
+                        originalImageUrl: originalUrl,
+                        originalFilename: uploadRes.data.filename,
+                        imageAlias: alias,
+                        imageKey,
                     }
                 });
             }
@@ -1002,9 +1086,12 @@ const insertImageNode = () => {
         try {
             const uploadRes: any = await uploadImage(file);
             if (uploadRes.data && uploadRes.data.url) {
-                const imageUrl = uploadRes.data.url.startsWith('http')
-                    ? uploadRes.data.url
-                    : `${window.location.origin}${uploadRes.data.url}`;
+                const originalUrl: string = uploadRes.data.url;
+                const imageUrl = originalUrl.startsWith('http')
+                    ? originalUrl
+                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                const imageKey: string = uploadRes.data.filename || originalUrl;
+                const alias = getOrCreateImageAlias(imageKey);
 
                 const nodeId = `image_node_${Date.now()}`;
                 addNodes({
@@ -1013,7 +1100,10 @@ const insertImageNode = () => {
                     position,
                     data: {
                         imageUrl,
-                        originalImageUrl: uploadRes.data.url
+                        originalImageUrl: originalUrl,
+                        originalFilename: uploadRes.data.filename,
+                        imageAlias: alias,
+                        imageKey,
                     }
                 });
                 ElMessage.success('已插入图片节点');
@@ -1128,9 +1218,12 @@ const addImageNodeFromToolbar = () => {
         try {
             const uploadRes: any = await uploadImage(file);
             if (uploadRes.data && uploadRes.data.url) {
-                const imageUrl = uploadRes.data.url.startsWith('http')
-                    ? uploadRes.data.url
-                    : `${window.location.origin}${uploadRes.data.url}`;
+                const originalUrl: string = uploadRes.data.url;
+                const imageUrl = originalUrl.startsWith('http')
+                    ? originalUrl
+                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                const imageKey: string = uploadRes.data.filename || originalUrl;
+                const alias = getOrCreateImageAlias(imageKey);
 
                 const nodeId = `image_node_${Date.now()}`;
                 addNodes({
@@ -1139,7 +1232,10 @@ const addImageNodeFromToolbar = () => {
                     position,
                     data: {
                         imageUrl,
-                        originalImageUrl: uploadRes.data.url,
+                        originalImageUrl: originalUrl,
+                        originalFilename: uploadRes.data.filename,
+                        imageAlias: alias,
+                        imageKey,
                     },
                 });
                 ElMessage.success('已添加图片节点');
@@ -1477,7 +1573,9 @@ const handleSaveTemplate = async () => {
     try {
         const workflowData = {
             nodes: getNodes.value,
-            edges: getEdges.value
+            edges: getEdges.value,
+            imageAliasCounter: imageAliasCounter.value,
+            imageAliasMap: imageAliasMap.value,
         };
         const payload = {
             name: saveForm.value.name,
@@ -1535,6 +1633,7 @@ const handleLoadTemplate = async (template: WorkflowTemplate) => {
         if (workflowData.nodes && workflowData.edges) {
             setNodes(workflowData.nodes);
             setEdges(workflowData.edges);
+            restoreImageAliasStateFromWorkflow(workflowData);
             ElMessage.success('模板加载成功');
             showLoadDialog.value = false;
         } else {
@@ -1584,6 +1683,7 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
         if (workflowData.nodes && workflowData.edges) {
             setNodes(workflowData.nodes);
             setEdges(workflowData.edges);
+            restoreImageAliasStateFromWorkflow(workflowData);
             ElMessage.success('历史记录恢复成功');
             showHistoryDialog.value = false;
         } else {
@@ -1616,10 +1716,15 @@ const startAutoSave = () => {
 
     autoSaveTimer = setInterval(async () => {
         try {
-            const workflowData = {
+            const workflowData: { nodes: any[]; edges: any[]; cover_image?: string; imageAliasCounter?: number; imageAliasMap?: Record<string, string> } = {
                 nodes: getNodes.value,
-                edges: getEdges.value
+                edges: getEdges.value,
+                imageAliasCounter: imageAliasCounter.value,
+                imageAliasMap: imageAliasMap.value,
             };
+
+            // 为自动保存补全封面：优先最后一张图片，其次画布截图
+            await ensureWorkflowCover(workflowData);
 
             // 只有在有节点时才保存；传入 currentHistoryId 则覆盖原记录，否则新建并在响应后回填 id
             if (workflowData.nodes.length > 0) {

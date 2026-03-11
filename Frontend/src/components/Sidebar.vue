@@ -41,6 +41,15 @@
         </div>
       </el-tooltip>
 
+      <el-tooltip content="设计稿检查工具" placement="right">
+        <div 
+          class="nav-item"
+          @click="openDesignChecker"
+        >
+          <el-icon :size="24"><Document /></el-icon>
+        </div>
+      </el-tooltip>
+
       <el-tooltip content="操作手册" placement="right">
         <div 
           class="nav-item"
@@ -98,6 +107,13 @@ const openHelpDoc = () => {
   } else {
     ElMessage.warning('暂未配置操作手册链接');
   }
+};
+
+const openDesignChecker = () => {
+  // 使用项目的 BASE_URL，指向 public 里的 DesignChecker.html
+  const base = import.meta.env.BASE_URL || '/';
+  const url = `${base}DesignChecker.html`;
+  window.open(url, '_blank');
 };
 
 onMounted(async () => {

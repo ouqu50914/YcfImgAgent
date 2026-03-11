@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设计稿检查工具</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/libarchive.js@1.3.0/dist/libarchive.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+*{box-sizing:border-box}
+body{font-family:'Noto Sans SC',sans-serif;background:#0f172a;color:#e2e8f0;margin:0;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+.card-pass{border-left:3px solid #22c55e;background:#052e16}
+.card-fail{border-left:3px solid #ef4444;background:#2d0a0a}
+.card-warn{border-left:3px solid #f59e0b;background:#2d1f00}
+.check-btn{background:linear-gradient(135deg,#3b82f6,#6366f1);transition:all .3s}
+.check-btn:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(59,130,246,.4)}
+.check-btn:disabled,.resize-btn:disabled{opacity:.5;transform:none;cursor:not-allowed}
+.resize-btn{background:linear-gradient(135deg,#10b981,#059669);transition:all .3s}
+.resize-btn:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(16,185,129,.4)}
+.dl-btn{background:rgba(59,130,246,.15);border:1px solid #3b82f6;color:#60a5fa;transition:all .2s}
+.dl-btn:hover{background:rgba(59,130,246,.25)}
+.glass{background:rgba(30,41,59,.8);backdrop-filter:blur(12px);border:1px solid #334155}
+.upload-zone{border:2px dashed #475569;border-radius:10px;transition:all .3s;cursor:pointer}
+.upload-zone:hover,.upload-zone.dragover{border-color:#3b82f6;background:rgba(59,130,246,.08)}
+.thumb-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.thumb-item{position:relative;width:68px;text-align:center}
+.thumb-item img{width:68px;height:68px;object-fit:cover;border-radius:6px;border:1px solid #334155}
+.thumb-item .fname{font-size:9px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:68px}
+.thumb-item .del-btn{position:absolute;top:-4px;right:-2px;background:#ef4444;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;line-height:14px;text-align:center;cursor:pointer;z-index:2;opacity:0;transition:opacity .2s}
+.thumb-item:hover .del-btn{opacity:1}
+.size-chip{display:inline-flex;align-items:center;gap:3px;background:#1e293b;border:1px solid #475569;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;margin:1px;transition:all .15s}
+.size-chip:hover{border-color:#10b981;background:#334155}
+.size-chip.sel{border-color:#10b981;background:rgba(16,185,129,.2);color:#34d399;font-weight:500}
+.unit-toggle{display:inline-flex;border:1px solid #475569;border-radius:5px;overflow:hidden}
+.unit-toggle button{padding:4px 10px;font-size:11px;cursor:pointer;border:none;background:#1e293b;color:#94a3b8}
+.unit-toggle button.active{background:#3b82f6;color:#fff}
+.fn-toggle{display:inline-flex;align-items:center;gap:5px;background:#1e293b;border:1px solid #475569;border-radius:7px;padding:5px 10px;font-size:11px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.fn-toggle:hover{border-color:#6366f1}
+.fn-toggle.active{border-color:#3b82f6;background:rgba(59,130,246,.15);color:#60a5fa}
+.fn-toggle .dot{width:6px;height:6px;border-radius:50%;background:#475569;transition:background .2s}
+.fn-toggle.active .dot{background:#3b82f6}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#475569;border-radius:2px}
+.log-entry{padding:2px 0;font-size:11px;border-bottom:1px solid rgba(30,41,59,.5)}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+.lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;border-radius:4px}
+.history-chip{display:inline-flex;align-items:center;gap:4px;background:#1e293b;border:1px solid #475569;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin:2px}
+.history-chip:hover{border-color:#3b82f6;background:#334155}
+.history-chip .del{color:#ef4444;cursor:pointer;margin-left:3px;font-size:9px}
+</style>
+</head>
+<body>
+<header class="flex-shrink-0 px-4 py-2 flex items-center justify-between border-b border-slate-700/50" style="background:rgba(15,23,42,.9)">
+  <div class="flex items-center gap-2"><div class="w-6 h-6 rounded bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-[10px]">A</div><h1 class="text-sm font-semibold">Design Checker</h1></div>
+  <div class="text-[10px] text-slate-600">v3.2</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+  <!-- LEFT -->
+  <aside class="flex-shrink-0 flex flex-col border-r border-slate-700/40 overflow-hidden" style="width:300px;min-width:280px">
+    <div class="p-3 flex-shrink-0">
+      <div class="flex items-center justify-between mb-2"><h2 class="text-xs font-semibold">📤 上传文件</h2><button id="clearBtn" onclick="clearUploads()" class="hidden text-[10px] text-slate-500 hover:text-red-400">🗑️ 清除</button></div>
+      <div class="upload-zone p-3 text-center" id="mainUploadZone"><div class="text-2xl mb-1">📁</div><p class="text-[11px] text-slate-400">拖拽或点击上传</p><input type="file" id="mainFileInput" class="hidden" multiple accept="image/*,.txt,.text,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.zip,.rar,.7z"><div class="flex justify-center gap-1 mt-1.5 text-[9px] text-slate-600"><span class="bg-slate-800/80 px-1.5 py-0.5 rounded">🖼️图片</span><span class="bg-slate-800/80 px-1.5 py-0.5 rounded">📄文档</span><span class="bg-slate-800/80 px-1.5 py-0.5 rounded">📦压缩包</span></div></div>
+      <div id="uploadInfo" class="hidden mt-2 text-[11px] text-slate-400"></div>
+    </div>
+    <div class="flex-1 overflow-y-auto px-3 pb-3"><div id="uploadThumbs" class="thumb-grid"></div><div id="emptyHint" class="text-center text-slate-600 text-xs py-8">暂无文件</div></div>
+  </aside>
+  <!-- RIGHT -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <!-- Function bar: all functions + buttons on right -->
+    <div class="flex-shrink-0 px-3 py-2 border-b border-slate-700/40">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs text-slate-500 mr-1">功能：</span>
+        <button class="fn-toggle" data-fn="size" onclick="toggleFn(this)"><span class="dot"></span>📐 尺寸检查</button>
+        <button class="fn-toggle" data-fn="filesize" onclick="toggleFn(this)"><span class="dot"></span>📦 大小检查</button>
+        <button class="fn-toggle" data-fn="typo" onclick="toggleFn(this)"><span class="dot"></span>✏️ 错别字</button>
+        <button class="fn-toggle" data-fn="simp" onclick="toggleFn(this)"><span class="dot"></span>🈳 繁中检查</button>
+        <button class="fn-toggle" data-fn="align" onclick="toggleFn(this)"><span class="dot"></span>🎯 居中检查</button>
+        <div class="ml-auto flex gap-2">
+          <button id="runBtn" onclick="runAllChecks()" class="check-btn px-4 py-1.5 rounded-lg text-white text-xs font-medium" disabled>▶ 开始检查</button>
+        </div>
+      </div>
+      <!-- Options -->
+      <div id="opt-size" class="hidden mt-2"><div class="glass rounded-lg p-2"><div class="flex flex-wrap gap-x-2 gap-y-0.5" id="presetSizes"></div><div class="border-t border-slate-700/50 pt-1 mt-1"><div class="flex gap-1 items-center"><input type="number" id="customW" placeholder="宽" class="bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-[10px] w-12"><span class="text-slate-600 text-[10px]">×</span><input type="number" id="customH" placeholder="高" class="bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-[10px] w-12"><button onclick="addCustomSize()" class="text-[9px] bg-blue-600 px-1.5 py-0.5 rounded hover:bg-blue-500">+添加</button></div><div class="mt-1" id="sizeHistoryArea"></div></div></div></div>
+      <div id="opt-filesize" class="hidden mt-2"><div class="glass rounded-lg p-2 flex items-center gap-2"><span class="text-[10px] text-slate-400">限制</span><input type="number" id="sizeLimit" value="5" min="1" class="bg-slate-800 border border-slate-600 rounded px-1.5 py-0.5 text-[10px] w-16"><div class="unit-toggle" id="checkUnitToggle"><button class="active" onclick="setUnit('MB',this)">MB</button><button onclick="setUnit('KB',this)">KB</button></div></div></div>
+      <div id="opt-typo" class="hidden mt-2"><div class="glass rounded-lg p-2"><p class="text-[10px] text-slate-400">常见中文错别字检查</p></div></div>
+      <div id="opt-simp" class="hidden mt-2"><div class="glass rounded-lg p-2"><p class="text-[10px] text-slate-400">主要适用于繁中版本的物料</p></div></div>
+      <div id="opt-align" class="hidden mt-2"><div class="glass rounded-lg p-2"><p class="text-[10px] text-slate-400">十字居中辅助虚线</p></div></div>
+    </div>
+    <!-- Results -->
+    <div class="flex-1 overflow-y-auto p-3" id="resultsWrapper" style="display:none">
+      <div class="flex items-center justify-between mb-2"><h2 class="text-xs font-semibold">📊 结果</h2><div id="dlAllArea"></div></div>
+      <div id="progressArea" class="glass rounded-lg p-2 mb-2"></div>
+      <div id="resultsContent"></div>
+    </div>
+    <div class="flex-1 flex items-center justify-center" id="emptyState"><div class="text-center text-slate-600"><div class="text-4xl mb-2 opacity-50">🔍</div><p class="text-sm">上传文件 → 选择功能 → 开始</p></div></div>
+  </main>
+</div>
+<script>
+let uploadedFiles=[],selectedFns=new Set(),fileUnit='MB';
+let customSizes=JSON.parse(localStorage.getItem('ds_cs')||'[]');
+const PS=[[1920,1080],[1280,720],[1080,640],[2208,1242],[2688,1242],[2732,2048],[1080,1920],[720,1280],[640,1080],[1242,2208],[1242,2688],[2048,2732],[900,383],[800,800],[1080,1080],[512,512],[2048,2048]];
+
+// Init preset checkboxes
+(function(){const el=document.getElementById('presetSizes');PS.forEach(([w,h])=>{el.innerHTML+=`<label class="flex items-center gap-1 text-xs cursor-pointer hover:bg-slate-700/50 py-0.5 px-1 rounded"><input type="checkbox" value="${w}x${h}" class="rounded"><span class="text-slate-300">${w}×${h}</span></label>`})})();
+
+// Toggle fn
+function toggleFn(btn){const fn=btn.dataset.fn;if(selectedFns.has(fn)){selectedFns.delete(fn);btn.classList.remove('active')}else{selectedFns.add(fn);btn.classList.add('active')}document.getElementById('opt-'+fn).classList.toggle('hidden',!selectedFns.has(fn));updateBtnStates()}
+function updateBtnStates(){
+  const hasCheck=selectedFns.has('size')||selectedFns.has('filesize')||selectedFns.has('typo')||selectedFns.has('simp')||selectedFns.has('align');
+  document.getElementById('runBtn').disabled=!hasCheck||!getAllImages().length;
+}
+function setUnit(u,btn){fileUnit=u;const inp=document.getElementById('sizeLimit');if(u==='MB'){inp.value=5;inp.step='0.1'}else{inp.value=5120;inp.step='1'}document.querySelectorAll('#checkUnitToggle button').forEach(b=>b.classList.remove('active'));btn.classList.add('active')}
+function addCustomSize(){const w=document.getElementById('customW').value,h=document.getElementById('customH').value;if(!w||!h)return;const s={w:+w,h:+h};if(customSizes.some(c=>c.w===s.w&&c.h===s.h))return;customSizes.push(s);localStorage.setItem('ds_cs',JSON.stringify(customSizes));renderSizeHistory();document.getElementById('customW').value='';document.getElementById('customH').value=''}
+function removeCustomSize(i){customSizes.splice(i,1);localStorage.setItem('ds_cs',JSON.stringify(customSizes));renderSizeHistory()}
+function renderSizeHistory(){const el=document.getElementById('sizeHistoryArea');el.innerHTML=customSizes.length?customSizes.map((s,i)=>`<span class="history-chip">${s.w}×${s.h}<span class="del" onclick="removeCustomSize(${i})">✕</span></span>`).join(''):''}
+renderSizeHistory();
+
+// Drag & Drop
+(function(){const zone=document.getElementById('mainUploadZone'),inp=document.getElementById('mainFileInput');let dc=0;zone.addEventListener('click',e=>{if(e.target.tagName!=='INPUT')inp.click()});zone.addEventListener('dragenter',e=>{e.preventDefault();e.stopPropagation();dc++;zone.classList.add('dragover')});zone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation()});zone.addEventListener('dragleave',e=>{e.preventDefault();e.stopPropagation();dc--;if(dc<=0){dc=0;zone.classList.remove('dragover')}});zone.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();dc=0;zone.classList.remove('dragover');if(e.dataTransfer.files.length)handleFiles(e.dataTransfer.files)});document.body.addEventListener('dragover',e=>e.preventDefault());document.body.addEventListener('drop',e=>{e.preventDefault();if(e.dataTransfer.files.length)handleFiles(e.dataTransfer.files)});inp.addEventListener('change',e=>{if(e.target.files.length)handleFiles(e.target.files);e.target.value=''})})();
+
+function clearUploads(){uploadedFiles=[];document.getElementById('uploadThumbs').innerHTML='';document.getElementById('uploadInfo').classList.add('hidden');document.getElementById('uploadInfo').innerHTML='';document.getElementById('clearBtn').classList.add('hidden');document.getElementById('resultsWrapper').style.display='none';document.getElementById('emptyState').style.display='flex';document.getElementById('progressArea').innerHTML='';document.getElementById('resultsContent').innerHTML='';document.getElementById('dlAllArea').innerHTML='';document.getElementById('emptyHint').style.display='block';updateBtnStates()}
+
+async function handleFiles(fileList){const info=document.getElementById('uploadInfo');document.getElementById('emptyHint').style.display='none';for(const file of fileList){const ext=file.name.split('.').pop().toLowerCase();const isImg=['jpg','jpeg','png','gif','bmp','webp','svg','tiff','tif'].includes(ext);const isDoc=['txt','text','xlsx','xls','docx','doc','pptx','ppt','csv'].includes(ext);const isArc=['zip','rar','7z'].includes(ext);if(isImg){uploadedFiles.push({name:file.name,type:'image',file,extractedImages:[file]})}else if(isDoc){uploadedFiles.push({name:file.name,type:'doc',file,extractedImages:[]})}else if(isArc){
+            if(file.size>300*1048576){info.classList.remove('hidden');info.innerHTML=`❌ ${file.name}: 超过300MB限制`;continue}
+            info.classList.remove('hidden');info.innerHTML=`📦 解压 ${file.name}...`;
+            const imgs=await extractArchive(file);
+            if(imgs.length>200){info.innerHTML=`❌ ${file.name}: 包含${imgs.length}张图片，超过200张限制`;continue}
+            if(imgs.length){uploadedFiles.push({name:file.name,type:'archive',file,extractedImages:imgs});info.innerHTML=`✅ ${file.name}: ${imgs.length} 张`}else{info.innerHTML=`⚠️ ${file.name}: 无图片`}}else{info.classList.remove('hidden');info.innerHTML=`⚠️ 不支持的格式`}}renderThumbs();document.getElementById('clearBtn').classList.remove('hidden');info.classList.remove('hidden');updateUI();updateBtnStates()}
+
+async function extractArchive(file){const IE=['jpg','jpeg','png','gif','bmp','webp','tiff','tif'];try{if(typeof Archive!=='undefined'){const ab=await file.arrayBuffer(),ar=await Archive.open(ab),ex=await ar.extractFiles(),imgs=[];for(const[p,d]of Object.entries(ex)){if(d instanceof Uint8Array){const e=p.split('.').pop().toLowerCase();if(IE.includes(e))imgs.push(new File([d],p.split('/').pop(),{type:'image/'+(e==='jpg'?'jpeg':e)}))}}if(imgs.length)return imgs}}catch(e){}if(file.name.split('.').pop().toLowerCase()==='zip'){try{const z=await JSZip.loadAsync(file),imgs=[];for(const[n,e]of Object.entries(z.files)){if(e.dir)continue;const x=n.split('.').pop().toLowerCase();if(IE.includes(x)){const b=await e.async('blob');imgs.push(new File([b],n.split('/').pop(),{type:b.type}))}}return imgs}catch(e){}}return[]}
+
+function renderThumbs(){const el=document.getElementById('uploadThumbs');el.innerHTML='';uploadedFiles.forEach((f,fi)=>{(f.extractedImages||[]).forEach((img,ii)=>{const d=document.createElement('div');d.className='thumb-item';d.innerHTML=`<span class="del-btn" onclick="event.stopPropagation();removeFile(${fi},${ii})">✕</span><img src="${URL.createObjectURL(img)}" style="cursor:zoom-in" onclick="showLightbox(this.src)"><div class="fname" title="${img.name}">${img.name}</div>`;el.appendChild(d)});if(f.type==='doc'){const d=document.createElement('div');d.className='thumb-item';const ic=f.name.match(/xlsx|xls|csv/)?'📊':f.name.match(/docx|doc/)?'📝':'📄';d.innerHTML=`<span class="del-btn" onclick="removeFile(${fi},-1)">✕</span><div style="width:68px;height:68px;border-radius:6px;border:1px solid #334155;display:flex;align-items:center;justify-content:center;font-size:22px;background:#1e293b">${ic}</div><div class="fname" title="${f.name}">${f.name}</div>`;el.appendChild(d)}})}
+function removeFile(fi,ii){if(ii>=0){uploadedFiles[fi].extractedImages.splice(ii,1);if(!uploadedFiles[fi].extractedImages.length)uploadedFiles.splice(fi,1)}else{uploadedFiles.splice(fi,1)}renderThumbs();updateUI();updateBtnStates();if(!uploadedFiles.length){document.getElementById('clearBtn').classList.add('hidden');document.getElementById('emptyHint').style.display='block';document.getElementById('resultsWrapper').style.display='none';document.getElementById('emptyState').style.display='flex'}}
+function updateUI(){if(!uploadedFiles.length){document.getElementById('uploadInfo').classList.add('hidden');return}const ic=uploadedFiles.reduce((s,f)=>s+(f.extractedImages?.length||0),0);document.getElementById('uploadInfo').classList.remove('hidden');document.getElementById('uploadInfo').innerHTML=`<p>${uploadedFiles.length} 个文件 · ${ic} 张图片</p>`}
+
+function getImageData(f){return new Promise(r=>{const i=new Image(),u=URL.createObjectURL(f);i.onload=()=>r({img:i,url:u,w:i.naturalWidth,h:i.naturalHeight});i.src=u})}
+async function parseDoc(f){const x=f.name.split('.').pop().toLowerCase();if(['txt','text','csv'].includes(x))return await f.text();if(['xlsx','xls'].includes(x)){const a=await f.arrayBuffer(),w=XLSX.read(a,{type:'array'});let t='';w.SheetNames.forEach(s=>{t+=XLSX.utils.sheet_to_txt(w.Sheets[s])+'\n'});return t}if(['docx','doc'].includes(x)){const r=await mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()});return r.value}return''}
+function getAllImages(){const a=[];uploadedFiles.forEach(f=>{(f.extractedImages||[]).forEach(i=>a.push(i))});return a}
+function getAllDocs(){return uploadedFiles.filter(f=>f.type==='doc').map(f=>f.file)}
+function addLog(m,t='info'){const el=document.getElementById('progressArea'),c={info:'text-blue-400',ok:'text-green-400',warn:'text-amber-400',err:'text-red-400'};el.innerHTML+=`<div class="log-entry ${c[t]||c.info}">${m}</div>`}
+function showLightbox(src){const lb=document.createElement('div');lb.className='lightbox';lb.onclick=()=>lb.remove();lb.innerHTML=`<img src="${src}">`;document.body.appendChild(lb)}
+function dlBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
+function showResults(){document.getElementById('resultsWrapper').style.display='block';document.getElementById('emptyState').style.display='none'}
+
+// ====== Run check functions ======
+async function runAllChecks(){showResults();document.getElementById('progressArea').innerHTML='';document.getElementById('resultsContent').innerHTML='';document.getElementById('dlAllArea').innerHTML='';document.getElementById('runBtn').disabled=true;const ck=[];if(selectedFns.has('size'))ck.push(runSizeCheck());if(selectedFns.has('filesize'))ck.push(runFileSizeCheck());if(selectedFns.has('typo'))ck.push(runTypoCheck());if(selectedFns.has('simp'))ck.push(runSimpCheck());if(selectedFns.has('align'))ck.push(runAlignCheck());await Promise.allSettled(ck);addLog('✅ 检查完成','ok');document.getElementById('runBtn').disabled=false}
+
+// ====== Size Check ======
+async function runSizeCheck(){addLog('📐 尺寸检查...');const imgs=getAllImages(),docs=getAllDocs();if(!imgs.length){addLog('⚠️ 无图片','warn');return}const tg=[];document.querySelectorAll('#presetSizes input:checked').forEach(c=>{const[w,h]=c.value.split('x').map(Number);tg.push({label:w+'×'+h,w,h})});customSizes.forEach(s=>tg.push({label:`${s.w}×${s.h}`,w:s.w,h:s.h}));for(const d of docs){const t=await parseDoc(d);parseDocSizes(t).forEach(s=>tg.push({label:`文档${s.w}×${s.h}`,w:s.w,h:s.h}))}if(!tg.length){addLog('⚠️ 未选尺寸','warn');return}let h='<div class="glass rounded-lg p-2.5 mb-3"><h3 class="font-medium mb-2 text-xs">📐 尺寸检查</h3>';for(const f of imgs){const d=await getImageData(f);const ck=tg.map(t=>{const p=d.w===t.w&&d.h===t.h;return`<div class="flex items-center gap-1.5 text-[11px] py-px"><span class="${p?'text-green-400':'text-red-400'}">${p?'✅':'❌'}</span><span class="text-slate-400">${t.label}</span></div>`}).join('');const ap=tg.some(t=>d.w===t.w&&d.h===t.h);h+=`<div class="${ap?'card-pass':'card-fail'} rounded p-2 mb-1.5"><div class="flex items-center gap-2 mb-1"><img src="${d.url}" class="w-9 h-9 object-cover rounded border border-slate-600 cursor-zoom-in" onclick="showLightbox(this.src)"><div><div class="font-medium text-[11px]">${f.name}</div><div class="text-slate-500 text-[10px]">${d.w}×${d.h}</div></div></div>${ck}</div>`}h+='</div>';document.getElementById('resultsContent').innerHTML+=h;addLog('📐 尺寸检查完成','ok')}
+function parseDocSizes(t){const s=[],p=[/(\d{3,5})\s*[x×X*]\s*(\d{3,5})/g];p.forEach(r=>{let m;while((m=r.exec(t))!==null)s.push({w:+m[1],h:+m[2]})});return[...new Map(s.map(x=>[x.w+'x'+x.h,x])).values()]}
+
+// ====== File Size Check ======
+async function runFileSizeCheck(){addLog('📦 大小检查...');const imgs=getAllImages();if(!imgs.length){addLog('⚠️ 无图片','warn');return}const lim=parseFloat(document.getElementById('sizeLimit').value);let h='<div class="glass rounded-lg p-2.5 mb-3"><h3 class="font-medium mb-2 text-xs">📦 大小检查</h3>';for(const f of imgs){const v=fileUnit==='MB'?f.size/1048576:f.size/1024;const p=v<=lim;h+=`<div class="${p?'card-pass':'card-fail'} rounded p-2 mb-1.5"><div class="flex items-center justify-between"><div><div class="font-medium text-[11px]">${f.name}</div><div class="text-slate-500 text-[10px]">${(f.size/1024).toFixed(1)} KB</div></div><div class="text-right"><div class="text-[11px] ${p?'text-green-400':'text-red-400'}">${v.toFixed(fileUnit==='MB'?2:0)} ${fileUnit}</div><div class="text-[10px] text-slate-600">≤ ${lim} ${fileUnit}</div></div></div>${!p?`<div class="mt-1.5"><div class="w-full bg-slate-700 rounded-full h-1.5"><div class="bg-red-500 h-1.5 rounded-full" style="width:${Math.min(100,v/lim*100)}%"></div></div><p class="text-red-400 text-[10px] mt-0.5">超出 ${(v-lim).toFixed(fileUnit==='MB'?2:0)} ${fileUnit}</p></div>`:''}</div>`}h+='</div>';document.getElementById('resultsContent').innerHTML+=h;addLog('📦 大小检查完成','ok')}
+
+// ====== Typo Check ======
+async function runTypoCheck(){addLog('✏️ 错别字检查...');const imgs=getAllImages();if(!imgs.length){addLog('⚠️ 无图片','warn');return}const D=[['按装','安装'],['想像','想象'],['报歉','抱歉'],['必竟','毕竟'],['粗旷','粗犷'],['凑和','凑合'],['出奇不意','出其不意'],['穿流不息','川流不息'],['刺刺不休','喋喋不休'],['拨出','播出'],['查颜观色','察言观色'],['冲满','充满'],['大才小用','大材小用'],['大有做为','大有作为'],['带罪立功','戴罪立功'],['鬼计多端','诡计多端'],['合衣而卧','和衣而卧'],['皇天厚土','皇天后土'],['混身是汗','浑身是汗'],['火中取粟','火中取栗'],['既使','即使'],['金壁辉煌','金碧辉煌'],['零乱','凌乱'],['罗唆','啰嗦'],['漫延','蔓延'],['貌和神离','貌合神离'],['明片','名片'],['偶而','偶尔'],['迫不急待','迫不及待'],['善长','擅长'],['身分','身份'],['收查','搜查'],['树稍','树梢'],['水笼头','水龙头'],['肆业','肄业'],['塌实','踏实'],['妥贴','妥帖'],['文身','纹身'],['陷井','陷阱'],['消毁','销毁'],['肖象','肖像'],['修茸','修葺'],['宣染','渲染'],['眩耀','炫耀'],['演义','演绎'],['因该','应该'],['引见','引荐'],['尤如','犹如'],['予告','预告'],['源远流常','源远流长'],['帐幕','帐篷'],['震憾','震撼'],['争扎','挣扎'],['装璜','装潢'],['追朔','追溯'],['姿意','恣意'],['遵寻','遵循'],['名符其实','名副其实'],['一如继往','一如既往'],['大声急呼','大声疾呼'],['再接再励','再接再厉'],['记忆尤新','记忆犹新'],['走头无路','走投无路'],['世外桃园','世外桃源'],['中流抵柱','中流砥柱'],['鸠占雀巢','鸠占鹊巢'],['金榜提名','金榜题名'],['默守成规','墨守成规'],['情不自尽','情不自禁'],['山青水秀','山清水秀'],['仗义直言','仗义执言']];let h='<div class="glass rounded-lg p-2.5 mb-3"><h3 class="font-medium mb-2 text-xs">✏️ 错别字检查</h3>';for(const f of imgs){addLog(` 识别: ${f.name}...`);try{const r=await Tesseract.recognize(f,'chi_sim+eng',{});const txt=r.data.text;let fd=[];D.forEach(([w,ri])=>{let i=-1;while((i=txt.indexOf(w,i+1))!==-1){const s=Math.max(0,i-10),e=Math.min(txt.length,i+w.length+10);fd.push({f:w,s:ri,c:txt.substring(s,e).replace(/\n/g,' ')})}});h+=`<div class="glass rounded p-2 mb-1.5"><div class="flex items-center gap-2 mb-1"><img src="${URL.createObjectURL(f)}" class="w-8 h-8 object-cover rounded cursor-zoom-in" onclick="showLightbox(this.src)"><span class="font-medium text-[11px]">${f.name}</span><span class="text-[10px] text-slate-500">${txt.length}字</span></div>`;if(fd.length){h+=`<div class="card-fail rounded p-1.5 mb-1"><p class="text-[10px] font-medium mb-0.5">❌ ${fd.length} 处疑似错别字</p>`;fd.forEach(x=>{h+=`<div class="flex items-center gap-1.5 text-[11px] py-px flex-wrap"><span class="text-red-400 font-mono bg-red-900/30 px-1 rounded">${x.f}</span><span class="text-slate-600">→</span><span class="text-green-400 font-mono bg-green-900/30 px-1 rounded">${x.s}</span>${x.c?`<span class="text-slate-600 text-[10px]">「…${x.c}…」</span>`:''}</div>`});h+=`</div>`}else{h+=`<div class="card-pass rounded p-1.5"><p class="text-[11px]">✅ 未发现错别字</p></div>`}h+=`</div>`}catch(e){h+=`<div class="card-fail rounded p-2 mb-1.5 text-[11px]">${f.name}: 失败</div>`;addLog(`❌ ${f.name} 失败`,'err')}}h+='</div>';document.getElementById('resultsContent').innerHTML+=h;addLog('✏️ 错别字检查完成','ok')}
+
+// ====== Simplified Chinese Check ======
+async function runSimpCheck(){addLog('🈳 繁中检查...');const imgs=getAllImages();if(!imgs.length){addLog('⚠️ 无图片','warn');return}const SM=new Map([['这','這'],['说','說'],['个','個'],['们','們'],['对','對'],['开','開'],['时','時'],['无','無'],['会','會'],['现','現'],['资','資'],['机','機'],['经','經'],['体','體'],['产','產'],['万','萬'],['关','關'],['点','點'],['义','義'],['团','團'],['虽','雖'],['长','長'],['营','營'],['杂','雜'],['历','歷'],['处','處'],['县','縣'],['务','務'],['设','設'],['质','質'],['线','線'],['准','準'],['备','備'],['强','強'],['让','讓'],['权','權'],['干','幹'],['亚','亞'],['欧','歐'],['远','遠'],['听','聽'],['丰','豐'],['养','養'],['触','觸'],['验','驗'],['职','職'],['网','網'],['欢','歡'],['离','離'],['双','雙'],['际','際'],['岁','歲'],['层','層'],['显','顯'],['额','額'],['节','節'],['续','續'],['观','觀'],['边','邊'],['护','護'],['证','證'],['响','響'],['弹','彈'],['龄','齡'],['确','確'],['龙','龍'],['积','積'],['运','運'],['币','幣'],['脸','臉'],['应','應'],['东','東'],['电','電'],['动','動'],['学','學'],['书','書'],['过','過'],['还','還'],['来','來'],['去','去'],['国','國'],['场','場'],['济','濟'],['争','爭'],['达','達'],['险','險'],['顾','顧'],['卫','衛'],['风','風'],['飞','飛'],['马','馬'],['鱼','魚'],['鸟','鳥'],['龟','龜'],['齐','齊'],['寿','壽'],['将','將'],['专','專'],['门','門'],['问','問'],['间','間'],['阅','閱'],['进','進'],['连','連'],['选','選'],['适','適'],['艺','藝'],['势','勢'],['实','實'],['审','審'],['宪','憲'],['庆','慶'],['广','廣'],['庄','莊'],['庙','廟'],['庞','龐'],['庐','廬'],['库','庫'],['导','導'],['尝','嘗'],['总','總'],['战','戰'],['戏','戲'],['户','戸'],['卢','盧'],['录','錄'],['寻','尋'],['灵','靈'],['当','當'],['归','歸'],['尘','塵'],['坚','堅'],['觉','覺'],['览','覽'],['宝','寶'],['卖','賣'],['参','參']]);const CS=new Set(SM.keys());let h='<div class="glass rounded-lg p-2.5 mb-3"><h3 class="font-medium mb-2 text-xs">🈳 繁中检查</h3>';for(const f of imgs){addLog(` 识别: ${f.name}...`);try{const r=await Tesseract.recognize(f,'chi_sim+eng',{});const txt=r.data.text;const sf=new Map();for(const ch of txt){if(CS.has(ch)&&!sf.has(ch))sf.set(ch,SM.get(ch))}h+=`<div class="glass rounded p-2 mb-1.5"><div class="flex items-center gap-2 mb-1"><img src="${URL.createObjectURL(f)}" class="w-8 h-8 object-cover rounded cursor-zoom-in" onclick="showLightbox(this.src)"><span class="font-medium text-[11px]">${f.name}</span><span class="text-[10px] text-slate-500">${txt.length}字</span></div>`;if(sf.size){h+=`<div class="card-warn rounded p-1.5 mb-1"><p class="text-[10px] font-medium mb-0.5">⚠️ ${sf.size} 个简体字（建议替换为繁体）</p><div class="flex flex-wrap gap-1">${[...sf.entries()].map(([sp,tr])=>`<span class="text-amber-400 font-mono bg-amber-900/30 px-1 py-px rounded text-[11px]" title="→${tr}">${sp}</span>`).join('')}</div></div>`}else{h+=`<div class="card-pass rounded p-1.5"><p class="text-[11px]">✅ 未发现简体字</p></div>`}h+=`</div>`}catch(e){h+=`<div class="card-fail rounded p-2 mb-1.5 text-[11px]">${f.name}: 失败</div>`;addLog(`❌ ${f.name} 失败`,'err')}}h+='</div>';document.getElementById('resultsContent').innerHTML+=h;addLog('🈳 繁中检查完成','ok')}
+
+// ====== Align Check ======
+async function runAlignCheck(){addLog('🎯 居中检查...');const imgs=getAllImages();if(!imgs.length){addLog('⚠️ 无图片','warn');return}let h='<div class="glass rounded-lg p-2.5 mb-3"><h3 class="font-medium mb-2 text-xs">🎯 居中检查</h3>';for(const f of imgs){const d=await getImageData(f);const c=document.createElement('canvas'),ctx=c.getContext('2d');c.width=d.w;c.height=d.h;ctx.drawImage(d.img,0,0);ctx.strokeStyle='rgba(255,68,68,0.8)';ctx.lineWidth=Math.max(2,Math.round(Math.max(d.w,d.h)/500));ctx.setLineDash([12,8]);ctx.beginPath();ctx.moveTo(d.w/2,0);ctx.lineTo(d.w/2,d.h);ctx.stroke();ctx.beginPath();ctx.moveTo(0,d.h/2);ctx.lineTo(d.w,d.h/2);ctx.stroke();ctx.setLineDash([]);const du=c.toDataURL('image/png');h+=`<div class="glass rounded p-2 mb-1.5"><div class="flex items-center gap-2 mb-1"><img src="${d.url}" class="w-8 h-8 object-cover rounded cursor-zoom-in" onclick="showLightbox(this.src)"><span class="font-medium text-[11px]">${f.name}</span><span class="text-[10px] text-slate-500">${d.w}×${d.h}</span><span class="text-[10px] text-blue-400 cursor-pointer hover:text-blue-300 ml-auto" onclick="showLightbox('${du}')">🔍 放大</span></div><div class="flex justify-center"><img src="${du}" style="max-width:400px;width:100%;border-radius:6px;border:1px solid #334155;cursor:zoom-in" onclick="showLightbox('${du}')"></div></div>`}h+='</div>';document.getElementById('resultsContent').innerHTML+=h;addLog('🎯 居中检查完成','ok')}
+</script>
+</body>
+</html>

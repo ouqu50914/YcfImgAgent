@@ -126,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Grid, CircleCheck } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
@@ -138,9 +138,15 @@ defineEmits<{
     updateNodeInternals: [];
 }>();
 
+type ImageAliasStore = {
+    getOrCreateAlias: (imageKey: string) => string;
+    getAllAliases: () => { key: string; alias: string }[];
+};
+
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const userStore = useUserStore();
 
 // 图层分离使用 Dream API，固定 1 积分
@@ -277,6 +283,9 @@ const createLayerNodes = async () => {
         const nodeId = `layer_node_${Date.now()}_${i}`;
         const edgeId = `edge_layer_${Date.now()}_${i}`;
 
+        const imageKey: string = layer.url;
+        const alias = imageAliasStore?.getOrCreateAlias(imageKey) ?? '';
+
         // 创建图片节点
         addNodes({
             id: nodeId,
@@ -289,7 +298,9 @@ const createLayerNodes = async () => {
                 imageUrl: layer.url,
                 name: layer.name,
                 prompt: prompt.value || '图层分离',
-                originalImageUrl: layer.url.includes('/uploads/') ? layer.url : ''
+                originalImageUrl: layer.url.includes('/uploads/') ? layer.url : '',
+                imageAlias: alias,
+                imageKey,
             }
         });
 
@@ -337,7 +348,6 @@ const previewLayer = (url: string) => {
 
 .node-content {
     padding: 14px 16px;
-    border-bottom: 1px solid #404040;
     color: #e0e0e0;
 }
 

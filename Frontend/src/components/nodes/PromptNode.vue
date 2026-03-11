@@ -7,10 +7,10 @@
       
       <div class="node-content">
             <div class="prompt-content nodrag">
-        <el-input
+                <el-input
                     ref="promptInputRef"
-          v-model="text"
-          type="textarea"
+                    v-model="text"
+                    type="textarea"
                     :autosize="{ minRows: 6, maxRows: 12 }"
                     placeholder="请输入提示词..."
                     class="prompt-input"
@@ -34,6 +34,24 @@
                     >
                         <span class="suggestion-dot"></span>
                         <span class="suggestion-name">{{ template.name || '未命名提示词' }}</span>
+                    </div>
+                </div>
+
+                <!-- 图片别名 @ 图列表 -->
+                <div
+                    v-if="showAliasSuggestions && aliasSuggestions.length > 0"
+                    class="prompt-suggestions alias-suggestions"
+                >
+                    <div
+                        v-for="(item, index) in aliasSuggestions"
+                        :key="item.key"
+                        class="suggestion-item"
+                        :class="{ active: selectedAliasIndex === index }"
+                        @click="selectImageAlias(item)"
+                        @mouseenter="selectedAliasIndex = index"
+                    >
+                        <span class="suggestion-dot"></span>
+                        <span class="suggestion-name">{{ '@' + item.alias }}</span>
                     </div>
                 </div>
             </div>
@@ -122,26 +140,53 @@
     </el-dialog>
   </template>
   
-  <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
-  import { Handle, Position, type NodeProps } from '@vue-flow/core';
-  import { EditPen } from '@element-plus/icons-vue';
+<script setup lang="ts">
+import { ref, watch, computed, onMounted, onUnmounted, inject, nextTick } from 'vue';
+import { Handle, Position, type NodeProps } from '@vue-flow/core';
+import { EditPen } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
-  
-  const props = defineProps<NodeProps>();
-  const text = ref(props.data?.text || '');
-  
-// 同步输出数据
-  watch(text, (val) => {
-    props.data.text = val;
-  });
+
+// 声明 Vue Flow 会注入的事件，避免控制台出现 updateNodeInternals 的警告
+defineEmits<{
+  updateNodeInternals: [];
+}>();
+
+type ImageAliasStore = {
+    getOrCreateAlias: (imageKey: string) => string;
+    getAllAliases: () => { key: string; alias: string }[];
+};
+
+const props = defineProps<NodeProps>();
+const text = ref(props.data?.text || '');
+
+// 当内部输入变化时，同步到节点数据
+watch(text, (val) => {
+  props.data.text = val;
+});
+
+// 当从历史记录 / 模板加载时，节点 data.text 可能先于组件创建好，这里反向同步到本地 text
+watch(
+  () => props.data?.text,
+  (val) => {
+    if (typeof val === 'string' && val !== text.value) {
+      text.value = val;
+    }
+  },
+  { immediate: true }
+);
 
 // 提示词模板相关
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
 const selectedSuggestionIndex = ref(0);
 const promptInputRef = ref<any>(null);
+
+// 图片别名 @图1 自动补全
+const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
+const showAliasSuggestions = ref(false);
+const aliasSuggestions = ref<{ key: string; alias: string }[]>([]);
+const selectedAliasIndex = ref(0);
 
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
@@ -174,20 +219,63 @@ const loadPromptTemplates = async () => {
 const handlePromptInput = () => {
     props.data.text = text.value;
 
-    // 有 / 时显示下拉
-    const currentValue = text.value;
+    const currentValue = text.value || '';
     const slashIndex = currentValue.lastIndexOf('/');
-    if (slashIndex !== -1) {
-        // 只有当 / 位于末尾或后面跟关键词时才显示
+    const atIndex = currentValue.lastIndexOf('@');
+
+    // / 模板提示
+    if (slashIndex !== -1 && (slashIndex > atIndex)) {
         showPromptSuggestions.value = filteredTemplates.value.length > 0;
         selectedSuggestionIndex.value = 0;
     } else {
         showPromptSuggestions.value = false;
     }
+
+    // @ 图片别名提示（仅当注入存在时）
+    if (imageAliasStore && atIndex !== -1 && atIndex >= 0) {
+        const keyword = currentValue.slice(atIndex + 1).trim();
+        const all = imageAliasStore.getAllAliases();
+        const list = all.filter(item =>
+            !keyword ||
+            item.alias.includes(keyword)
+        );
+        showAliasSuggestions.value = list.length > 0;
+        aliasSuggestions.value = list;
+        selectedAliasIndex.value = 0;
+    } else {
+        showAliasSuggestions.value = false;
+        aliasSuggestions.value = [];
+    }
 };
 
 // 处理键盘事件
 const handlePromptKeydown = (event: KeyboardEvent) => {
+    // 图片别名选择优先
+    if (showAliasSuggestions.value && aliasSuggestions.value.length > 0) {
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            selectedAliasIndex.value = Math.min(
+                selectedAliasIndex.value + 1,
+                aliasSuggestions.value.length - 1
+            );
+            return;
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            selectedAliasIndex.value = Math.max(selectedAliasIndex.value - 1, 0);
+            return;
+        } else if (event.key === 'Enter' && !event.shiftKey) {
+            const selected = aliasSuggestions.value[selectedAliasIndex.value];
+            if (selected) {
+                event.preventDefault();
+                selectImageAlias(selected);
+                return;
+            }
+        } else if (event.key === 'Escape') {
+            showAliasSuggestions.value = false;
+            return;
+        }
+    }
+
     if (showPromptSuggestions.value && filteredTemplates.value.length > 0) {
         if (event.key === 'ArrowDown') {
             event.preventDefault();
@@ -225,6 +313,44 @@ const selectPromptTemplate = (template: PromptTemplate) => {
     if (promptInputRef.value) {
         promptInputRef.value.focus();
     }
+};
+
+// 图片别名选择，将最后一个 @xxx 替换为 @图1 之类
+const selectImageAlias = (item: { key: string; alias: string }) => {
+    const currentPrompt = text.value || '';
+    const atIndex = currentPrompt.lastIndexOf('@');
+    const aliasText = `@${item.alias}`;
+
+    if (atIndex === -1) {
+        text.value = `${currentPrompt}${currentPrompt ? ' ' : ''}${aliasText}`;
+    } else {
+        const before = currentPrompt.slice(0, atIndex);
+        // 保留 @ 后到光标的内容由 handlePromptInput 控制，这里直接整体替换成别名
+        const textareaEl = getTextareaEl();
+        const cursorPos = textareaEl?.selectionStart ?? currentPrompt.length;
+        const between = currentPrompt.slice(atIndex, cursorPos);
+        const after = currentPrompt.slice(cursorPos);
+        const replacePrefix = between.startsWith('@') ? before : `${before}@`;
+        text.value = `${replacePrefix}${item.alias}${after}`;
+    }
+
+    props.data.text = text.value;
+    showAliasSuggestions.value = false;
+
+    nextTick(() => {
+        const textareaEl = getTextareaEl();
+        if (textareaEl) {
+            const pos = text.value.lastIndexOf(item.alias) + item.alias.length + 1; // 包含 @
+            textareaEl.setSelectionRange(pos, pos);
+            textareaEl.focus();
+        }
+    });
+};
+
+const getTextareaEl = (): HTMLTextAreaElement | null => {
+    const comp = promptInputRef.value as any;
+    if (!comp) return null;
+    return comp.textarea || comp.$refs?.textarea || null;
 };
 
 // 保存提示词

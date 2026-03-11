@@ -123,7 +123,7 @@ const filePreviewUrls = ref<string[]>([]);
 const showModelDropdown = ref(false);
 
 const models = [
-  { label: 'Nano Banana Pro', value: 'nano' },
+  { label: 'Nano Banana', value: 'nano' },
   { label: 'Dream AI', value: 'dream' },
 ];
 

@@ -49,7 +49,7 @@ export class PromptService {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${API_KEY}`
                     },
-                    timeout: 30000
+                    timeout: 1800000
                 }
             );
 

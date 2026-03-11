@@ -15,7 +15,8 @@ import adminRoutes from "./routes/admin.routes";
 import promptRoutes from "./routes/prompt.routes";
 import layerRoutes from "./routes/layer.routes";
 import workflowRoutes from "./routes/workflow.routes";
-
+import videoRoutes from "./routes/video.routes";
+import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 
 dotenv.config();
 
@@ -66,8 +67,20 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/prompt", promptRoutes);
 app.use("/api/layer", layerRoutes);
 app.use("/api/workflow", workflowRoutes);
-// 静态资源托管 (用于前端访问生成的图片)
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use("/api/video", videoRoutes);
+
+// 静态资源 / 腾讯云 COS 预签名重定向
+app.use("/uploads", (req, res, next) => {
+    if ((req.method !== "GET" && req.method !== "HEAD") || !isCosEnabled()) {
+        return next();
+    }
+    const key = pathToKey("/uploads" + (req.path === "/" ? "" : req.path));
+    if (!key) return next();
+    getSignedUrl(key, 3600)
+        .then((url) => res.redirect(302, url))
+        .catch(() => next());
+});
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 
 // 公开/收藏模板 14 天后过期删除（每天执行一次）

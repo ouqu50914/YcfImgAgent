@@ -6,7 +6,7 @@ import router from '@/router';
 // 创建 axios 实例
 const service = axios.create({
   baseURL: '/api', // 走 vite 代理，指向 http://localhost:3000/api
-  timeout: 120000, // 图片生成可能需要较长时间，设置为120秒
+  timeout: 1800000, // 统一超时时间为30分钟
 });
 
 // 存储待重试的请求

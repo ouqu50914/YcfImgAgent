@@ -17,8 +17,8 @@
                     <div class="param-label">模型</div>
                     <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
                         <el-option label="Seedream" value="dream" />
-                        <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
-                        <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
+                        <el-option label="Nano Banana 2" value="nano:nano-banana-2" />
+                        <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
                     </el-select>
                 </div>
 
@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { ZoomIn, CircleCheck } from '@element-plus/icons-vue';
 import { upscaleImage } from '../../api/image';
@@ -115,9 +115,15 @@ defineEmits<{
     updateNodeInternals: [];
 }>();
 
+type ImageAliasStore = {
+    getOrCreateAlias: (imageKey: string) => string;
+    getAllAliases: () => { key: string; alias: string }[];
+};
+
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
+const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const userStore = useUserStore();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
@@ -127,10 +133,8 @@ const apiType = computed<'dream' | 'nano'>(() => {
     return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
 });
 const nanoModel = computed<string | undefined>(() => {
-    if (selectedModel.value.startsWith('nano:')) {
-        return selectedModel.value.split(':')[1];
-    }
-    return undefined;
+    if (!selectedModel.value.startsWith('nano:')) return undefined;
+    return selectedModel.value.split(':')[1];
 });
 
 const executeCost = computed(() => getCreditCost(apiType.value, 'upscale'));
@@ -219,6 +223,8 @@ const handleUpscale = async () => {
             params.model = nanoModel.value;
         }
 
+        console.log('[前端 UpscaleNode] 调用 upscaleImage，参数:', params);
+
         const res: any = await upscaleImage(params);
 
         if (res.data && res.data.image_url) {
@@ -262,6 +268,9 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
     const nodeId = `image_node_${Date.now()}`;
     const edgeId = `edge_${Date.now()}`;
 
+    const imageKey: string = originalUrl || fullUrl;
+    const alias = imageAliasStore?.getOrCreateAlias(imageKey) ?? '';
+
     // 创建图片节点
     addNodes({
         id: nodeId,
@@ -274,7 +283,9 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
             imageUrl: fullUrl,
             prompt: props.data?.prompt || '图片放大',
             // 保存原始URL（相对路径）供后续使用
-            originalImageUrl: originalUrl
+            originalImageUrl: originalUrl,
+            imageAlias: alias,
+            imageKey,
         }
     });
 
@@ -315,7 +326,6 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 
 .node-content {
     padding: 14px 16px;
-    border-bottom: 1px solid #404040;
     color: #e0e0e0;
 }
 

@@ -14,8 +14,8 @@
                     <div class="param-label">模型</div>
                     <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
                         <el-option label="Seedream" value="dream" />
-                        <el-option label="Nano Banana" value="nano:gemini-2.5-flash-image" />
-                        <el-option label="Nano Banana Pro" value="nano:gemini-3-pro-image-preview" />
+                        <el-option label="Nano Banana 2" value="nano:nano-banana-2" />
+                        <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
                     </el-select>
                 </div>
 
@@ -169,26 +169,33 @@ const executeButtonText = computed(() => {
     return `${base} (消耗 ${executeCost.value} 积分)`;
 });
 
-// 统一的模型选择：dream 或 nano:model-name 格式
-const selectedModel = ref<string>(props.data?.apiType === 'nano' 
-    ? 'nano:gemini-2.5-flash-image' 
-    : (props.data?.apiType || 'dream'));
-const quality = ref('2K');
-const aspectRatio = ref('1:1'); // 使用比例字符串格式
-const numImages = ref(1);
+// 统一的模型选择：dream 或 nano 子模型（nano-banana-2 / nano-banana-pro）
+const initialSelectedModel = (() => {
+    if (props.data?.apiType === 'nano') {
+        const m = (props.data as any).model as string | undefined;
+        if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
+        if (m === 'nano-banana-2') return 'nano:nano-banana-2';
+        // 默认使用 nano-banana-2
+        return 'nano:nano-banana-2';
+    }
+    return (props.data?.apiType || 'dream') as string;
+})();
+// 从节点数据初始化本地状态，保证从历史/模板加载时能恢复
+const selectedModel = ref<string>(initialSelectedModel);
+const quality = ref<string>((props.data as any)?.quality || '2K');
+const aspectRatio = ref<string>((props.data as any)?.aspectRatio || '1:1'); // 使用比例字符串格式
+const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number' ? (props.data as any).numImages : 1);
 
-// 计算属性：从 selectedModel 中提取 apiType
+// 计算属性：apiType 由 selectedModel 推导
 const apiType = computed<'dream' | 'nano'>(() => {
     return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
 });
 
-// 计算属性：从 selectedModel 中提取 nano 模型名称
-const nanoModel = computed<'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview' | undefined>(() => {
-    if (selectedModel.value.startsWith('nano:')) {
-        const model = selectedModel.value.split(':')[1];
-        return model as 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
-    }
-    return undefined;
+// 计算属性：从 selectedModel 中提取具体的 nano 模型
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | undefined>(() => {
+    if (!selectedModel.value.startsWith('nano:')) return undefined;
+    const parts = selectedModel.value.split(':');
+    return parts[1] as 'nano-banana-2' | 'nano-banana-pro';
 });
 
 // toast 去重，避免频繁提示
@@ -199,16 +206,9 @@ const toastOnce = (key: string, message: string) => {
     ElMessage.info(message);
 };
 
-// 可用的分辨率选项（根据模型动态过滤）
+// 可用的分辨率选项：Dream 含 standard，Nano Banana 系列为 1K/2K/4K
 const availableResolutions = computed(() => {
-    if (apiType.value === 'dream') {
-        return ['1K', '2K', '4K', 'standard'];
-    } else if (nanoModel.value === 'gemini-2.5-flash-image') {
-        // Nano Banana 不支持分辨率选择，固定 1024px
-        return [];
-    } else if (nanoModel.value === 'gemini-3-pro-image-preview') {
-        return ['1K', '2K', '4K'];
-    }
+    if (apiType.value === 'dream') return ['1K', '2K', '4K', 'standard'];
     return ['1K', '2K', '4K'];
 });
 
@@ -246,32 +246,34 @@ const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): 
     return ratioMap[aspectRatioValue] || { width: baseSize, height: baseSize };
 };
 
-// 监听模型切换，重置不兼容的选项
-watch([selectedModel, nanoModel], ([newModel, newNanoModel]) => {
-    // 当切换到 Nano Banana 时，清空 quality（因为该模型不支持分辨率选择）
-    if (newModel.startsWith('nano:') && newNanoModel === 'gemini-2.5-flash-image') {
-        if (quality.value && quality.value !== '') {
-            console.log('[前端] 切换到 Nano Banana，清空分辨率选择（固定 1024px）');
-            quality.value = '';
-        }
-        toastOnce('nano:flash', 'Nano Banana 固定使用 1024px 分辨率');
-    } else if (newModel.startsWith('nano:') && newNanoModel === 'gemini-3-pro-image-preview') {
-        // 切换到 Nano Banana Pro，如果没有选择分辨率，默认使用 2K
-        if (!quality.value || quality.value === '') {
-            quality.value = '2K';
-        } else if (!['1K', '2K', '4K'].includes(quality.value)) {
-            // 如果当前值是 'standard'，改为 '2K'
+// 监听模型切换，重置不兼容的选项，并同步到节点数据
+watch(selectedModel, (newModel) => {
+    const isNano = newModel.startsWith('nano:');
+    if (isNano) {
+        if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
             quality.value = '2K';
         }
-        toastOnce('nano:pro', 'Nano Banana Pro 支持 1K/2K/4K 分辨率');
     } else if (newModel === 'dream') {
-        // 切换到 Seedream，如果没有选择分辨率，默认使用 2K
         if (!quality.value || quality.value === '') {
             quality.value = '2K';
         }
-        toastOnce('dream', 'Seedream 将自动把尺寸信息添加到提示词中');
     }
-}, { immediate: false });
+    // 同步 apiType / model 到节点数据，方便自动保存与恢复
+    const api: 'dream' | 'nano' = isNano ? 'nano' : 'dream';
+    (props.data as any).apiType = api;
+    (props.data as any).model = isNano ? newModel.split(':')[1] : undefined;
+}, { immediate: true });
+
+// 将本地参数同步到节点数据，确保自动保存能带上这些配置
+watch(quality, (val) => {
+    (props.data as any).quality = val;
+});
+watch(aspectRatio, (val) => {
+    (props.data as any).aspectRatio = val;
+});
+watch(numImages, (val) => {
+    (props.data as any).numImages = val;
+});
 
 const loading = ref(false);
 const imageUrl = ref(props.data?.imageUrl || '');
@@ -434,16 +436,11 @@ const handleGenerate = async () => {
             
             console.log(`[前端] Seedream 模式: ${width}x${height}, 比例: ${aspectRatio.value}, 分辨率: ${quality.value}`);
         } else if (apiType.value === 'nano') {
-            // Nano: 传递 aspectRatio 和 quality（作为 imageSize）
-            requestParams.model = nanoModel.value;
+            // Nano Banana 2 / Nano Banana Pro (Ace Data Cloud)
             requestParams.aspectRatio = aspectRatio.value;
-            
-            // 只有 Nano Banana Pro 支持 imageSize
-            if (nanoModel.value === 'gemini-3-pro-image-preview' && quality.value) {
-                requestParams.quality = quality.value; // 后端会将其转换为 imageSize
-            }
-            
-            console.log(`[前端] Nano 模式: 模型=${nanoModel.value}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '固定1024px'}`);
+            if (quality.value) requestParams.quality = quality.value;
+            if (nanoModel.value) requestParams.model = nanoModel.value;
+            console.log(`[前端] Nano Banana 模型=${nanoModel.value || 'nano-banana-2'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
         }
         
         console.log('发送生图请求，参数:', requestParams);
@@ -696,7 +693,6 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
     display: flex;
     flex-direction: column;
     padding: 14px 16px;
-    border-bottom: 1px solid #404040;
     color: #e0e0e0;
 }
 
