@@ -146,15 +146,22 @@ export class WorkflowHistoryService {
     }
 
     /**
-     * 更新历史记录（公开、收藏）
+     * 更新历史记录（公开、收藏、名称）
      */
-    async updateHistory(historyId: number, userId: number, updates: { isPublic?: boolean; isFavorite?: boolean }) {
+    async updateHistory(
+        historyId: number,
+        userId: number,
+        updates: { isPublic?: boolean; isFavorite?: boolean; snapshot_name?: string }
+    ) {
         const history = await this.historyRepo.findOne({
             where: { id: historyId, user_id: userId }
         });
         if (!history) throw new Error('历史记录不存在');
         if (updates.isPublic !== undefined) history.is_public = updates.isPublic ? 1 : 0;
         if (updates.isFavorite !== undefined) history.is_favorite = updates.isFavorite ? 1 : 0;
+        if (typeof updates.snapshot_name === 'string' && updates.snapshot_name.trim()) {
+            history.snapshot_name = updates.snapshot_name.trim();
+        }
         await this.historyRepo.save(history);
         return history;
     }

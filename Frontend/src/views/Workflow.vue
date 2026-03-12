@@ -252,6 +252,7 @@ import { uploadImage } from '@/api/upload';
 import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
+import { getUploadUrl } from '@/utils/image-loader';
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
@@ -491,7 +492,7 @@ const captureCanvasCover = async (): Promise<string | null> => {
         const res: any = await uploadImage(file);
         const url = res?.data?.url;
         if (!url) return null;
-        return url.startsWith('http') ? url : `${window.location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+        return url.startsWith('http') ? url : getUploadUrl(url);
     } catch (e) {
         console.warn('画布截图失败', e);
         return null;
@@ -709,14 +710,7 @@ const getLastImageFromWorkflow = (): string => {
     if (imageNodes.length > 0 && imageNodes[0]) {
         const lastImageUrl = imageNodes[0].data?.imageUrl;
         if (!lastImageUrl) return '';
-        // 转换为完整URL
-        if (lastImageUrl.startsWith('http')) {
-            return lastImageUrl;
-        }
-        if (lastImageUrl.startsWith('/uploads/')) {
-            return `${window.location.origin}${lastImageUrl}`;
-        }
-        return `${window.location.origin}/uploads/${lastImageUrl}`;
+        return getUploadUrl(lastImageUrl);
     }
     return '';
 };
@@ -728,11 +722,7 @@ const selectCoverImage = () => {
         .filter(node => node.type === 'image' && node.data?.imageUrl)
         .map(node => {
             const url = node.data.imageUrl;
-            const fullUrl = url.startsWith('http')
-                ? url
-                : url.startsWith('/uploads/')
-                    ? `${window.location.origin}${url}`
-                    : `${window.location.origin}/uploads/${url}`;
+            const fullUrl = getUploadUrl(url);
             return {
                 id: node.id,
                 url: fullUrl,
@@ -999,7 +989,7 @@ const handleDrop = async (event: DragEvent) => {
                 const originalUrl: string = uploadRes.data.url;
                 const imageUrl = originalUrl.startsWith('http')
                     ? originalUrl
-                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                    : getUploadUrl(originalUrl);
                 const imageKey: string = uploadRes.data.filename || originalUrl;
                 const alias = getOrCreateImageAlias(imageKey);
 
@@ -1094,7 +1084,7 @@ const insertImageNode = () => {
                 const originalUrl: string = uploadRes.data.url;
                 const imageUrl = originalUrl.startsWith('http')
                     ? originalUrl
-                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                    : getUploadUrl(originalUrl);
                 const imageKey: string = uploadRes.data.filename || originalUrl;
                 const alias = getOrCreateImageAlias(imageKey);
 
@@ -1226,7 +1216,7 @@ const addImageNodeFromToolbar = () => {
                 const originalUrl: string = uploadRes.data.url;
                 const imageUrl = originalUrl.startsWith('http')
                     ? originalUrl
-                    : `${window.location.origin}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+                    : getUploadUrl(originalUrl);
                 const imageKey: string = uploadRes.data.filename || originalUrl;
                 const alias = getOrCreateImageAlias(imageKey);
 
@@ -1952,7 +1942,7 @@ onMounted(async () => {
         imageUrls.forEach((imageUrl, index) => {
             const fullImageUrl = imageUrl.startsWith('http')
                 ? imageUrl
-                : `${window.location.origin}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+                : getUploadUrl(imageUrl);
 
             const nodeId = `image_node_${Date.now()}_${index}`;
             imageNodeIds.push(nodeId);

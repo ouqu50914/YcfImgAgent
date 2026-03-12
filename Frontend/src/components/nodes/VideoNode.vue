@@ -180,6 +180,7 @@ import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
 import { uploadImage } from '@/api/upload';
+import { getUploadUrl } from '@/utils/image-loader';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -262,9 +263,7 @@ const style = ref('');
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads/')) return `${window.location.origin}${url}`;
-  return `${window.location.origin}/uploads/${url}`;
+  return getUploadUrl(url);
 };
 
 // 首帧/尾帧预览用 URL（连线优先，否则用上传的）

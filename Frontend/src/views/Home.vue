@@ -1,7 +1,7 @@
 <template>
   <div class="home-container">
     <!-- 左侧导航栏 -->
-    <Sidebar />
+    <Sidebar @open-teaching="openTeachingDialog" />
     
     <!-- 主内容区域 -->
     <div class="main-content">
@@ -77,11 +77,36 @@
         <el-button type="primary" :loading="applyCreditsLoading" @click="handleApplyCredits">提交</el-button>
       </template>
     </el-dialog>
+
+    <!-- 教学视频弹窗：优先 MP4（浏览器对音轨支持更好），无则用 MOV -->
+    <el-dialog
+      v-model="showTeachingDialog"
+      title="使用引导"
+      width="70%"
+      :close-on-click-modal="false"
+      :close-on-press-escape="true"
+      append-to-body
+    >
+      <div class="teaching-video-wrapper">
+        <video
+          ref="teachingVideoRef"
+          controls
+          autoplay
+          playsinline
+          class="teaching-video"
+          :src="teachingVideoSrc"
+          @loadedmetadata="onTeachingVideoLoaded"
+        >
+          您的浏览器不支持视频播放，请使用 Chrome 或 Safari。
+        </video>
+      </div>
+      <p v-if="showNoSoundHint" class="teaching-hint">若没有声音，请将视频转为 MP4（H.264+AAC）后保存为 public/teaching.mp4</p>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../store/user';
 import { applyCredits } from '@/api/user';
@@ -94,8 +119,30 @@ import InspirationGrid from '@/components/InspirationGrid.vue';
 const router = useRouter();
 const userStore = useUserStore();
 
+const showTeachingDialog = ref(false);
+const teachingVideoRef = ref<HTMLVideoElement | null>(null);
+const showNoSoundHint = ref(false);
+
+// 教学视频使用与图片相同的公共 COS 域名
+const teachingVideoSrc = computed(() => {
+  const base = import.meta.env.VITE_UPLOAD_BASE_URL || window.location.origin;
+  return `${base}/assets/teaching.mp4`;
+});
+
+const onTeachingVideoLoaded = () => {
+  const el = teachingVideoRef.value;
+  if (el?.currentSrc) showNoSoundHint.value = el.currentSrc.includes('.mov');
+};
+
 onMounted(() => {
   userStore.fetchCredits();
+  if (typeof window !== 'undefined') {
+    const seen = localStorage.getItem('hasSeenTeachingVideo');
+    if (!seen) {
+      showTeachingDialog.value = true;
+      localStorage.setItem('hasSeenTeachingVideo', '1');
+    }
+  }
 });
 const recentProjectsRef = ref<InstanceType<typeof RecentProjects> | null>(null);
 
@@ -103,6 +150,23 @@ const handleLogout = async () => {
   await userStore.logout();
   router.push('/login');
 };
+
+const openTeachingDialog = () => {
+  showNoSoundHint.value = false;
+  showTeachingDialog.value = true;
+};
+
+const pauseTeachingVideo = () => {
+  const el = teachingVideoRef.value;
+  if (el) {
+    el.pause();
+    el.currentTime = 0;
+  }
+};
+
+watch(showTeachingDialog, (val) => {
+  if (!val) pauseTeachingVideo();
+});
 
 const showApplyCreditsModal = ref(false);
 const applyCreditsForm = reactive({ amount: 10, reason: '' });
@@ -210,6 +274,25 @@ const handleApplyCredits = async () => {
 .header-right {
   display: flex;
   align-items: center;
+}
+
+.teaching-video-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.teaching-video {
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: #000;
+}
+
+.teaching-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #909399;
 }
 
 .user-info {

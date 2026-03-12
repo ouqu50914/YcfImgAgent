@@ -185,12 +185,18 @@ export const updateHistory = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "无效的历史记录ID" });
         }
         const historyId = parseInt(idParam);
-        const { isPublic, isFavorite } = req.body;
+        const { isPublic, isFavorite, snapshot_name } = req.body as {
+            isPublic?: boolean;
+            isFavorite?: boolean;
+            snapshot_name?: string;
+        };
 
-        const history = await historyService.updateHistory(historyId, userId, {
-            isPublic,
-            isFavorite
-        });
+        const updates: { isPublic?: boolean; isFavorite?: boolean; snapshot_name?: string } = {};
+        if (typeof isPublic === 'boolean') updates.isPublic = isPublic;
+        if (typeof isFavorite === 'boolean') updates.isFavorite = isFavorite;
+        if (typeof snapshot_name === 'string') updates.snapshot_name = snapshot_name;
+
+        const history = await historyService.updateHistory(historyId, userId, updates);
 
         return res.status(200).json({
             message: "更新成功",

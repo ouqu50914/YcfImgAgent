@@ -103,7 +103,17 @@
             <div v-else class="image-placeholder">暂无封面</div>
           </div>
           <div class="card-info">
-            <div class="card-title">{{ getItemName(item) }}</div>
+            <div class="card-title">
+              <span class="card-title-text">{{ getItemName(item) }}</span>
+              <el-button
+                text
+                type="primary"
+                size="small"
+                @click.stop="handleRenameItem(item)"
+              >
+                重命名
+              </el-button>
+            </div>
             <div class="card-meta">
               <span class="time">{{ formatTime(getItemTime(item)) }}</span>
             </div>
@@ -150,6 +160,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, Search } from '@element-plus/icons-vue';
 import { getPublicTemplates, getTemplates, getTemplate, saveTemplate, updateTemplate, deleteTemplate, getHistoryList, updateHistory, deleteHistory, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { getUploadUrl } from '@/utils/image-loader';
 
 const router = useRouter();
 const route = useRoute();
@@ -172,14 +183,8 @@ const pagination = ref({
   pageSize: 12
 });
 
-// 获取图片URL
-const getImageUrl = (url: string) => {
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads/')) {
-    return `${window.location.origin}${url}`;
-  }
-  return `${window.location.origin}/uploads/${url}`;
-};
+// 获取图片URL（支持 CDN 域名）
+const getImageUrl = (url: string) => getUploadUrl(url);
 
 // 格式化时间
 const formatTime = (time: string) => {
@@ -289,6 +294,42 @@ const handleFavoriteChange = async (item: MyItem, v: number) => {
     } catch (e: any) {
       (item.data as WorkflowHistory).is_favorite = v === 1 ? 0 : 1;
       ElMessage.error(e.message || '操作失败');
+    }
+  }
+};
+
+// 我的工作流：重命名（模板 & 历史）
+const handleRenameItem = async (item: MyItem) => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的名称', '重命名', {
+      inputValue: getItemName(item),
+      inputPlaceholder: '请输入名称',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValidator: (val: string) => {
+        if (!val || !val.trim()) return '名称不能为空';
+        if (val.trim().length > 50) return '名称长度不能超过 50 个字符';
+        return true;
+      },
+    });
+    const newName = (value as string).trim();
+    if (!newName) return;
+
+    if (item.source === 'template') {
+      await updateTemplate(item.data.id, { name: newName });
+      (item.data as WorkflowTemplate).name = newName;
+    } else {
+      await updateHistory(item.data.id, { snapshot_name: newName });
+      (item.data as WorkflowHistory & { name?: string }).snapshot_name = newName;
+      (item.data as WorkflowHistory & { name?: string }).name = newName;
+    }
+
+    ElMessage.success('重命名成功');
+    // 为保证和后端完全一致，重新加载列表
+    loadList();
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '重命名失败，请稍后重试');
     }
   }
 };

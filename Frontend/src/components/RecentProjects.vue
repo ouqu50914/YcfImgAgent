@@ -33,14 +33,24 @@
           <div class="project-name">{{ project.name || '未命名工作流' }}</div>
           <div class="project-meta">
             <span class="project-time">{{ formatTime((project.updated_at || project.created_at) || '') }}</span>
-            <el-button
-              type="danger"
-              link
-              size="small"
-              @click.stop="handleDelete(project)"
-            >
-              删除
-            </el-button>
+            <div class="project-actions">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                @click.stop="handleRename(project)"
+              >
+                重命名
+              </el-button>
+              <el-button
+                type="danger"
+                link
+                size="small"
+                @click.stop="handleDelete(project)"
+              >
+                删除
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -53,7 +63,8 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Picture } from '@element-plus/icons-vue';
-import { getTemplates, getHistoryList, deleteTemplate, deleteHistory, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { getTemplates, getHistoryList, deleteTemplate, deleteHistory, updateTemplate, updateHistory, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { getUploadUrl } from '@/utils/image-loader';
 
 const router = useRouter();
 const projects = ref<Array<{
@@ -65,14 +76,7 @@ const projects = ref<Array<{
   source?: 'template' | 'history';
 }>>([]);
 
-const getImageUrl = (url: string) => {
-  if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads/')) {
-    return `${window.location.origin}${url}`;
-  }
-  return `${window.location.origin}/uploads/${url}`;
-};
+const getImageUrl = (url: string) => getUploadUrl(url);
 
 const formatTime = (time: string) => {
   if (!time) return '';
@@ -130,6 +134,39 @@ const handleDelete = async (project: any) => {
       // 统一错误提示交给全局拦截器
       if (!(e as any)?.response) {
         ElMessage.error('删除失败，请稍后重试');
+      }
+    }
+  }
+};
+
+const handleRename = async (project: any) => {
+  if (project.id == null) return;
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的名称', '重命名', {
+      inputValue: project.name || '',
+      inputPlaceholder: '请输入名称',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValidator: (val: string) => {
+        if (!val || !val.trim()) return '名称不能为空';
+        if (val.trim().length > 50) return '名称长度不能超过 50 个字符';
+        return true;
+      },
+    });
+    const newName = (value as string).trim();
+    if (!newName) return;
+    if (project.source === 'history') {
+      await updateHistory(project.id, { snapshot_name: newName });
+    } else {
+      await updateTemplate(project.id, { name: newName });
+    }
+    ElMessage.success('重命名成功');
+    loadProjects();
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      console.error('[RecentProjects] 重命名失败', e);
+      if (!(e as any)?.response) {
+        ElMessage.error('重命名失败，请稍后重试');
       }
     }
   }

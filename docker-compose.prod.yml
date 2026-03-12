@@ -55,7 +55,7 @@ services:
       REDIS_PORT: 6379
       # 下面是你的 API Key 等配置，请确保这里有值或通过 .env 文件传入
       JWT_SECRET: ${JWT_SECRET:-your-secret-key}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://ouqu.top}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://www.artycf.com,http://www.artycf.com}
     volumes:
       - ./Backend/uploads:/app/uploads
       - ./Backend/temp:/app/temp

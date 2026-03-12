@@ -200,10 +200,12 @@ watch(
 const getImageUrl = (url: string) => {
     if (!url) return '';
     if (url.startsWith('http')) return url;
-    if (url.startsWith('/uploads/')) {
-        return `${window.location.origin}${url}`;
-    }
-    return url;
+    // 图层结果同样通过 CDN 分发
+    return import.meta.env.VITE_UPLOAD_BASE_URL
+        ? url.startsWith('/uploads/')
+            ? `${import.meta.env.VITE_UPLOAD_BASE_URL}${url}`
+            : `${import.meta.env.VITE_UPLOAD_BASE_URL}/uploads/${url}`
+        : url;
 };
 
 const downloadLayer = (url: string, name: string) => {

@@ -140,6 +140,7 @@ import { extendImage } from '../../api/image';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
+import { getUploadUrl } from '@/utils/image-loader';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -191,15 +192,8 @@ const currentNode = computed(() => {
     return getNodes.value.find(n => n.id === props.id);
 });
 
-// 获取完整图片URL
-const getImageUrl = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('/uploads/')) {
-        return `${window.location.origin}${url}`;
-    }
-    return url;
-};
+// 获取完整图片URL（支持 CDN 域名）
+const getImageUrl = (url: string) => getUploadUrl(url);
 
 // 监听上游节点连接
 watch(
@@ -266,7 +260,7 @@ const handleExtend = async () => {
         if (res.data && res.data.image_url) {
             const url = res.data.image_url.startsWith('http')
                 ? res.data.image_url
-                : `${window.location.origin}${res.data.image_url}`;
+                : getUploadUrl(res.data.image_url);
             // 更新节点数据，供下游节点使用
             props.data.imageUrl = url;
             ElMessage.success('图片扩展成功！');

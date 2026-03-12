@@ -142,6 +142,7 @@ import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
+import { getUploadUrl } from '@/utils/image-loader';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -393,13 +394,7 @@ const handleGenerate = async () => {
         let referenceImageUrl = '';
         
         // 转换图片URL为完整URL
-        const processedImageUrls = referenceImageUrls.map(url => {
-            if (url.startsWith('http')) return url;
-            if (url.startsWith('/uploads/')) {
-                return `${window.location.origin}${url}`;
-            }
-            return `${window.location.origin}/uploads/${url}`;
-        });
+        const processedImageUrls = referenceImageUrls.map(url => getUploadUrl(url));
                     
         if (processedImageUrls.length === 1 && processedImageUrls[0]) {
             referenceImageUrl = processedImageUrls[0];
@@ -459,14 +454,7 @@ const handleGenerate = async () => {
             
             if (allImages.length > 0) {
                 // 转换所有图片URL为完整URL
-                const fullUrls = allImages.map((url: string) => {
-                    if (url.startsWith('http')) return url;
-                    // 处理相对路径
-                    if (url.startsWith('/uploads/')) {
-                        return `${window.location.origin}${url}`;
-                    }
-                    return `${window.location.origin}/uploads/${url}`;
-                });
+                const fullUrls = allImages.map((url: string) => getUploadUrl(url));
                 
                 imageUrls.value = fullUrls;
                 imageUrl.value = fullUrls[0]; // 第一张作为主图
@@ -490,7 +478,7 @@ const handleGenerate = async () => {
                 // 兼容旧格式：只有 image_url
                 const url = res.data.image_url.startsWith('http')
                     ? res.data.image_url
-                    : `${window.location.origin}${res.data.image_url}`;
+                    : getUploadUrl(res.data.image_url);
                 imageUrl.value = url;
                 imageUrls.value = [url];
                 props.data.imageUrl = res.data.image_url;

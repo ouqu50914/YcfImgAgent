@@ -131,6 +131,7 @@ import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Grid, CircleCheck } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import request from '@/utils/request';
+import { getUploadUrl } from '@/utils/image-loader';
 import { useUserStore } from '@/store/user';
 
 // 声明 emits 以消除 Vue Flow 的警告
@@ -176,16 +177,8 @@ const currentNode = computed(() => {
     return getNodes.value.find(n => n.id === props.id);
 });
 
-// 获取完整图片URL
-const getImageUrl = (url: string) => {
-    if (!url) return '';
-    if (typeof url !== 'string') return '';
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('/uploads/')) {
-        return `${window.location.origin}${url}`;
-    }
-    return url;
-};
+// 获取完整图片URL（支持 CDN 域名）
+const getImageUrl = (url: string) => getUploadUrl(typeof url === 'string' ? url : '');
 
 // 监听上游节点连接
 watch(
@@ -239,14 +232,10 @@ const handleSeparate = async () => {
 
         if (res.data && res.data.layers) {
             // 处理分离结果
-            layers.value = res.data.layers.map((layer: any) => {
-                return {
-                    ...layer,
-                    url: layer.url.startsWith('http')
-                        ? layer.url
-                        : `${window.location.origin}${layer.url}`
-                };
-            });
+            layers.value = res.data.layers.map((layer: any) => ({
+                ...layer,
+                url: getImageUrl(layer.url)
+            }));
             
             ElMessage.success(`成功分离出 ${layers.value.length} 个图层！`);
             userStore.fetchCredits();

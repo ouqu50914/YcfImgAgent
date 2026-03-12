@@ -83,7 +83,7 @@ export const getHistory = (id: number) => {
   return request.get<{ message: string; data: WorkflowHistory }>(`/workflow/history/${id}`);
 };
 
-export const updateHistory = (id: number, data: { isPublic?: boolean; isFavorite?: boolean }) => {
+export const updateHistory = (id: number, data: { isPublic?: boolean; isFavorite?: boolean; snapshot_name?: string }) => {
   return request.put<{ message: string; data: WorkflowHistory }>(`/workflow/history/${id}`, data);
 };
 

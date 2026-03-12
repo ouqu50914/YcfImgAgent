@@ -68,14 +68,24 @@
           <el-icon :size="24"><Setting /></el-icon>
         </div>
       </el-tooltip>
+
+      <div class="sidebar-spacer" />
+
+      <el-tooltip content="新手引导" placement="right">
+        <div class="nav-item nav-item-guide" @click="$emit('open-teaching')">
+          <el-icon :size="24"><VideoPlay /></el-icon>
+        </div>
+      </el-tooltip>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+
+defineEmits<{ 'open-teaching': [] }>();
 import { useRouter, useRoute } from 'vue-router';
-import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting } from '@element-plus/icons-vue';
+import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting, VideoPlay } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getHelpDocUrlForClient } from '@/api/user';
@@ -110,9 +120,9 @@ const openHelpDoc = () => {
 };
 
 const openDesignChecker = () => {
-  // 使用项目的 BASE_URL，指向 public 里的 DesignChecker.html
-  const base = import.meta.env.BASE_URL || '/';
-  const url = `${base}DesignChecker.html`;
+  // 使用与图片相同的 COS 公共域名，指向 COS 上的 www/DesignChecker.html
+  const base = import.meta.env.VITE_UPLOAD_BASE_URL || (import.meta.env.BASE_URL || '/');
+  const url = `${base}/www/DesignChecker.html`;
   window.open(url, '_blank');
 };
 
@@ -149,6 +159,13 @@ onMounted(async () => {
   gap: 12px;
   width: 100%;
   align-items: center;
+  flex: 1;
+  padding-bottom: 50px;
+}
+
+.sidebar-spacer {
+  flex: 1;
+  min-height: 12px;
 }
 
 .nav-item {

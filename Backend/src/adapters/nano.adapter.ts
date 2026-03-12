@@ -422,7 +422,36 @@ export class NanoAdapter implements AiProvider {
         throw new Error(`无效的 Nano 模型: ${model}，仅支持 nano-banana-2 或 nano-banana-pro`);
     }
 
+    /** 根据分辨率+比例计算像素尺寸，用于 Nano 文生图 size（如 1024x1024） */
+    private calculatePixelSize(aspectRatioValue: string | undefined, qualityValue: string | undefined): { width: number; height: number } {
+        const ratio = aspectRatioValue || "1:1";
+        const q = qualityValue || "2K";
+
+        const resolutionMap: Record<string, number> = {
+            "1K": 1024,
+            "2K": 2048,
+            "4K": 4096,
+        };
+        const baseSize = resolutionMap[q] || 2048;
+
+        const ratioMap: Record<string, { width: number; height: number }> = {
+            "1:1": { width: baseSize, height: baseSize },
+            "2:3": { width: Math.floor((baseSize * 2) / 3), height: baseSize },
+            "3:2": { width: baseSize, height: Math.floor((baseSize * 2) / 3) },
+            "3:4": { width: Math.floor((baseSize * 3) / 4), height: baseSize },
+            "4:3": { width: baseSize, height: Math.floor((baseSize * 3) / 4) },
+            "4:5": { width: Math.floor((baseSize * 4) / 5), height: baseSize },
+            "5:4": { width: baseSize, height: Math.floor((baseSize * 4) / 5) },
+            "9:16": { width: Math.floor((baseSize * 9) / 16), height: baseSize },
+            "16:9": { width: baseSize, height: Math.floor((baseSize * 9) / 16) },
+            "21:9": { width: baseSize, height: Math.floor((baseSize * 9) / 21) },
+        };
+
+        return ratioMap[ratio] || { width: baseSize, height: baseSize };
+    }
+
     async generateImage(params: GenerateParams, _apiKey: string, _apiUrl: string): Promise<AiResponse> {
+        // 前端仍然可以传 numImages，这里只用来决定是否并发多次调用，不再透传到 Ace（不发送 count 字段）
         const count = params.num_images || (params as any).numImages || 1;
         const hasImage = !!params.imageUrl || (params.imageUrls && params.imageUrls.length > 0);
 
@@ -452,23 +481,38 @@ export class NanoAdapter implements AiProvider {
             imageCountForAlias
         );
 
+        // Ace 文档中 action 默认为 generate，这里仅在图生图时显式设置为 edit，
+        // 文生图则不传 action 字段，交给服务端使用默认行为。
         const body: Record<string, unknown> = {
-            action: hasImage ? "edit" : "generate",
             prompt: promptWithAliases,
-            count: 1,
         };
+        if (hasImage) {
+            body.action = "edit";
+        }
 
         // 选择 Ace 模型：仅支持 nano-banana-2 / nano-banana-pro
         const model = this.normalizeModel((params as any).model as string | undefined);
         if (model) {
             body.model = model;
         }
+        const quality = params.quality && ["1K", "2K", "4K"].includes(params.quality) ? params.quality : undefined;
 
-        if (params.quality && ["1K", "2K", "4K"].includes(params.quality)) {
-            body.size = params.quality;
-        }
-        if (params.aspectRatio) {
-            body.aspect_ratio = params.aspectRatio;
+        if (!hasImage) {
+            // 文生图：size 换算为像素尺寸，如 "1024x1024"，不再透传 aspect_ratio
+            const { width, height } = this.calculatePixelSize(params.aspectRatio as string | undefined, quality);
+            body.size = `${width}x${height}`;
+
+            if (params.aspectRatio) {
+                body.prompt = `${promptWithAliases}。宽高比约为 ${params.aspectRatio}，分辨率约为 ${width}x${height} 像素。`;
+            }
+        } else {
+            // 图生图：size 仍然使用 1K/2K/4K 档位，aspect_ratio 直接传给 Ace
+            if (quality) {
+                body.size = quality;
+            }
+            if (params.aspectRatio) {
+                body.aspect_ratio = params.aspectRatio;
+            }
         }
 
         // 参考图片：支持单张 imageUrl 或多张 imageUrls（行为与 Seedream 类似）
@@ -595,7 +639,6 @@ export class NanoAdapter implements AiProvider {
         const body: Record<string, unknown> = {
             action: "edit",
             prompt: `保持原图风格和内容，提高分辨率和细节，放大 ${scale} 倍`,
-            count: 1,
         };
 
         const model = this.normalizeModel((params as any).model as string | undefined);
@@ -609,6 +652,7 @@ export class NanoAdapter implements AiProvider {
             const base64 = await this.getImageBase64(params.imageUrl);
             body.image_urls = [`data:image/png;base64,${base64}`];
         }
+        // 放大场景也使用 size 字段
         if (scale === 4) body.size = "4K";
         else body.size = "2K";
 
@@ -666,7 +710,6 @@ export class NanoAdapter implements AiProvider {
         const body: Record<string, unknown> = {
             action: "edit",
             prompt,
-            count: 1,
         };
         if (params.ratio && params.ratio !== "auto") body.aspect_ratio = params.ratio;
 
@@ -733,7 +776,6 @@ export class NanoAdapter implements AiProvider {
         const body: Record<string, unknown> = {
             action: "edit",
             prompt,
-            count: 1,
         };
 
         const model = this.normalizeModel((params as any).model as string | undefined);

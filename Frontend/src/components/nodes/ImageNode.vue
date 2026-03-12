@@ -173,6 +173,7 @@ import { ref, computed, watch, onMounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
+import { getUploadUrl } from '@/utils/image-loader';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -440,15 +441,8 @@ const handleSplitLayer = async () => {
     }
 };
 
-// 获取完整图片URL
-const getImageUrl = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('http')) return url;
-    if (url.startsWith('/uploads/')) {
-        return `${window.location.origin}${url}`;
-    }
-    return url;
-};
+// 获取完整图片URL（支持 CDN 域名）
+const getImageUrl = (url: string) => getUploadUrl(url);
 
 // 点击图片预览
 const handleImageClick = () => {

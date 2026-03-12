@@ -55,14 +55,23 @@ export function useLazyImage(element: HTMLElement | null, imageUrl: string, call
   };
 }
 
+const UPLOAD_BASE = import.meta.env.VITE_UPLOAD_BASE_URL || window.location.origin;
+
 /**
- * 获取完整图片URL
+ * 将后端返回的 /uploads 相对路径拼成可访问的完整 URL（支持 CDN 域名）
  */
-export function getFullImageUrl(url: string): string {
+export function getUploadUrl(url: string): string {
   if (!url) return '';
   if (url.startsWith('http')) return url;
   if (url.startsWith('/uploads/')) {
-    return `${window.location.origin}${url}`;
+    return `${UPLOAD_BASE}${url}`;
   }
-  return `${window.location.origin}/uploads/${url}`;
+  return `${UPLOAD_BASE}/uploads/${url}`;
+}
+
+/**
+ * 兼容旧命名：获取完整图片URL
+ */
+export function getFullImageUrl(url: string): string {
+  return getUploadUrl(url);
 }

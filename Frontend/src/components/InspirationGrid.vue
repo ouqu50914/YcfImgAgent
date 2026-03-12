@@ -73,6 +73,7 @@ import { useRouter } from 'vue-router';
 import { Picture, View, User, Document } from '@element-plus/icons-vue';
 import { getPublicTemplates, type WorkflowTemplate } from '@/api/workflow';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
+import { getUploadUrl } from '@/utils/image-loader';
 
 const router = useRouter();
 const loading = ref(false);
@@ -83,14 +84,7 @@ const currentPage = ref(1);
 const pageSize = ref(12);
 const categories = ref<WorkflowCategory[]>([]);
 
-const getImageUrl = (url: string) => {
-  if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('/uploads/')) {
-    return `${window.location.origin}${url}`;
-  }
-  return `${window.location.origin}/uploads/${url}`;
-};
+const getImageUrl = (url: string) => getUploadUrl(url);
 
 const handleImageError = (event: Event) => {
   const target = event.target as HTMLImageElement;
