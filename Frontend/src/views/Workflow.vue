@@ -138,7 +138,10 @@
             <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
                 :connection-line-style="{ stroke: '#409eff', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
                 :snap-to-grid="true" :snap-grid="[15, 15]" :nodes-connectable="true" :edges-updatable="true"
-                :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="false"
+                :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="!isSpacePressed"
+                :elements-selectable="true"
+                :selection-key-code="selectionKeyCode"
+                :delete-key-code="null"
                 :pan-on-drag="panOnDrag"
                 :pan-on-scroll="true" :zoom-on-scroll="true" :zoom-on-double-click="true" :min-zoom="0.2" :max-zoom="4"
                 :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="true"
@@ -779,6 +782,8 @@ const isSpacePressed = ref(false);
 const panOnDrag = computed(() =>
     isSpacePressed.value ? [0, 1] : [1]
 );
+// 框选：true 表示无需按修饰键即可在空白处拖拽出选择框（与 select-nodes-on-drag 配合）
+const selectionKeyCode = ref<boolean | null>(true);
 
 // 右键菜单状态
 const contextMenuVisible = ref(false);
@@ -1775,12 +1780,13 @@ const handleKeyDown = (event: KeyboardEvent) => {
         const selectedNodes = getNodes.value.filter(node => node.selected);
         if (selectedNodes.length > 0) {
             event.preventDefault();
+
+            // 先把「删除前」的状态保存到撤销栈，方便 Ctrl+Z 恢复
+            saveState();
+
             const nodeIds = selectedNodes.map(node => node.id);
             removeNodes(nodeIds);
             ElMessage.success(`已删除 ${selectedNodes.length} 个节点`);
-
-            // 保存状态到撤销栈
-            saveState();
         }
     }
 
@@ -2130,6 +2136,16 @@ onUnmounted(() => {
     overflow: hidden;
     min-height: 0;
     position: relative;
+}
+
+.canvas-wrapper :deep(.vue-flow__node.selected) {
+    box-shadow: 0 0 0 2px #409eff, 0 0 12px rgba(64, 158, 255, 0.75);
+    border-radius: 8px;
+}
+
+.canvas-wrapper :deep(.vue-flow__selection) {
+    border: 1px dashed rgba(64, 158, 255, 0.9);
+    background-color: rgba(64, 158, 255, 0.06);
 }
 
 .side-toolbar {

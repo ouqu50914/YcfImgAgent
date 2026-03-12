@@ -30,7 +30,10 @@
                 @click="handleImageClick"
             >
                 <template #error>
-                    <div class="image-slot">加载失败</div>
+                    <div class="image-slot image-slot-error">
+                        <span>加载失败</span>
+                        <span class="image-slot-hint">图片可能已过期或无法访问</span>
+                    </div>
                 </template>
             </el-image>
 
@@ -609,6 +612,18 @@ const handleDownloadOriginal = () => {
     background: #25262b;
     border-radius: 8px;
     border: 1px solid #404040;
+}
+
+.image-slot.image-slot-error {
+    flex-direction: column;
+    gap: 6px;
+    color: #a0a0a0;
+    font-size: 13px;
+}
+
+.image-slot-hint {
+    font-size: 11px;
+    color: #606266;
 }
 
 .loading-slot {
