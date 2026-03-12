@@ -328,6 +328,7 @@ const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => 
     }
 
     if (!currentNode.value) {
+        console.error('[ImageNode] 无法获取当前节点信息（handleAddActionNode）', currentNode.value);
         ElMessage.error('无法获取当前节点信息');
         return;
     }
@@ -391,6 +392,7 @@ const handleSplitLayer = async () => {
     }
 
     if (!currentNode.value) {
+        console.error('[ImageNode] 无法获取当前节点信息（handleSplitLayer）', currentNode.value);
         ElMessage.error('无法获取当前节点信息');
         return;
     }
@@ -428,7 +430,11 @@ const handleSplitLayer = async () => {
 
         ElMessage.success('已添加图层拆分结果节点');
     } catch (error: any) {
-        ElMessage.error(error.message || '创建图层拆分节点失败');
+        console.error('[ImageNode] 创建图层拆分节点失败', error);
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('创建图层拆分节点失败，请稍后重试');
+        }
     } finally {
         creatingLayerNode.value = false;
     }

@@ -261,7 +261,10 @@ const handleSeparate = async () => {
         }
     } catch (error: any) {
         console.error('图层分离失败:', error);
-        ElMessage.error(error.response?.data?.message || error.message || '图层分离失败');
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('图层分离失败，请稍后重试');
+        }
     } finally {
         loading.value = false;
     }

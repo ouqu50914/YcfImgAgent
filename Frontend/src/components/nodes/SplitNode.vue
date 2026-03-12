@@ -267,8 +267,11 @@ const handleSplit = async () => {
             ElMessage.warning('拆分成功，但未获取到图片URL');
         }
     } catch (error: any) {
-        console.error(error);
-        ElMessage.error(error.message || '图片拆分失败');
+        console.error('[SplitNode] 图片拆分失败', error);
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('图片拆分失败，请稍后重试');
+        }
     } finally {
         loading.value = false;
     }

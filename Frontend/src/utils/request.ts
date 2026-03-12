@@ -42,6 +42,26 @@ service.interceptors.request.use(
   }
 );
 
+// 错误码与中文提示文案（toast 用，console 打原始错误）
+const errorMessages: Record<string, string> = {
+  // 上传相关
+  UPLOAD_FILE_TOO_LARGE: '单张图片大小不能超过 10MB，请压缩后再试。',
+  UPLOAD_FILE_TYPE_NOT_ALLOWED: '仅支持 jpg、png、gif、webp 等常见图片格式。',
+  UPLOAD_FILE_COUNT_LIMIT: '一次上传的图片数量超出限制，请分批上传。',
+  UPLOAD_AUTH_REQUIRED: '请先登录后再上传图片。',
+  UPLOAD_ERROR: '图片上传失败，请检查文件后重试。',
+  UPLOAD_UNKNOWN_ERROR: '图片上传失败，请稍后重试或联系客服。',
+
+  // 账户相关
+  ACCOUNT_IN_ARREARS: '账户余额不足，请先充值后再使用。',
+};
+
+const isUploadRequest = (config?: AxiosRequestConfig) => {
+  if (!config || !config.url) return false;
+  const url = config.url;
+  return url.includes('/image/upload');
+};
+
 // 响应拦截器：统一处理错误和Token刷新
 service.interceptors.response.use(
   (response) => {
@@ -51,7 +71,20 @@ service.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
     const userStore = useUserStore();
-    const msg = (error.response?.data as any)?.message || '请求失败';
+    // 先打印详细错误日志，方便开发排查
+    console.error('[HTTP ERROR]', {
+      url: originalRequest?.url,
+      method: originalRequest?.method,
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message,
+    });
+
+    const data = (error.response?.data || {}) as any;
+    const backendCode: string | undefined = data.code;
+    const backendMsg: string | undefined = data.message;
+    const isUpload = isUploadRequest(originalRequest);
+    const fallbackMsg = '请求失败，请稍后重试';
 
     // 如果是401错误且是token过期
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
@@ -109,8 +142,19 @@ service.interceptors.response.use(
         router.push('/login');
       }
     } else if (error.response?.status !== 401) {
-      // 非401错误，显示错误消息
-      ElMessage.error(msg);
+      // 非401错误，统一中文错误提示（toast）
+      if (backendCode && errorMessages[backendCode]) {
+        ElMessage.error(errorMessages[backendCode]);
+      } else if (isUpload && backendMsg) {
+        // 上传接口：后端 message 已是中文时可直接展示
+        ElMessage.error(backendMsg);
+      } else if (backendMsg && /[\u4e00-\u9fa5]/.test(backendMsg)) {
+        // 仅当后端 message 含中文时直接展示，避免英文直出
+        ElMessage.error(backendMsg);
+      } else {
+        // 兜底：统一中文文案
+        ElMessage.error(fallbackMsg);
+      }
     }
 
     return Promise.reject(error);

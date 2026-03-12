@@ -376,7 +376,11 @@ const handleSavePrompt = async () => {
         savePromptDescription.value = '';
         await loadPromptTemplates();
     } catch (error: any) {
-        ElMessage.error(error.message || '保存失败');
+        console.error('[PromptNode] 保存提示词失败', error);
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('保存失败，请稍后重试');
+        }
     }
 };
 

@@ -233,7 +233,11 @@ const handleSubmit = async () => {
       }
       ElMessage.success('所有图片上传成功');
     } catch (error: any) {
-      ElMessage.error(error.message || '图片上传失败');
+      console.error('[QuickStartInput] 图片上传失败', error);
+      // 具体错误提示由全局拦截器处理，这里仅在无响应时兜底
+      if (!(error as any)?.response) {
+        ElMessage.error('图片上传失败，请稍后重试');
+      }
       return;
     }
   }

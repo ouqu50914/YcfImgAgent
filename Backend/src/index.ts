@@ -17,6 +17,7 @@ import layerRoutes from "./routes/layer.routes";
 import workflowRoutes from "./routes/workflow.routes";
 import videoRoutes from "./routes/video.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
+import { errorHandler } from "./middlewares/error.middleware";
 
 dotenv.config();
 
@@ -82,6 +83,8 @@ app.use("/uploads", (req, res, next) => {
 });
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
+// 全局错误处理中间件（需放在所有路由之后）
+app.use(errorHandler);
 
 // 公开/收藏模板 14 天后过期删除（每天执行一次）
 function startExpiredTemplatesJob() {

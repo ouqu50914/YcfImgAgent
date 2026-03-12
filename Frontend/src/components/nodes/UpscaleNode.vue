@@ -247,8 +247,11 @@ const handleUpscale = async () => {
             ElMessage.warning('放大成功，但未获取到图片URL');
         }
     } catch (error: any) {
-        console.error(error);
-        ElMessage.error(error.message || '图片放大失败');
+        console.error('[UpscaleNode] 图片放大失败', error);
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('图片放大失败，请稍后重试');
+        }
     } finally {
         loading.value = false;
     }

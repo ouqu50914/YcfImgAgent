@@ -292,7 +292,11 @@ const onFirstFileChange = async (e: Event) => {
       ElMessage.success('首帧上传成功');
     }
   } catch (err: any) {
-    ElMessage.error(err?.message || '首帧上传失败');
+    console.error('[VideoNode] 首帧上传失败', err);
+    // 具体错误提示由全局拦截器处理，这里仅在无响应时兜底
+    if (!(err as any)?.response) {
+      ElMessage.error('首帧上传失败，请稍后重试');
+    }
   }
   input.value = '';
 };
@@ -309,7 +313,10 @@ const onEndFileChange = async (e: Event) => {
       ElMessage.success('尾帧上传成功');
     }
   } catch (err: any) {
-    ElMessage.error(err?.message || '尾帧上传失败');
+    console.error('[VideoNode] 尾帧上传失败', err);
+    if (!(err as any)?.response) {
+      ElMessage.error('尾帧上传失败，请稍后重试');
+    }
   }
   input.value = '';
 };
@@ -468,7 +475,7 @@ const handleGenerate = async () => {
     startPolling(t.id);
   } catch (e: any) {
     console.error('[VideoNode] 创建任务失败', e);
-    ElMessage.error(e?.message || '创建视频任务失败');
+    // 统一错误提示交给全局拦截器，这里不再重复 toast
   } finally {
     loading.value = false;
   }
@@ -487,7 +494,7 @@ const manualRefresh = async () => {
       : [];
   } catch (e: any) {
     console.error('[VideoNode] 手动刷新失败', e);
-    ElMessage.error(e?.message || '刷新任务状态失败');
+    // 统一错误提示交给全局拦截器
   }
 };
 

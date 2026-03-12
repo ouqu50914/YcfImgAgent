@@ -174,7 +174,11 @@ const doSplit = async () => {
             ElMessage.success(`成功拆分出 ${res.data.layerCount} 个图层`);
         }
     } catch (error: any) {
-        ElMessage.error(error.message || '图层拆分失败');
+        console.error('[LayerNode] 图层拆分失败', error);
+        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('图层拆分失败，请稍后重试');
+        }
     } finally {
         isLoading.value = false;
     }

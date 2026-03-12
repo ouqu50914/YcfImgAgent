@@ -126,7 +126,11 @@ const handleDelete = async (project: any) => {
     loadProjects();
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error(e.message || '删除失败');
+      console.error('[RecentProjects] 删除失败', e);
+      // 统一错误提示交给全局拦截器
+      if (!(e as any)?.response) {
+        ElMessage.error('删除失败，请稍后重试');
+      }
     }
   }
 };

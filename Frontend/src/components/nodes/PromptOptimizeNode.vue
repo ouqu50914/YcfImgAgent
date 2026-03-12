@@ -126,8 +126,11 @@ const handleOptimize = async () => {
             ElMessage.warning('优化成功，但未获取到结果');
         }
     } catch (error: any) {
-        console.error(error);
-        ElMessage.error(error.message || '提示词优化失败');
+        console.error('[PromptOptimizeNode] 提示词优化失败', error);
+        // 统一错误提示交给全局拦截器，这里只在无响应时兜底
+        if (!(error as any)?.response) {
+            ElMessage.error('提示词优化失败，请稍后重试');
+        }
     } finally {
         loading.value = false;
     }
