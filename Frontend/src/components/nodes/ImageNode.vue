@@ -172,6 +172,7 @@ import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getUploadUrl } from '@/utils/image-loader';
+import request from '@/utils/request';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -449,7 +450,7 @@ const handleImageClick = () => {
     }
 };
 
-// 下载原图（通过 Blob 强制触发下载，避免在浏览器中直接打开）
+// 下载原图：走后端代理接口拉取图片并返回附件，避免直连 CDN 被 CORS 拦截
 const handleDownloadOriginal = async () => {
     const original = (props.data as any)?.originalImageUrl || imageUrl.value;
     if (!original) {
@@ -459,20 +460,18 @@ const handleDownloadOriginal = async () => {
 
     try {
         const fullUrl = getImageUrl(original);
-        const response = await fetch(fullUrl, { mode: 'cors' });
-        if (!response.ok) {
-            throw new Error('下载请求失败');
-        }
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        // 优先使用原文件名，其次回退到固定文件名
+        const blob = await request.get<Blob>('/image/download', {
+            params: { url: fullUrl },
+            responseType: 'blob',
+        });
+        const blobUrl = URL.createObjectURL(blob as unknown as Blob);
         const filename =
             (props.data as any)?.originalFilename ||
             original.split('/').pop() ||
             'image.png';
+
+        const link = document.createElement('a');
+        link.href = blobUrl;
         link.download = filename;
         document.body.appendChild(link);
         link.click();

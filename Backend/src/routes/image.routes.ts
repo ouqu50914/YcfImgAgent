@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { generateImage, upscaleImage, extendImage, splitImage } from "../controllers/image.controller";
-import { uploadImage, uploadImages, upload } from "../controllers/upload.controller";
+import { uploadImage, uploadImages, upload, downloadImage } from "../controllers/upload.controller";
 import { authenticateToken } from "../middlewares/auth.middleware";
 import { rateLimitByApiType } from "../middlewares/rate-limit.middleware";
 
@@ -15,5 +15,8 @@ router.post("/split", authenticateToken, rateLimitByApiType, splitImage);
 // 图片上传接口（启用 COS 时仅传 COS 不落盘）
 router.post("/upload", authenticateToken, upload("image", true), uploadImage);
 router.post("/upload/multiple", authenticateToken, upload("images", false), uploadImages);
+
+// 下载图片代理（避免前端直连 CDN 触发 CORS，强制以附件形式下载）
+router.get("/download", authenticateToken, downloadImage);
 
 export default router;

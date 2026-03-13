@@ -23,6 +23,8 @@ const NANO_REQUEST_TIMEOUT_MS = Number(
 );
 // 调试开关：只打印请求，不真正调用 Ace，避免消耗 token
 const NANO_DRY_RUN = process.env.ACE_NANO_DRY_RUN === "true";
+// 直链模式：不下载 Ace 返回的图片，直接返回 Ace CDN URL 给前端，由浏览器直连 Ace，节省服务器带宽（适合 1M 等低带宽）
+const ACE_RETURN_REMOTE_URL = process.env.ACE_RETURN_REMOTE_URL === "true";
 
 export class NanoAdapter implements AiProvider {
     private formatAceErrorMessage(data: unknown, fallback: string): string {
@@ -567,7 +569,7 @@ export class NanoAdapter implements AiProvider {
 
         const localPaths: string[] = [];
         for (const u of remoteUrls) {
-            if (u.startsWith("http")) {
+            if (u.startsWith("http") && !ACE_RETURN_REMOTE_URL) {
                 localPaths.push(await this.downloadAndSaveImage(u));
             } else {
                 localPaths.push(u);
@@ -716,7 +718,9 @@ export class NanoAdapter implements AiProvider {
 
         const first = remoteUrls[0];
         if (!first) throw new Error("Ace 放大失败：未获取到图片 URL");
-        const local = first.startsWith("http") ? await this.downloadAndSaveImage(first) : first;
+        const local = first.startsWith("http") && !ACE_RETURN_REMOTE_URL
+            ? await this.downloadAndSaveImage(first)
+            : first;
         return { original_id: `nano_upscale_${Date.now()}`, images: [local] };
     }
 
@@ -787,7 +791,9 @@ export class NanoAdapter implements AiProvider {
 
         const first = remoteUrls[0];
         if (!first) throw new Error("Ace 扩展失败：未获取到图片 URL");
-        const local = first.startsWith("http") ? await this.downloadAndSaveImage(first) : first;
+        const local = first.startsWith("http") && !ACE_RETURN_REMOTE_URL
+            ? await this.downloadAndSaveImage(first)
+            : first;
         return { original_id: `nano_extend_${Date.now()}`, images: [local] };
     }
 
@@ -852,7 +858,9 @@ export class NanoAdapter implements AiProvider {
 
         const first = remoteUrls[0];
         if (!first) throw new Error("Ace 拆分失败：未获取到图片 URL");
-        const local = first.startsWith("http") ? await this.downloadAndSaveImage(first) : first;
+        const local = first.startsWith("http") && !ACE_RETURN_REMOTE_URL
+            ? await this.downloadAndSaveImage(first)
+            : first;
         return { original_id: `nano_split_${Date.now()}`, images: [local] };
     }
 }

@@ -284,15 +284,26 @@ const handlePromptInput = () => {
 
     // @ 图片别名提示（仅当注入存在时）
     if (imageAliasStore && atIndex !== -1 && atIndex >= 0) {
-        const keyword = currentValue.slice(atIndex + 1).trim();
-        const all = getRelatedImageAliases();
-        const list = all.filter(item =>
-            !keyword ||
-            item.alias.includes(keyword)
-        );
-        showAliasSuggestions.value = list.length > 0;
-        aliasSuggestions.value = list;
-        selectedAliasIndex.value = 0;
+        const textareaEl = getTextareaEl();
+        const cursorPos = textareaEl?.selectionStart ?? currentValue.length;
+
+        // 只有当光标在该 @ 之后时，才认为用户正在输入别名
+        if (cursorPos >= atIndex + 1) {
+            const rawKeyword = currentValue.slice(atIndex + 1, cursorPos);
+            const keyword = rawKeyword.trim();
+
+            const all = getRelatedImageAliases();
+            const list = all.filter(item =>
+                !keyword ||
+                item.alias.includes(keyword)
+            );
+            showAliasSuggestions.value = list.length > 0;
+            aliasSuggestions.value = list;
+            selectedAliasIndex.value = 0;
+        } else {
+            showAliasSuggestions.value = false;
+            aliasSuggestions.value = [];
+        }
     } else {
         showAliasSuggestions.value = false;
         aliasSuggestions.value = [];

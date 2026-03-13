@@ -150,7 +150,7 @@
                 @pane-contextmenu="handlePaneContextMenu">
                 <Background pattern-color="#2d2e36" :gap="8" />
                 <Controls />
-                <MiniMap />
+                <MiniMap mask-color="#212228" node-color="#191a1e" />
             </VueFlow>
 
             <!-- 右键菜单 -->
@@ -295,8 +295,10 @@ const nodes = ref([
 // 初始边数据
 const edges = ref([]);
 
-// 复制的节点与连线（用于 Ctrl+C / Ctrl+V）
+// 复制的节点与连线（用于 Ctrl+C / Ctrl+V，仅节点复制粘贴）
 const copiedSelection = ref<{ nodes: any[]; edges: any[] } | null>(null);
+// 标记本次粘贴是否已在 paste 事件中处理过（避免 keydown 兜底与 paste 重复执行）
+const didHandlePasteThisCycle = ref(false);
 
 // 图片别名：按工作流范围自增（图1、图2...）
 type ImageAliasStore = {
@@ -1027,8 +1029,69 @@ const handleDrop = async (event: DragEvent) => {
     }
 };
 
-// 处理粘贴事件：优先识别图片，若有图片则上传并在画布上创建图片节点
-const handlePaste = async (event: ClipboardEvent) => {
+// 执行「粘贴已复制节点」逻辑（可被 handlePaste 与 keydown 兜底调用）
+const pasteCopiedNodes = () => {
+    if (!copiedSelection.value || copiedSelection.value.nodes.length === 0) return;
+    const timestamp = Date.now();
+    const idMap: Record<string, string> = {};
+    copiedSelection.value.nodes.forEach((node: any, index: number) => {
+        idMap[node.id] = `${node.id}_copy_${timestamp}_${index}`;
+    });
+    let dx = 40;
+    let dy = 40;
+    const nodes = copiedSelection.value.nodes;
+    if (nodes.length > 0) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        nodes.forEach((node: any) => {
+            const x = node.position?.x ?? 0;
+            const y = node.position?.y ?? 0;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        });
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        let targetX = centerX + 40;
+        let targetY = centerY + 40;
+        if (lastMousePosition.value) {
+            const flowPos = screenToFlowCoordinate({
+                x: lastMousePosition.value.x,
+                y: lastMousePosition.value.y,
+            });
+            targetX = flowPos.x;
+            targetY = flowPos.y;
+        }
+        dx = targetX - centerX;
+        dy = targetY - centerY;
+    }
+    saveState();
+    const newNodes = copiedSelection.value.nodes.map((node: any) => {
+        const cloned = JSON.parse(JSON.stringify(node));
+        cloned.id = idMap[node.id];
+        cloned.position = {
+            x: (cloned.position?.x ?? 0) + dx,
+            y: (cloned.position?.y ?? 0) + dy,
+        };
+        cloned.selected = false;
+        return cloned;
+    });
+    const newEdges = (copiedSelection.value.edges || []).map((edge: any, index: number) => {
+        const cloned = JSON.parse(JSON.stringify(edge));
+        cloned.id = `${edge.id}_copy_${timestamp}_${index}`;
+        cloned.source = idMap[edge.source] || edge.source;
+        cloned.target = idMap[edge.target] || edge.target;
+        return cloned;
+    });
+    addNodes(newNodes);
+    if (newEdges.length > 0) {
+        addEdges(newEdges);
+    }
+    ElMessage.success(`已粘贴 ${newNodes.length} 个节点`);
+};
+
+// 处理粘贴事件：仅支持粘贴已复制的节点（单节点或多节点）
+const handlePaste = (event: ClipboardEvent) => {
     const target = event.target as HTMLElement | null;
     const isInputElement = !!(
         target &&
@@ -1037,95 +1100,13 @@ const handlePaste = async (event: ClipboardEvent) => {
             target.isContentEditable ||
             target.closest('input, textarea, [contenteditable="true"]'))
     );
+    if (isInputElement) return;
 
-    // 如果正在输入框中粘贴，交给默认行为处理
-    if (isInputElement) {
-        return;
-    }
-
-    const items = event.clipboardData?.items;
-    if (!items || items.length === 0) {
-        // 没有剪贴板数据，尝试仅做节点粘贴
-        return;
-    }
-
-    // 优先查找图片
-    let imageFile: File | null = null;
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item) continue;
-        const type = item.type || '';
-        if (type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-                imageFile = file;
-                break;
-            }
-        }
-    }
-
-    // 如果有图片，走图片上传 + 创建图片节点逻辑
-    if (imageFile) {
+    if (copiedSelection.value && copiedSelection.value.nodes.length > 0) {
         event.preventDefault();
-
-        const file = imageFile;
-        if (!isSupportedImageFile(file)) {
-            ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
-            return;
-        }
-
-        // 确定节点位置：优先使用最后的鼠标位置，否则使用画布中心附近
-        let position: { x: number; y: number };
-        if (lastMousePosition.value) {
-            position = screenToFlowCoordinate({
-                x: lastMousePosition.value.x,
-                y: lastMousePosition.value.y,
-            });
-        } else {
-            position = calculateOptimalPosition('image');
-        }
-
-        try {
-            const uploadRes: any = await uploadImage(file);
-            if (uploadRes.data && uploadRes.data.url) {
-                const originalUrl: string = uploadRes.data.url;
-                const imageUrl = originalUrl.startsWith('http')
-                    ? originalUrl
-                    : getUploadUrl(originalUrl);
-                const imageKey: string = uploadRes.data.filename || originalUrl;
-                const alias = getOrCreateImageAlias(imageKey);
-
-                // 在状态改变前入撤销栈，保证可撤销
-                saveState();
-
-                const nodeId = `image_node_${Date.now()}`;
-                addNodes({
-                    id: nodeId,
-                    type: 'image',
-                    position,
-                    data: {
-                        imageUrl,
-                        originalImageUrl: originalUrl,
-                        originalFilename: uploadRes.data.filename,
-                        imageAlias: alias,
-                        imageKey,
-                    },
-                });
-
-                ElMessage.success('已通过粘贴创建图片节点');
-            } else {
-                ElMessage.error('图片上传失败：返回数据异常');
-            }
-        } catch (error: any) {
-            console.error('粘贴图片上传失败:', error);
-            ElMessage.error(error?.message || '图片上传失败');
-        }
-
-        return;
+        didHandlePasteThisCycle.value = true;
+        pasteCopiedNodes();
     }
-
-    // 若剪贴板中没有图片，但存在内部复制内容，则在这里也可以考虑做节点粘贴
-    // 当前实现中，Ctrl+V 的节点粘贴逻辑在 handleKeyDown 中已处理，这里无需重复。
 };
 
 // 画布鼠标移动：记录最后一次鼠标位置（用于粘贴图片节点定位）
@@ -1896,7 +1877,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
         }
     }
 
-    // Ctrl+C / Cmd+C: 复制当前选中的节点和它们之间的连线
+    // Ctrl+C / Cmd+C: 复制当前选中的节点（单节点或多节点）及它们之间的连线
     if ((event.ctrlKey || event.metaKey) && event.key === 'c' && !isInputElement) {
         const selectedNodes = getNodes.value.filter(node => node.selected);
         if (selectedNodes.length > 0) {
@@ -1904,7 +1885,6 @@ const handleKeyDown = (event: KeyboardEvent) => {
             const selectedEdges = getEdges.value.filter(
                 edge => selectedIds.has(edge.source) && selectedIds.has(edge.target)
             );
-            // 深拷贝，避免后续修改影响原始数据
             copiedSelection.value = {
                 nodes: JSON.parse(JSON.stringify(selectedNodes)),
                 edges: JSON.parse(JSON.stringify(selectedEdges)),
@@ -1943,89 +1923,15 @@ const handleKeyDown = (event: KeyboardEvent) => {
         insertLayerSeparationNode();
     }
 
-    // Ctrl+V / Cmd+V: 粘贴节点（若没有图片剪贴板数据）
+    // Ctrl+V：节点粘贴由 paste 事件优先处理；若 paste 未触发（如画布焦点问题），则延迟兜底执行节点粘贴
     if ((event.ctrlKey || event.metaKey) && event.key === 'v' && !isInputElement) {
-        // 具体粘贴逻辑在 paste 事件中处理，这里仅在无图片时兜底处理节点粘贴
         if (copiedSelection.value && copiedSelection.value.nodes.length > 0) {
-            event.preventDefault();
-
-            const timestamp = Date.now();
-            const idMap: Record<string, string> = {};
-
-            // 为每个旧节点 ID 生成新 ID
-            copiedSelection.value.nodes.forEach((node, index) => {
-                idMap[node.id] = `${node.id}_copy_${timestamp}_${index}`;
-            });
-
-            // 计算粘贴位置：优先使用鼠标位置，使整组节点围绕鼠标落点
-            let dx = 40;
-            let dy = 40;
-            const nodes = copiedSelection.value.nodes;
-
-            if (nodes.length > 0) {
-                // 计算被复制节点的中心点
-                let minX = Infinity;
-                let maxX = -Infinity;
-                let minY = Infinity;
-                let maxY = -Infinity;
-
-                nodes.forEach((node: any) => {
-                    const x = node.position?.x ?? 0;
-                    const y = node.position?.y ?? 0;
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                });
-
-                const centerX = (minX + maxX) / 2;
-                const centerY = (minY + maxY) / 2;
-
-                // 目标点：鼠标所在画布坐标，若没有则在原中心右下偏移
-                let targetX = centerX + 40;
-                let targetY = centerY + 40;
-                if (lastMousePosition.value) {
-                    const flowPos = screenToFlowCoordinate({
-                        x: lastMousePosition.value.x,
-                        y: lastMousePosition.value.y,
-                    });
-                    targetX = flowPos.x;
-                    targetY = flowPos.y;
+            setTimeout(() => {
+                if (!didHandlePasteThisCycle.value) {
+                    pasteCopiedNodes();
                 }
-
-                dx = targetX - centerX;
-                dy = targetY - centerY;
-            }
-
-            // 在状态改变前入撤销栈，保证可撤销
-            saveState();
-
-            const newNodes = copiedSelection.value.nodes.map((node) => {
-                const cloned = JSON.parse(JSON.stringify(node));
-                cloned.id = idMap[node.id];
-                cloned.position = {
-                    x: (cloned.position?.x ?? 0) + dx,
-                    y: (cloned.position?.y ?? 0) + dy,
-                };
-                // 粘贴后的节点默认不选中，避免误操作
-                cloned.selected = false;
-                return cloned;
-            });
-
-            const newEdges = (copiedSelection.value.edges || []).map((edge, index) => {
-                const cloned = JSON.parse(JSON.stringify(edge));
-                cloned.id = `${edge.id}_copy_${timestamp}_${index}`;
-                cloned.source = idMap[edge.source] || edge.source;
-                cloned.target = idMap[edge.target] || edge.target;
-                return cloned;
-            });
-
-            addNodes(newNodes);
-            if (newEdges.length > 0) {
-                addEdges(newEdges);
-            }
-
-            ElMessage.success(`已粘贴 ${newNodes.length} 个节点`);
+                didHandlePasteThisCycle.value = false;
+            }, 80);
         }
     }
 
@@ -2069,7 +1975,7 @@ onMounted(async () => {
     // 绑定快捷键
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('paste', handlePaste);
+    window.addEventListener('paste', handlePaste, true);
 
     // 处理URL参数
     const query = route.query;
@@ -2275,7 +2181,7 @@ onUnmounted(() => {
     }
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
-    window.removeEventListener('paste', handlePaste);
+    window.removeEventListener('paste', handlePaste, true);
 });
 </script>
 
@@ -2357,6 +2263,17 @@ onUnmounted(() => {
 .canvas-wrapper :deep(.vue-flow__selection) {
     border: 1px dashed rgba(64, 158, 255, 0.9);
     background-color: rgba(64, 158, 255, 0.06);
+}
+
+/* 右下角小地图预览：背景与节点色 */
+.canvas-wrapper :deep(.vue-flow__minimap) {
+    background-color: #212228 !important;
+}
+.canvas-wrapper :deep(.vue-flow__minimap svg) {
+    background-color: #212228;
+}
+.canvas-wrapper :deep(.vue-flow__minimap .vue-flow__minimap-mask) {
+    fill: #212228;
 }
 
 .side-toolbar {
