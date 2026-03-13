@@ -70,7 +70,8 @@ export const uploadImage = async (req: Request, res: Response) => {
             data: { url: fileUrl, filename, size: req.file.size },
         });
     } catch (error: any) {
-        return res.status(500).json({ message: error.message || "上传失败" });
+        console.error("[uploadImage]", error?.message ?? error);
+        return res.status(500).json({ message: error?.message || "上传失败" });
     }
 };
 
@@ -110,7 +111,8 @@ export const uploadImages = async (req: Request, res: Response) => {
             data: { files: uploadedFiles, count: uploadedFiles.length },
         });
     } catch (error: any) {
-        return res.status(500).json({ message: error.message || "上传失败" });
+        console.error("[uploadImages]", error?.message ?? error);
+        return res.status(500).json({ message: error?.message || "上传失败" });
     }
 };
 

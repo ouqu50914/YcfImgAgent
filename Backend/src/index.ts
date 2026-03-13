@@ -20,6 +20,8 @@ import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 import { errorHandler } from "./middlewares/error.middleware";
 
 dotenv.config();
+// 本地环境配置：.env.local 会覆盖 .env 中的同名变量（本地开发时使用）
+dotenv.config({ path: ".env.local", override: true });
 
 const app = express();
 

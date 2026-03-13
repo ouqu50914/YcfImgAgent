@@ -24,6 +24,7 @@ Frontend/.vite/
 .env
 .env.*.local
 Backend/.env
+Backend/.env.local
 Frontend/.env
 Frontend/.env.*
 

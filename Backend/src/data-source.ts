@@ -16,6 +16,7 @@ import { SystemConfig } from "./entities/SystemConfig";
 import { VideoTask } from "./entities/VideoTask";
 
 dotenv.config();
+dotenv.config({ path: ".env.local", override: true });
 
 export const AppDataSource = new DataSource({
     type: "mysql",
