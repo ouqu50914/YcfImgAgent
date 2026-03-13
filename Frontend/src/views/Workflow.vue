@@ -233,6 +233,9 @@
                 </el-table-column>
             </el-table>
         </el-dialog>
+
+        <!-- Gemini 聊天面板（包含右侧悬浮开关按钮） -->
+        <WorkflowChatPanel :workflow-context="workflowContextForChat" />
     </div>
 </template>
 
@@ -253,6 +256,7 @@ import { uploadImage } from '@/api/upload';
 import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
+import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
 import { getUploadUrl } from '@/utils/image-loader';
 
 // 引入默认样式
@@ -471,6 +475,26 @@ const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
 const canvasWrapperRef = ref<HTMLElement | null>(null);
 /** 当前编辑对应的历史记录 id：从历史打开时设为该 id，首次自动保存后回填，后续保存均覆盖此条 */
 const currentHistoryId = ref<number | null>(null);
+
+// 提供给 Gemini 聊天的工作流上下文（精简版）
+const workflowContextForChat = computed(() => {
+    const nodes = getNodes.value;
+    const edges = getEdges.value;
+    const selectedNodes = nodes.filter(node => node.selected);
+
+    return {
+        historyId: currentHistoryId.value,
+        templateId: currentTemplateId.value,
+        nodesCount: nodes.length,
+        edgesCount: edges.length,
+        selectedNodes: selectedNodes.map(node => ({
+            id: node.id,
+            type: node.type,
+            label: (node.data as any)?.label,
+            text: (node.data as any)?.text,
+        })),
+    };
+});
 
 // 截取画布作为封面图，上传后返回 URL；失败返回 null
 const captureCanvasCover = async (): Promise<string | null> => {

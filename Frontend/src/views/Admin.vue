@@ -61,12 +61,19 @@
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="180" />
-          <el-table-column label="操作" width="360" fixed="right">
+          <el-table-column label="操作" width="420" fixed="right">
             <template #default="{ row }">
               <el-button size="small" @click="viewUserStats(row.id)">统计</el-button>
               <el-button size="small" @click="editCreditsHandler(row)" v-if="row.role_id !== 1">积分</el-button>
               <el-button size="small" @click="showResetPasswordDialogHandler(row)">重置密码</el-button>
               <el-button size="small" @click="editUser(row)">编辑</el-button>
+              <el-button
+                size="small"
+                :type="row.status === 1 ? 'warning' : 'success'"
+                @click="toggleUserStatus(row)"
+              >
+                {{ row.status === 1 ? '停用' : '启用' }}
+              </el-button>
               <el-button size="small" type="danger" @click="deleteUserHandler(row.id)">删除</el-button>
             </template>
           </el-table-column>
@@ -502,6 +509,26 @@ const editUser = async (user: any) => {
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '更新失败');
+    }
+  }
+};
+
+/** 停用/启用用户：停用后无法登录，信息保留；启用后可重新登录 */
+const toggleUserStatus = async (row: any) => {
+  const isEnable = row.status === 1;
+  const action = isEnable ? '停用' : '启用';
+  try {
+    await ElMessageBox.confirm(
+      isEnable ? '停用后该用户将无法登录，是否继续？' : '启用后该用户可重新登录，是否继续？',
+      action,
+      { type: 'warning' }
+    );
+    await updateUser(row.id, { status: isEnable ? 0 : 1 });
+    ElMessage.success(`${action}成功`);
+    loadUserList();
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || `${action}失败`);
     }
   }
 };

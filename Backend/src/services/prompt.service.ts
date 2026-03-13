@@ -1,5 +1,17 @@
 import axios from 'axios';
 
+type ChatMessageRole = 'user' | 'assistant' | 'system';
+
+interface ChatMessage {
+    role: ChatMessageRole;
+    content: string;
+}
+
+interface GeminiChatOptions {
+    temperature?: number;
+    maxTokens?: number;
+}
+
 export class PromptService {
     /**
      * 优化提示词
@@ -65,6 +77,81 @@ export class PromptService {
             console.error('[PromptService] 大模型API调用失败:', error.message);
             // 降级到简单优化
             return this.simpleOptimize(originalPrompt, options);
+        }
+    }
+
+    /**
+     * 使用 Ace Data Gemini chat-completions 进行对话
+     * 约定环境变量：
+     * - GEMINI_CHAT_API_KEY: Ace Data 提供的 API Key
+     * - GEMINI_CHAT_API_URL: 完整的 chat-completions 接口地址
+     * - GEMINI_CHAT_MODEL:   使用的模型名称
+     */
+    async chatWithGemini(
+        messages: ChatMessage[],
+        options?: GeminiChatOptions
+    ): Promise<string> {
+        const API_KEY = process.env.GEMINI_CHAT_API_KEY;
+        const API_URL = process.env.GEMINI_CHAT_API_URL;
+        const MODEL = process.env.GEMINI_CHAT_MODEL || 'gemini-1.5-flash';
+
+        if (!API_KEY || !API_URL) {
+            throw new Error('Gemini 聊天服务未正确配置，请先设置 GEMINI_CHAT_API_KEY 与 GEMINI_CHAT_API_URL');
+        }
+
+        const payload: any = {
+            model: MODEL,
+            messages,
+        };
+
+        if (typeof options?.temperature === 'number') {
+            payload.temperature = options.temperature;
+        }
+        if (typeof options?.maxTokens === 'number') {
+            // Ace Data 文档如使用 max_tokens，则沿用；否则可根据实际字段名调整
+            payload.max_tokens = options.maxTokens;
+        }
+
+        try {
+            const response = await axios.post(
+                API_URL,
+                payload,
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${API_KEY}`,
+                    },
+                    timeout: 180000,
+                }
+            );
+
+            const data = response.data;
+
+            let reply: unknown =
+                // OpenAI 兼容格式
+                data?.choices?.[0]?.message?.content ??
+                data?.choices?.[0]?.text ??
+                // Gemini 官方 candidates 格式
+                (Array.isArray(data?.candidates) &&
+                    data.candidates[0]?.content &&
+                    Array.isArray(data.candidates[0].content.parts)
+                    ? data.candidates[0].content.parts
+                        .map((p: any) => p?.text || '')
+                        .join('\n')
+                    : undefined) ??
+                // 更简单的字段
+                data?.reply ??
+                data?.message ??
+                (typeof data === 'string' ? data : '');
+
+            if (!reply || typeof reply !== 'string' || !reply.trim()) {
+                throw new Error('Gemini 返回数据格式异常');
+            }
+
+            return reply.trim();
+        } catch (error: any) {
+            console.error('[PromptService] Gemini chat-completions 调用失败:', error?.message || error);
+            throw new Error('Gemini 聊天服务调用失败，请稍后重试');
         }
     }
 
