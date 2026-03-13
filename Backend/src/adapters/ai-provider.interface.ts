@@ -6,6 +6,8 @@ export interface GenerateParams {
     num_images?: number; // 生成图片数量，1-4
     imageUrl?: string; // 单图生图时使用的参考图片URL
     imageUrls?: string[]; // 多图生图时使用的参考图片URL数组
+    /** 与 imageUrls 同顺序的图片别名数字（例如 4 表示“图4”），用于构建 @图N 与具体图片的映射说明 */
+    imageAliases?: number[];
     quality?: string; // 画质：1K、2K、4K（Nano Banana Pro）或 standard（Seedream）
     model?: 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview'; // Nano 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）

@@ -289,6 +289,7 @@ const pendingImageNodeIds = ref<string[]>([]);
 // 从连接读取的数据
 const connectedPrompt = ref('');
 const connectedImages = ref<string[]>([]);
+const connectedImageAliases = ref<number[]>([]);
 
 // 计算连接状态
 const connectedPromptCount = computed(() => {
@@ -328,16 +329,30 @@ watch(
     }
         });
 
-        // 收集图片
+        // 收集图片及其别名
         connectedImages.value = [];
+        connectedImageAliases.value = [];
         targetEdges.forEach(edge => {
             const sourceNode = findNode(edge.source);
             if (sourceNode && sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
                 const url = sourceNode.data.imageUrl;
                 if (url && !connectedImages.value.includes(url)) {
                     connectedImages.value.push(url);
-        }
-    }
+                    const aliasText: string | undefined = (sourceNode.data as any)?.imageAlias;
+                    let aliasNum: number | null = null;
+                    if (typeof aliasText === 'string') {
+                        const m = aliasText.match(/^图(\d+)$/);
+                        if (m) {
+                            const n = Number(m[1]);
+                            if (!Number.isNaN(n) && n > 0) {
+                                aliasNum = n;
+                            }
+                        }
+                    }
+                    // 若别名解析失败，则按当前长度顺序兜底
+                    connectedImageAliases.value.push(aliasNum ?? connectedImageAliases.value.length + 1);
+                }
+            }
         });
     },
     { immediate: true, deep: true }
@@ -366,6 +381,7 @@ const handleGenerate = async () => {
         // 1. 从连接读取数据
         const finalPrompt = connectedPrompt.value;
         const referenceImageUrls = [...connectedImages.value];
+        const referenceImageAliases = [...connectedImageAliases.value];
 
         // 2. 校验：至少需要提示词或图片之一
         // 约束：必须至少连接一个提示词节点才能执行
@@ -408,6 +424,14 @@ const handleGenerate = async () => {
             imageUrl: hasMultipleReferenceImages ? undefined : (referenceImageUrl || undefined),
             imageUrls: hasMultipleReferenceImages && processedImageUrls.length > 0 ? processedImageUrls : undefined,
         };
+
+        // 为 Nano 传递与图片一一对应的别名编号（例如 4 表示“图4”）
+        if (processedImageUrls.length > 0 && referenceImageAliases.length > 0) {
+            const imageAliases = referenceImageAliases.slice(0, processedImageUrls.length);
+            if (imageAliases.some(n => typeof n === 'number' && n > 0)) {
+                requestParams.imageAliases = imageAliases;
+            }
+        }
 
         // 6. 根据模型类型处理参数
         if (apiType.value === 'dream') {

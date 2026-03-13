@@ -142,7 +142,7 @@
   
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted, inject, nextTick } from 'vue';
-import { Handle, Position, type NodeProps } from '@vue-flow/core';
+import { Handle, Position, type NodeProps, useVueFlow } from '@vue-flow/core';
 import { EditPen } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
@@ -159,6 +159,8 @@ type ImageAliasStore = {
 
 const props = defineProps<NodeProps>();
 const text = ref(props.data?.text || '');
+
+const { getEdges, findNode } = useVueFlow();
 
 // 当内部输入变化时，同步到节点数据
 watch(text, (val) => {
@@ -215,6 +217,55 @@ const loadPromptTemplates = async () => {
     }
 };
 
+// 计算与当前提示词节点通过同一生图节点关联的图片别名列表
+const getRelatedImageAliases = (): { key: string; alias: string }[] => {
+    if (!imageAliasStore) return [];
+
+    const edges = getEdges.value || [];
+    if (!Array.isArray(edges) || edges.length === 0) return [];
+
+    const dreamNodeIds = new Set<string>();
+
+    for (const edge of edges) {
+        if (!edge?.source || !edge?.target) continue;
+        if (edge.source !== props.id) continue;
+        const targetNode = findNode(edge.target);
+        if (targetNode && targetNode.type === 'dream') {
+            dreamNodeIds.add(targetNode.id);
+        }
+    }
+
+    if (dreamNodeIds.size === 0) return [];
+
+    const aliasMap: Record<string, string> = {};
+
+    for (const edge of edges) {
+        if (!edge?.source || !edge?.target) continue;
+        if (!dreamNodeIds.has(edge.target)) continue;
+
+        const imageNode = findNode(edge.source);
+        if (!imageNode || imageNode.type !== 'image') continue;
+
+        const data: any = imageNode.data || {};
+        const key: string | undefined =
+            data.imageKey || data.originalImageUrl || data.imageUrl;
+        if (!key) continue;
+
+        let alias: string | undefined = data.imageAlias;
+        if (!alias) {
+            alias = imageAliasStore.getOrCreateAlias(key);
+            data.imageAlias = alias;
+            data.imageKey = key;
+        }
+
+        if (!aliasMap[key]) {
+            aliasMap[key] = alias;
+        }
+    }
+
+    return Object.entries(aliasMap).map(([key, alias]) => ({ key, alias }));
+};
+
 // 处理提示词输入
 const handlePromptInput = () => {
     props.data.text = text.value;
@@ -234,7 +285,7 @@ const handlePromptInput = () => {
     // @ 图片别名提示（仅当注入存在时）
     if (imageAliasStore && atIndex !== -1 && atIndex >= 0) {
         const keyword = currentValue.slice(atIndex + 1).trim();
-        const all = imageAliasStore.getAllAliases();
+        const all = getRelatedImageAliases();
         const list = all.filter(item =>
             !keyword ||
             item.alias.includes(keyword)

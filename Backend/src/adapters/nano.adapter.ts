@@ -422,33 +422,9 @@ export class NanoAdapter implements AiProvider {
         throw new Error(`无效的 Nano 模型: ${model}，仅支持 nano-banana-2 或 nano-banana-pro`);
     }
 
-    /** 根据分辨率+比例计算像素尺寸，用于 Nano 文生图 size（如 1024x1024） */
-    private calculatePixelSize(aspectRatioValue: string | undefined, qualityValue: string | undefined): { width: number; height: number } {
-        const ratio = aspectRatioValue || "1:1";
-        const q = qualityValue || "2K";
-
-        const resolutionMap: Record<string, number> = {
-            "1K": 1024,
-            "2K": 2048,
-            "4K": 4096,
-        };
-        const baseSize = resolutionMap[q] || 2048;
-
-        const ratioMap: Record<string, { width: number; height: number }> = {
-            "1:1": { width: baseSize, height: baseSize },
-            "2:3": { width: Math.floor((baseSize * 2) / 3), height: baseSize },
-            "3:2": { width: baseSize, height: Math.floor((baseSize * 2) / 3) },
-            "3:4": { width: Math.floor((baseSize * 3) / 4), height: baseSize },
-            "4:3": { width: baseSize, height: Math.floor((baseSize * 3) / 4) },
-            "4:5": { width: Math.floor((baseSize * 4) / 5), height: baseSize },
-            "5:4": { width: baseSize, height: Math.floor((baseSize * 4) / 5) },
-            "9:16": { width: Math.floor((baseSize * 9) / 16), height: baseSize },
-            "16:9": { width: baseSize, height: Math.floor((baseSize * 9) / 16) },
-            "21:9": { width: baseSize, height: Math.floor((baseSize * 9) / 21) },
-        };
-
-        return ratioMap[ratio] || { width: baseSize, height: baseSize };
-    }
+    // 分辨率说明：
+    // 目前按照 Ace 官方示例，统一使用 resolution 字段，并直接透传 1K/2K/4K，
+    // 不在服务端换算成具体像素尺寸。
 
     async generateImage(params: GenerateParams, _apiKey: string, _apiUrl: string): Promise<AiResponse> {
         // 前端仍然可以传 numImages，这里只用来决定是否并发多次调用，不再透传到 Ace（不发送 count 字段）
@@ -468,7 +444,7 @@ export class NanoAdapter implements AiProvider {
             return { original_id: `nano_${Date.now()}`, images: allUrls };
         }
 
-        // 根据提示词中的 @图X 与参考图片数量，构造带别名说明的 prompt
+        // 根据提示词中的 @图X、参考图片数量与前端传入的图片别名，构造带别名说明的 prompt
         const imageCountForAlias =
             (params.imageUrls && params.imageUrls.length > 0)
                 ? params.imageUrls.length
@@ -476,16 +452,17 @@ export class NanoAdapter implements AiProvider {
                 ? 1
                 : 0;
 
-        const promptWithAliases = this.buildPromptWithAliases(
+        const imageAliasesFromFront = (params as any).imageAliases as number[] | undefined;
+
+        let promptWithAliases = this.buildPromptWithAliases(
             (params.prompt || "生成图片") as string,
-            imageCountForAlias
+            imageCountForAlias,
+            imageAliasesFromFront
         );
 
         // Ace 文档中 action 默认为 generate，这里仅在图生图时显式设置为 edit，
         // 文生图则不传 action 字段，交给服务端使用默认行为。
-        const body: Record<string, unknown> = {
-            prompt: promptWithAliases,
-        };
+        const body: Record<string, unknown> = {};
         if (hasImage) {
             body.action = "edit";
         }
@@ -495,25 +472,30 @@ export class NanoAdapter implements AiProvider {
         if (model) {
             body.model = model;
         }
+
+        // 分辨率/比例处理：
+        // - 文生图：resolution 直接透传 1K/2K/4K，aspect_ratio 也透传，不再写进提示词
+        // - 图生图：resolution 透传 1K/2K/4K，aspect_ratio 单独透传
         const quality = params.quality && ["1K", "2K", "4K"].includes(params.quality) ? params.quality : undefined;
 
         if (!hasImage) {
-            // 文生图：size 换算为像素尺寸，如 "1024x1024"，不再透传 aspect_ratio
-            const { width, height } = this.calculatePixelSize(params.aspectRatio as string | undefined, quality);
-            body.size = `${width}x${height}`;
-
+            if (quality) {
+                body.resolution = quality;
+            }
             if (params.aspectRatio) {
-                body.prompt = `${promptWithAliases}。宽高比约为 ${params.aspectRatio}，分辨率约为 ${width}x${height} 像素。`;
+                body.aspect_ratio = params.aspectRatio;
             }
         } else {
-            // 图生图：size 仍然使用 1K/2K/4K 档位，aspect_ratio 直接传给 Ace
+            // 图生图：resolution + aspect_ratio
             if (quality) {
-                body.size = quality;
+                body.resolution = quality;
             }
             if (params.aspectRatio) {
                 body.aspect_ratio = params.aspectRatio;
             }
         }
+
+        body.prompt = promptWithAliases;
 
         // 参考图片：支持单张 imageUrl 或多张 imageUrls（行为与 Seedream 类似）
         if (hasImage) {
@@ -603,32 +585,73 @@ export class NanoAdapter implements AiProvider {
      * 例如：图1 对应第 1 张图片；图2 对应第 2 张图片……
      * 这样模型在看到 @图1/@图2 时，就能知道对应的是哪一张参考图。
      */
-    private buildPromptWithAliases(originalPrompt: string, imageCount: number): string {
+    private buildPromptWithAliases(originalPrompt: string, imageCount: number, imageAliases?: number[]): string {
         const base = originalPrompt || "生成图片";
         if (!imageCount || imageCount <= 0) return base;
 
+        // 1) 如果前端显式传入了 imageAliases（与 imageUrls 对齐），优先使用该映射：
+        //    第 i 张图片对应别名 图{imageAliases[i]}。
+        const aliasesFromParam = Array.isArray(imageAliases)
+            ? imageAliases.filter((n) => typeof n === "number" && n > 0)
+            : [];
+
+        if (aliasesFromParam.length > 0) {
+            const pairsFromParam: { alias: number; index: number }[] = [];
+            for (let i = 0; i < imageCount; i++) {
+                const alias = aliasesFromParam[i] ?? i + 1;
+                pairsFromParam.push({ alias, index: i + 1 });
+            }
+
+            const aliasDescFromParam = pairsFromParam
+                .map((p) => `图${p.alias} 对应第 ${p.index} 张图片`)
+                .join("；");
+
+            return `有多张参考图片：${aliasDescFromParam}。下面是用户的详细描述：${base}`;
+        }
+
+        // 2) 兼容旧逻辑：从原始 prompt 中自动解析 @图N，并按照出现顺序映射到图片序号。
         const used = new Set<number>();
         const regex = /@图(\d+)/g;
         let match: RegExpExecArray | null;
 
+        // 收集用户实际使用过的别名编号（不再强制限制在 1..imageCount 内）
         while ((match = regex.exec(base)) !== null) {
             const raw = match[1];
             if (!raw) continue;
             const n = parseInt(raw, 10);
-            if (Number.isNaN(n)) continue;
-            if (n < 1 || n > imageCount) continue;
+            if (Number.isNaN(n) || n <= 0) continue;
             used.add(n);
         }
 
+        // 如果用户没有写任何 @图X，则默认使用 1..imageCount 作为别名编号
         if (used.size === 0) {
             for (let i = 1; i <= imageCount; i++) {
                 used.add(i);
             }
         }
 
-        const aliasDesc = Array.from(used)
-            .sort((a, b) => a - b)
-            .map((n) => `图${n} 对应第 ${n} 张图片`)
+        const sorted = Array.from(used).sort((a, b) => a - b);
+
+        // 将「出现顺序」与「图片下标」对齐：
+        // 例如用户只写了 @图4 @图5，且有 2 张参考图，则：
+        // 图4 -> 第 1 张图片；图5 -> 第 2 张图片
+        const pairs: { alias: number; index: number }[] = [];
+        let idx = 1;
+        for (const alias of sorted) {
+            if (idx > imageCount) break;
+            pairs.push({ alias, index: idx });
+            idx++;
+        }
+
+        // 理论上不应该出现，但兜底处理：如果 pairs 为空，则退回 1..imageCount 对应关系
+        if (pairs.length === 0) {
+            for (let i = 1; i <= imageCount; i++) {
+                pairs.push({ alias: i, index: i });
+            }
+        }
+
+        const aliasDesc = pairs
+            .map((p) => `图${p.alias} 对应第 ${p.index} 张图片`)
             .join("；");
 
         return `有多张参考图片：${aliasDesc}。下面是用户的详细描述：${base}`;

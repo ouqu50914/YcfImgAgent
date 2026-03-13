@@ -17,7 +17,7 @@
             </div>
             <!-- 加载中占位 -->
             <div v-if="isLoading" class="image-slot loading-slot"></div>
-            <!-- 实际图片 -->
+            <!-- 实际图片（取消 lazy，避免缩放画布时被误判离开视口而不渲染） -->
             <el-image 
                 v-else
                 :src="imageUrl" 
@@ -25,8 +25,6 @@
                 class="img-preview"
                 :preview-src-list="[]"
                 :hide-on-click-modal="false"
-                lazy
-                :loading="'lazy'"
                 @click="handleImageClick"
             >
                 <template #error>
@@ -451,19 +449,39 @@ const handleImageClick = () => {
     }
 };
 
-// 下载原图
-const handleDownloadOriginal = () => {
+// 下载原图（通过 Blob 强制触发下载，避免在浏览器中直接打开）
+const handleDownloadOriginal = async () => {
     const original = (props.data as any)?.originalImageUrl || imageUrl.value;
     if (!original) {
         ElMessage.warning('暂无可下载的原图');
         return;
     }
 
-    const fullUrl = getImageUrl(original);
-    const link = document.createElement('a');
-    link.href = fullUrl;
-    link.download = 'image.png';
-    link.click();
+    try {
+        const fullUrl = getImageUrl(original);
+        const response = await fetch(fullUrl, { mode: 'cors' });
+        if (!response.ok) {
+            throw new Error('下载请求失败');
+        }
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        // 优先使用原文件名，其次回退到固定文件名
+        const filename =
+            (props.data as any)?.originalFilename ||
+            original.split('/').pop() ||
+            'image.png';
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+    } catch (error: any) {
+        console.error('[ImageNode] 下载原图失败', error);
+        ElMessage.error('下载原图失败，请稍后重试');
+    }
 };
 </script>
 

@@ -68,7 +68,11 @@ export class WorkflowHistoryService {
             });
             if (existing) {
                 existing.workflow_data = JSON.stringify(workflowData);
-                existing.snapshot_name = `自动保存 ${new Date().toLocaleString('zh-CN')}`;
+                // 仅当名称仍为系统自动生成的“自动保存 ...”时才覆盖，保留用户手动重命名
+                const prefix = '自动保存 ';
+                if (!existing.snapshot_name || existing.snapshot_name.startsWith(prefix)) {
+                    existing.snapshot_name = `${prefix}${new Date().toLocaleString('zh-CN')}`;
+                }
                 await this.historyRepo.save(existing);
                 return existing;
             }
