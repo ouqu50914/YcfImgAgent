@@ -7,17 +7,21 @@
       
       <div class="node-content">
             <div class="prompt-content nodrag">
-                <el-input
-                    ref="promptInputRef"
-                    v-model="text"
-                    type="textarea"
-                    :autosize="{ minRows: 6, maxRows: 12 }"
-                    placeholder="请输入提示词..."
-                    class="prompt-input"
-                    maxlength="2000"
-                    @input="handlePromptInput"
-                    @keydown="handlePromptKeydown"
-                />
+                <div class="prompt-input-wrap" @wheel.stop>
+                    <div ref="mirrorRef" class="prompt-mirror">
+                        <div class="prompt-mirror-inner" v-html="highlightedHtml" />
+                    </div>
+                    <textarea
+                        ref="promptInputRef"
+                        v-model="text"
+                        class="prompt-input prompt-input-overlay"
+                        placeholder="请输入提示词..."
+                        maxlength="2000"
+                        rows="4"
+                        @input="handlePromptInput"
+                        @keydown="handlePromptKeydown"
+                    />
+                </div>
                 
                 <!-- 提示词列表下拉框 -->
                 <div
@@ -182,13 +186,32 @@ watch(
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
 const selectedSuggestionIndex = ref(0);
-const promptInputRef = ref<any>(null);
+const promptInputRef = ref<HTMLTextAreaElement | null>(null);
 
 // 图片别名 @图1 自动补全
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const showAliasSuggestions = ref(false);
 const aliasSuggestions = ref<{ key: string; alias: string }[]>([]);
 const selectedAliasIndex = ref(0);
+
+// 镜像高亮：@图1、@图2 等显示为蓝色
+const mirrorRef = ref<HTMLElement | null>(null);
+function escapeHtml(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+}
+const highlightedHtml = computed(() => {
+    const raw = text.value || '';
+    const escaped = escapeHtml(raw);
+    // 先高亮 @图1、@图2（保留 @ 并蓝色显示）
+    let out = escaped.replace(/@(图\d+)/g, '<span class="prompt-ref">@$1</span>');
+    // 再高亮未带 @ 的 图1、图2（仅显示高亮，不改变实际值）
+    out = out.replace(/(^|<br>|[\s\u00A0])(图\d+)(?=[\s\u00A0，。、；：!?]|$|<br>)/g, '$1<span class="prompt-ref">$2</span>');
+    return out;
+});
 
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
@@ -387,13 +410,11 @@ const selectImageAlias = (item: { key: string; alias: string }) => {
         text.value = `${currentPrompt}${currentPrompt ? ' ' : ''}${aliasText}`;
     } else {
         const before = currentPrompt.slice(0, atIndex);
-        // 保留 @ 后到光标的内容由 handlePromptInput 控制，这里直接整体替换成别名
         const textareaEl = getTextareaEl();
         const cursorPos = textareaEl?.selectionStart ?? currentPrompt.length;
-        const between = currentPrompt.slice(atIndex, cursorPos);
         const after = currentPrompt.slice(cursorPos);
-        const replacePrefix = between.startsWith('@') ? before : `${before}@`;
-        text.value = `${replacePrefix}${item.alias}${after}`;
+        // 始终用 @图1 形式替换，保留 @ 符号
+        text.value = `${before}${aliasText}${after}`;
     }
 
     props.data.text = text.value;
@@ -410,9 +431,9 @@ const selectImageAlias = (item: { key: string; alias: string }) => {
 };
 
 const getTextareaEl = (): HTMLTextAreaElement | null => {
-    const comp = promptInputRef.value as any;
-    if (!comp) return null;
-    return comp.textarea || comp.$refs?.textarea || null;
+    const el = promptInputRef.value;
+    if (!el) return null;
+    return el instanceof HTMLTextAreaElement ? el : null;
 };
 
 // 保存提示词
@@ -455,9 +476,49 @@ const handleClickOutside = (event: MouseEvent) => {
     }
 };
 
+const PROMPT_INPUT_MIN_H = 120;
+const PROMPT_INPUT_MAX_H = 360;
+
+function syncMirrorToTextarea() {
+    nextTick(() => {
+        const ta = getTextareaEl();
+        const mirror = mirrorRef.value;
+        if (ta && mirror) {
+            const inner = mirror.querySelector('.prompt-mirror-inner') as HTMLElement;
+            if (inner) inner.style.minHeight = `${ta.scrollHeight}px`;
+            mirror.scrollTop = ta.scrollTop;
+        }
+    });
+}
+
+function fitTextareaHeight() {
+    nextTick(() => {
+        const ta = getTextareaEl();
+        if (!ta) return;
+        ta.style.height = 'auto';
+        const h = Math.min(PROMPT_INPUT_MAX_H, Math.max(PROMPT_INPUT_MIN_H, ta.scrollHeight));
+        ta.style.height = `${h}px`;
+        syncMirrorToTextarea();
+    });
+}
+
+watch(text, () => {
+    syncMirrorToTextarea();
+    fitTextareaHeight();
+});
+
 onMounted(() => {
     loadPromptTemplates();
     document.addEventListener('click', handleClickOutside);
+    nextTick(() => {
+        const ta = getTextareaEl();
+        const mirror = mirrorRef.value;
+        if (ta && mirror) {
+            ta.addEventListener('scroll', () => { mirror.scrollTop = ta.scrollTop; });
+            fitTextareaHeight();
+            syncMirrorToTextarea();
+        }
+    });
 });
 
 onUnmounted(() => {
@@ -519,23 +580,72 @@ onUnmounted(() => {
     padding: 8px;
 }
 
+.prompt-input-wrap {
+    position: relative;
+    min-height: 120px;
+    max-height: 360px;
+}
+
+.prompt-mirror {
+    position: absolute;
+    /* 与 textarea 的 1px 边框一致，保证内容区域对齐 */
+    inset: 1px;
+    z-index: 0;
+    overflow-y: auto;
+    pointer-events: none;
+    border-radius: 7px; /* textarea 8px - 1px 边框 */
+}
+
+.prompt-mirror-inner {
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    font-family: inherit;
+    letter-spacing: normal;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #e0e0e0;
+    box-sizing: border-box;
+}
+
+/* 不加 font-weight，保证与 textarea 同字宽，光标才能对齐 */
+.prompt-mirror-inner :deep(.prompt-ref) {
+    color: var(--color-primary, #409eff);
+}
+
 .prompt-input {
     width: 100%;
 }
 
-.prompt-input :deep(.el-textarea__inner) {
-    min-height: 160px !important;
+.prompt-input-overlay {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    min-height: 120px;
+    max-height: 360px;
+    overflow-y: auto;
     line-height: 1.6;
     padding: 8px 10px;
     font-size: 13px;
-    background: transparent;
+    font-family: inherit;
+    letter-spacing: normal;
+    box-sizing: border-box;
+    background: transparent !important;
     border: 1px solid #404040;
     border-radius: 8px;
     resize: none;
-    color: #e0e0e0;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    caret-color: #e0e0e0;
+    outline: none;
 }
 
-.prompt-input :deep(.el-textarea__inner):focus {
+.prompt-input-overlay::placeholder {
+    color: var(--text-subtle);
+}
+
+.prompt-input-overlay:focus {
     border-color: #409eff;
     box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }

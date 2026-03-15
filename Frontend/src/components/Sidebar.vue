@@ -144,8 +144,8 @@ onMounted(async () => {
   top: 0;
   height: 100vh;
   width: 80px;
-  background: #fff;
-  border-right: 1px solid #e0e0e0;
+  background: var(--app-bg-sub);
+  border-right: 1px solid var(--app-border-color);
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -177,17 +177,17 @@ onMounted(async () => {
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.3s;
-  color: #606266;
+  color: var(--text-muted);
 }
 
 .nav-item:hover {
-  background: #f5f7fa;
-  color: #409eff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .nav-item.active {
-  background: #ecf5ff;
-  color: #409eff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 @media (max-width: 768px) {

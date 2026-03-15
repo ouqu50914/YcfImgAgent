@@ -127,6 +127,21 @@ export function getObject(key: string): Promise<Buffer> {
 }
 
 /**
+ * 从 COS 删除对象（用于删除模板/历史时同步清理云端文件）
+ * @param key COS 对象键，如 uploads/upload_xxx.jpg
+ */
+export function deleteObject(key: string): Promise<void> {
+    const client = getClient();
+    if (!client) return Promise.reject(new Error("COS 未配置或未启用"));
+    return new Promise((resolve, reject) => {
+        client.deleteObject(
+            { Bucket: BUCKET, Region: REGION, Key: key },
+            (err: unknown) => (err ? reject(err) : resolve())
+        );
+    });
+}
+
+/**
  * 根据逻辑路径获取文件内容：启用 COS 时从 COS 读，否则从本地 uploads 读
  * @param urlPath 如 /uploads/upload_xxx.jpg
  */

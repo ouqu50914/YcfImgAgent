@@ -136,7 +136,7 @@
             </div>
 
             <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
-                :connection-line-style="{ stroke: '#409eff', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
+                :connection-line-style="{ stroke: 'var(--color-primary)', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
                 :snap-to-grid="true" :snap-grid="[15, 15]" :nodes-connectable="true" :edges-updatable="true"
                 :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="!isSpacePressed"
                 :elements-selectable="true"
@@ -2224,11 +2224,11 @@ onUnmounted(() => {
     z-index: 30;
     padding: 6px 10px;
     font-size: 14px;
-    color: #606266;
+    color: var(--text-muted);
 }
 
 .back-button-float:hover {
-    color: #409eff;
+    color: var(--color-primary);
 }
 
 .workflow-header-float {
@@ -2245,7 +2245,7 @@ onUnmounted(() => {
     padding: 6px 14px;
     background: rgba(39, 40, 47, 0.95);
     border-radius: 20px;
-    border: 1px solid #404040;
+    border: 1px solid var(--app-border-strong);
 }
 
 .workflow-avatar {
@@ -2263,30 +2263,30 @@ onUnmounted(() => {
 .workflow-username {
     font-size: 13px;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--text-soft);
 }
 
 .workflow-credits {
     font-size: 11px;
-    color: #a0a0a0;
+    color: var(--text-subtle);
 }
 
 .canvas-wrapper {
     flex: 1;
-    background: #1b1c21;
+    background: var(--app-bg);
     overflow: hidden;
     min-height: 0;
     position: relative;
 }
 
 .canvas-wrapper :deep(.vue-flow__node.selected) {
-    box-shadow: 0 0 0 2px #409eff, 0 0 12px rgba(64, 158, 255, 0.75);
+    box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(37, 99, 235, 0.75);
     border-radius: 8px;
 }
 
 .canvas-wrapper :deep(.vue-flow__selection) {
-    border: 1px dashed rgba(64, 158, 255, 0.9);
-    background-color: rgba(64, 158, 255, 0.06);
+    border: 1px dashed rgba(37, 99, 235, 0.9);
+    background-color: var(--color-primary-soft);
 }
 
 /* 右下角小地图预览：背景与节点色 */

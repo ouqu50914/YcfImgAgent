@@ -442,8 +442,8 @@ onUnmounted(() => {
   max-width: 100vw;
   z-index: 39;
   border-radius: 24px;
-  background: #18181c;
-  border: 1px solid #404040;
+  background: var(--app-bg);
+  border: 1px solid var(--app-border-strong);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
@@ -457,10 +457,10 @@ onUnmounted(() => {
 
 .workflow-chat-sessions {
   flex: 0 0 160px;
-  border-right: 1px solid #33343b;
+  border-right: 1px solid var(--app-border-color);
   display: flex;
   flex-direction: column;
-  background: #202027;
+  background: var(--app-bg-sub);
 }
 
 .sessions-header {
@@ -478,7 +478,7 @@ onUnmounted(() => {
 
 .sessions-title {
   font-size: 14px;
-  color: #e5e5e5;
+  color: var(--text-soft);
 }
 
 .sessions-list {
@@ -493,11 +493,11 @@ onUnmounted(() => {
 }
 
 .session-item:hover {
-  background: #2d2f36;
+  background: var(--app-surface-soft);
 }
 
 .session-item.active {
-  background: #373a45;
+  background: var(--app-surface);
 }
 
 .session-item-row {
@@ -510,7 +510,7 @@ onUnmounted(() => {
 .session-title {
   flex: 1;
   font-size: 13px;
-  color: #f0f0f0;
+  color: var(--text-main);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -529,7 +529,7 @@ onUnmounted(() => {
 
 .session-meta {
   font-size: 11px;
-  color: #a0a0a0;
+  color: var(--text-subtle);
 }
 
 .workflow-chat-main {
@@ -540,7 +540,7 @@ onUnmounted(() => {
 
 .chat-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #33343b;
+  border-bottom: 1px solid var(--app-border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -548,12 +548,12 @@ onUnmounted(() => {
 
 .chat-title {
   font-size: 15px;
-  color: #f5f5f5;
+  color: var(--text-main);
   font-weight: 500;
 }
 
 .chat-actions :deep(.el-button) {
-  color: #b0b0b0;
+  color: var(--text-muted);
 }
 
 .chat-messages {
@@ -588,21 +588,21 @@ onUnmounted(() => {
 }
 
 .message-row.user .message-bubble {
-  background: #2563eb;
-  color: #f9fafb;
+  background: var(--color-primary);
+  color: var(--text-strong);
   border-bottom-right-radius: 2px;
 }
 
 .message-row.assistant .message-bubble {
-  background: #27272f;
-  color: #e5e7eb;
+  background: var(--app-surface);
+  color: var(--text-soft);
   border-bottom-left-radius: 2px;
 }
 
 .message-time {
   margin-top: 4px;
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--text-muted);
   text-align: right;
 }
 
@@ -614,12 +614,12 @@ onUnmounted(() => {
 .chat-error {
   margin-top: 8px;
   font-size: 12px;
-  color: #f97373;
+  color: var(--color-danger);
 }
 
 .chat-input-area {
   padding: 8px 16px 12px;
-  border-top: 1px solid #33343b;
+  border-top: 1px solid var(--app-border-color);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -628,7 +628,7 @@ onUnmounted(() => {
 .chat-input :deep(textarea) {
   background: #111827;
   border-color: #374151;
-  color: #e5e7eb;
+  color: var(--text-soft);
 }
 
 .chat-input-actions {
@@ -639,7 +639,7 @@ onUnmounted(() => {
 
 .chat-input-tip {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 .workflow-chat-fade-enter-active,

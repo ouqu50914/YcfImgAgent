@@ -264,13 +264,13 @@ defineExpose({
 .section-title {
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
   margin: 0;
 }
 
 .more-link {
   font-size: 14px;
-  color: #409eff;
+  color: var(--color-primary);
   text-decoration: none;
 }
 
@@ -285,7 +285,7 @@ defineExpose({
   overflow-x: auto;
   padding: 12px 0 8px 0;
   scrollbar-width: thin;
-  scrollbar-color: #c0c4cc #f5f5f5;
+  scrollbar-color: var(--text-subtle) var(--app-bg-sub);
 }
 
 .projects-scroll::-webkit-scrollbar {
@@ -293,24 +293,24 @@ defineExpose({
 }
 
 .projects-scroll::-webkit-scrollbar-track {
-  background: #f5f5f5;
+  background: var(--app-bg-sub);
   border-radius: 3px;
 }
 
 .projects-scroll::-webkit-scrollbar-thumb {
-  background: #c0c4cc;
+  background: var(--text-subtle);
   border-radius: 3px;
 }
 
 .projects-scroll::-webkit-scrollbar-thumb:hover {
-  background: #909399;
+  background: var(--text-muted);
 }
 
 .project-card {
   flex-shrink: 0;
   width: 200px;
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-color);
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
@@ -322,16 +322,16 @@ defineExpose({
 }
 
 .project-card:hover {
-  border-color: #409eff;
-  box-shadow: 0 8px 20px rgba(64, 158, 255, 0.2);
+  border-color: var(--color-primary);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
   transform: translateY(-6px);
   z-index: 1;
 }
 
 .new-project-card {
-  background: #c0c4cc;
+  background: var(--color-primary);
   border: none;
-  color: #fff;
+  color: var(--text-strong);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -358,7 +358,7 @@ defineExpose({
   height: 0;
   padding-bottom: 75%;
   position: relative;
-  background: #f5f5f5;
+  background: var(--app-bg-sub);
   overflow: hidden;
 }
 
@@ -380,7 +380,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #c0c4cc;
+  color: var(--text-subtle);
 }
 
 .project-info {
@@ -400,7 +400,7 @@ defineExpose({
 .project-name {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -408,7 +408,7 @@ defineExpose({
 
 .project-time {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
   flex: 1;
   min-width: 0;
 }

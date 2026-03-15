@@ -78,17 +78,17 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    background-color: #f0f2f5;
+  background-color: var(--app-bg);
   }
   
   .login-card {
-    width: 400px;
+  width: 400px;
   }
   
   .card-header h2 {
     text-align: center;
     margin: 0;
-    color: #333;
+  color: var(--text-main);
   }
   
   .w-100 {

@@ -2,12 +2,11 @@
   <div class="admin-container">
     <div class="header-section">
       <el-button 
-        text 
-        :icon="ArrowLeft" 
-        @click="router.push('/')"
+        circle
         class="back-button"
+        @click="router.push('/')"
       >
-        返回
+        <el-icon><ArrowLeft /></el-icon>
       </el-button>
       <h1 class="page-title">管理后台</h1>
     </div>
@@ -860,6 +859,7 @@ onMounted(() => {
   overflow-x: hidden;
   padding: 20px;
   box-sizing: border-box;
+  background: var(--app-bg);
 }
 
 .header-section {
@@ -872,19 +872,28 @@ onMounted(() => {
 .page-title {
   font-size: 24px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
   margin: 0;
 }
 
 .back-button {
-  padding: 8px 12px;
-  font-size: 14px;
-  color: #606266;
-  transition: color 0.2s;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-color);
+  color: var(--text-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
 }
 
 .back-button:hover {
-  color: #409eff;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .toolbar {
@@ -917,13 +926,13 @@ onMounted(() => {
 
 .stats-label {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .stats-value {
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
 }
 
 .stats-value.highlight {
@@ -936,12 +945,12 @@ onMounted(() => {
 
 .stats-section-title {
   font-size: 13px;
-  color: #606266;
+  color: var(--text-muted);
   margin-bottom: 8px;
 }
 
 .stats-meta {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
 }
 </style>

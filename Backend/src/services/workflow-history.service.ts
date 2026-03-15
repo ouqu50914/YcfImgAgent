@@ -2,6 +2,7 @@ import path from "path";
 import fs from "fs";
 import { AppDataSource } from "../data-source";
 import { WorkflowHistory } from "../entities/WorkflowHistory";
+import { isCosEnabled, deleteObject as cosDeleteObject, pathToKey } from "./cos.service";
 
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
@@ -33,8 +34,8 @@ function collectUploadFilenames(workflowData: any, coverImage?: string | null): 
     return [...new Set(names)];
 }
 
-/** 删除历史记录关联的 uploads 文件 */
-function deleteHistoryFiles(workflowDataRaw: string) {
+/** 删除历史记录关联的 uploads 文件（本地 + COS） */
+async function deleteHistoryFiles(workflowDataRaw: string) {
     let data: any;
     try {
         data = JSON.parse(workflowDataRaw);
@@ -43,7 +44,15 @@ function deleteHistoryFiles(workflowDataRaw: string) {
     }
     const coverImage = data?.cover_image;
     const filenames = collectUploadFilenames(data, coverImage);
+    const useCos = isCosEnabled();
     for (const name of filenames) {
+        if (useCos) {
+            try {
+                await cosDeleteObject(pathToKey(`/uploads/${name}`));
+            } catch (e) {
+                console.warn("deleteHistoryFiles COS delete failed:", name, e);
+            }
+        }
         const filePath = path.join(UPLOADS_DIR, name);
         try {
             if (fs.existsSync(filePath)) {
@@ -93,7 +102,7 @@ export class WorkflowHistoryService {
         const toPrune = allHistories.filter((h) => (h.is_public ?? 0) === 0 && (h.is_favorite ?? 0) === 0);
         if (toPrune.length > 20) {
             const toDelete = toPrune.slice(20);
-            for (const h of toDelete) deleteHistoryFiles(h.workflow_data);
+            for (const h of toDelete) await deleteHistoryFiles(h.workflow_data);
             await this.historyRepo.remove(toDelete);
         }
 
@@ -182,7 +191,7 @@ export class WorkflowHistoryService {
             throw new Error('历史记录不存在');
         }
 
-        deleteHistoryFiles(history.workflow_data);
+        await deleteHistoryFiles(history.workflow_data);
         await this.historyRepo.remove(history);
         return { message: '历史记录删除成功' };
     }

@@ -295,10 +295,10 @@ onUnmounted(() => {
 
 /* 中央输入框卡片 */
 .input-card {
-  background: #fff;
+  background: var(--app-surface);
   border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   margin-bottom: 20px;
 }
 
@@ -316,7 +316,7 @@ onUnmounted(() => {
 }
 
 .attach-icon {
-  color: #606266;
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.3s;
   font-size: 20px;
@@ -324,7 +324,7 @@ onUnmounted(() => {
 }
 
 .attach-icon:hover {
-  color: #409eff;
+  color: var(--color-primary);
   transform: scale(1.1);
 }
 
@@ -341,7 +341,7 @@ onUnmounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   padding: 6px;
-  background: #f5f7fa;
+  background: var(--app-bg-sub);
   border-radius: 8px;
 }
 
@@ -350,9 +350,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #fff;
+  background: var(--app-surface);
   border-radius: 6px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--app-border-color);
 }
 
 .preview-image-small {
@@ -365,7 +365,7 @@ onUnmounted(() => {
 
 .file-name-small {
   font-size: 12px;
-  color: #303133;
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -373,7 +373,7 @@ onUnmounted(() => {
 }
 
 .remove-file-icon-small {
-  color: #909399;
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 0.3s;
   font-size: 14px;
@@ -381,20 +381,20 @@ onUnmounted(() => {
 }
 
 .remove-file-icon-small:hover {
-  color: #f56c6c;
+  color: var(--color-danger);
 }
 
 .quick-input {
   border: none;
   outline: none;
   font-size: 16px;
-  color: #303133;
+  color: var(--text-main);
   background: transparent;
   width: 100%;
 }
 
 .quick-input::placeholder {
-  color: #c0c4cc;
+  color: var(--text-subtle);
 }
 
 .input-right {
@@ -405,7 +405,7 @@ onUnmounted(() => {
 }
 
 .action-icon {
-  color: #606266;
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.3s;
   font-size: 20px;
@@ -414,21 +414,21 @@ onUnmounted(() => {
 }
 
 .action-icon:hover {
-  color: #409eff;
-  background: #ecf5ff;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 .model-icon.active {
-  color: #409eff;
-  background: #ecf5ff;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 .submit-icon {
-  color: #409eff;
+  color: var(--color-primary);
 }
 
 .submit-icon:hover {
-  background: #ecf5ff;
+  background: var(--color-primary-soft);
   transform: scale(1.1);
 }
 
@@ -441,10 +441,10 @@ onUnmounted(() => {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-color);
   border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   min-width: 200px;
   z-index: 1000;
   overflow: hidden;
@@ -454,15 +454,15 @@ onUnmounted(() => {
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
-  border-bottom: 1px solid #e0e0e0;
-  background: #f5f7fa;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--app-border-color);
+  background: var(--app-bg-sub);
 }
 
 .dropdown-item {
   padding: 12px 16px;
   font-size: 14px;
-  color: #606266;
+  color: var(--text-muted);
   cursor: pointer;
   transition: background 0.3s;
   display: flex;
@@ -471,12 +471,12 @@ onUnmounted(() => {
 }
 
 .dropdown-item:hover {
-  background: #f5f7fa;
+  background: var(--app-bg-sub);
 }
 
 .dropdown-item.selected {
-  color: #409eff;
-  background: #ecf5ff;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 
 .selected-dot {

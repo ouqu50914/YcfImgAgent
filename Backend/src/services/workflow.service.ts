@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs";
 import { AppDataSource } from "../data-source";
+import { isCosEnabled, deleteObject as cosDeleteObject, pathToKey } from "./cos.service";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { User } from "../entities/User";
 
@@ -131,7 +132,7 @@ export class WorkflowService {
         return { message: '模板删除成功' };
     }
 
-    /** 删除模板关联的 uploads 文件（不删库记录） */
+    /** 删除模板关联的 uploads 文件（本地 + COS，不删库记录） */
     private async deleteTemplateFiles(template: WorkflowTemplate) {
         let data: any;
         try {
@@ -140,7 +141,15 @@ export class WorkflowService {
             data = null;
         }
         const filenames = collectUploadFilenames(data, template.cover_image);
+        const useCos = isCosEnabled();
         for (const name of filenames) {
+            if (useCos) {
+                try {
+                    await cosDeleteObject(pathToKey(`/uploads/${name}`));
+                } catch (e) {
+                    console.warn("deleteTemplateFiles COS delete failed:", name, e);
+                }
+            }
             const filePath = path.join(UPLOADS_DIR, name);
             try {
                 if (fs.existsSync(filePath)) {

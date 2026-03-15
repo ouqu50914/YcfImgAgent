@@ -447,7 +447,7 @@ onMounted(() => {
   width: 100vw;
   overflow-y: auto;
   overflow-x: hidden;
-  background: #f5f5f5;
+  background: var(--app-bg);
   padding: 20px;
   box-sizing: border-box;
   display: flex;
@@ -470,15 +470,15 @@ onMounted(() => {
   margin: 0;
   font-size: 24px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
 }
 
 .my-tip {
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #fff7e6;
+  background: rgba(255, 247, 230, 0.05);
   border-radius: 8px;
-  color: #ad6800;
+  color: var(--text-soft);
   font-size: 14px;
 }
 
@@ -487,9 +487,9 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 24px;
   padding: 16px;
-  background: white;
+  background: var(--app-surface);
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 .card-actions {
@@ -530,7 +530,7 @@ onMounted(() => {
 }
 
 .workflow-card {
-  background: white;
+  background: var(--app-surface);
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -549,7 +549,7 @@ onMounted(() => {
   padding-bottom: 75%; /* 4:3 比例，更合理的高度 */
   position: relative;
   overflow: hidden;
-  background: #f0f0f0;
+  background: var(--app-bg-sub);
 }
 
 .cover-image {
@@ -570,7 +570,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--text-subtle);
   font-size: 14px;
 }
 
@@ -581,7 +581,7 @@ onMounted(() => {
 .card-title {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
   margin-bottom: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -593,13 +593,13 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
   margin-bottom: 8px;
 }
 
 .card-stats {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .empty-state {
@@ -613,7 +613,7 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   padding: 20px;
-  background: white;
+  background: var(--app-surface);
   border-radius: 8px;
   margin-top: auto;
   flex-shrink: 0;

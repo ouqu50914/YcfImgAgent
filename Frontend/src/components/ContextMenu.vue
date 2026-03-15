@@ -133,10 +133,10 @@ onUnmounted(() => {
 <style scoped>
 .context-menu {
     position: fixed;
-    background: white;
-    border: 1px solid #e0e0e0;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border-color);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
     z-index: 10000;
     min-width: 180px;
     padding: 4px 0;
@@ -153,30 +153,30 @@ onUnmounted(() => {
 }
 
 .menu-item:hover {
-    background-color: #f5f7fa;
+    background-color: var(--app-bg-sub);
 }
 
 .menu-item .el-icon {
     font-size: 16px;
-    color: #606266;
+    color: var(--text-soft);
 }
 
 .menu-item span:not(.shortcut) {
     flex: 1;
-    color: #303133;
+    color: var(--text-main);
 }
 
 .shortcut {
     font-size: 12px;
-    color: #909399;
+    color: var(--text-muted);
     padding: 2px 6px;
-    background: #f5f7fa;
+    background: var(--app-bg-sub);
     border-radius: 3px;
 }
 
 .menu-divider {
     height: 1px;
-    background: #e0e0e0;
+    background: var(--app-border-color);
     margin: 4px 0;
 }
 </style>

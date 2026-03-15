@@ -173,7 +173,7 @@ onMounted(() => {
 .section-title {
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-main);
   margin: 0;
 }
 
@@ -210,8 +210,8 @@ onMounted(() => {
 }
 
 .template-card {
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-color);
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
@@ -221,8 +221,8 @@ onMounted(() => {
 }
 
 .template-card:hover {
-  border-color: #409eff;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.15);
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
   transform: translateY(-4px);
 }
 
@@ -231,7 +231,7 @@ onMounted(() => {
   height: 0;
   padding-bottom: 100%;
   position: relative;
-  background: #f5f5f5;
+  background: var(--app-bg-sub);
   overflow: hidden;
 }
 
@@ -253,7 +253,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #c0c4cc;
+  color: var(--text-subtle);
 }
 
 .template-overlay {
@@ -272,7 +272,7 @@ onMounted(() => {
 }
 
 .template-stats {
-  color: #fff;
+  color: var(--text-strong);
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -289,7 +289,7 @@ onMounted(() => {
 .template-name {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -299,7 +299,7 @@ onMounted(() => {
 
 .template-author {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -308,12 +308,12 @@ onMounted(() => {
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .empty-icon {
   margin-bottom: 16px;
-  color: #c0c4cc;
+  color: var(--text-subtle);
 }
 
 .load-more {

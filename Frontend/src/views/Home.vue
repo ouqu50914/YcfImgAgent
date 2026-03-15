@@ -191,7 +191,7 @@ const handleApplyCredits = async () => {
 <style scoped>
 .home-container {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: var(--app-bg);
   display: flex;
   padding-left: 80px;
 }
@@ -256,7 +256,7 @@ const handleApplyCredits = async () => {
 .main-title {
   font-size: 24px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-main);
   margin: 0;
 }
 
@@ -267,7 +267,7 @@ const handleApplyCredits = async () => {
 
 .sub-title {
   font-size: 14px;
-  color: #909399;
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -292,7 +292,7 @@ const handleApplyCredits = async () => {
 .teaching-hint {
   margin: 12px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 .user-info {
@@ -300,14 +300,14 @@ const handleApplyCredits = async () => {
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  background: #fff;
+  background: var(--app-bg-sub);
   border-radius: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 .user-avatar {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -320,12 +320,12 @@ const handleApplyCredits = async () => {
 .username {
   font-size: 14px;
   font-weight: 500;
-  color: #303133;
+  color: var(--text-main);
 }
 
 .user-role {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-muted);
 }
 
 /* 最近项目区域 */
