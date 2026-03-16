@@ -526,7 +526,29 @@ const handleGenerate = async () => {
             ElMessage.warning('生成成功，但未获取到图片URL');
         }
     } catch (error) {
-        console.error(error);
+        console.error('[DreamNode] 图片生成失败', error);
+
+        // 如果存在占位图片节点，将其标记为失败状态，以便在 ImageNode 中展示“生成失败”
+        if (pendingImageNodeIds.value.length) {
+            const failedIds = [...pendingImageNodeIds.value];
+            setNodes(nodes =>
+                nodes.map(node =>
+                    failedIds.includes(node.id)
+                        ? {
+                            ...node,
+                            data: {
+                                ...node.data,
+                                isLoading: false,
+                                status: 'error',
+                            },
+                        }
+                        : node
+                )
+            );
+            pendingImageNodeIds.value = [];
+        }
+
+        ElMessage.error('图片生成失败，请稍后重试');
     } finally {
         loading.value = false;
     }

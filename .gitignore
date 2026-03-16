@@ -50,3 +50,6 @@ data/redis/
 Backend/uploads/
 Backend/temp/
 
+### 备份脚本（含服务器配置，不提交） ###
+scripts/backup_mysql_to_cos.sh
+

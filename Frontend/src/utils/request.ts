@@ -141,6 +141,12 @@ service.interceptors.response.use(
         userStore.logout();
         router.push('/login');
       }
+    } else if (error.response?.status === 403 &&
+               (backendMsg === '无效的认证令牌' || backendMsg === '未提供认证令牌')) {
+      // 403 且是认证相关错误，同样视为登录失效
+      ElMessage.error('登录已过期，请重新登录');
+      userStore.logout();
+      router.push('/login');
     } else if (error.response?.status !== 401) {
       // 非401错误，统一中文错误提示（toast）
       if (backendCode && errorMessages[backendCode]) {

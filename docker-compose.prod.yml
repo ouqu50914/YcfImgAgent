@@ -8,12 +8,11 @@ services:
     restart: always
     environment:
       # 这里设置数据库 root 密码，请确保与后端 .env 一致
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: OuQuYcf@2026
       MYSQL_DATABASE: ai_image_tool
-      MYSQL_USER: user
-      MYSQL_PASSWORD: user123
-    ports:
-      - "3307:3306"  # 【关键修改】宿主机用 3307，容器内部依然是 3306
+      MYSQL_USER: WSYCF
+      MYSQL_PASSWORD: WSYCF@2026.1993
+
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -26,14 +25,13 @@ services:
     image: redis:7-alpine
     container_name: ycf_redis
     restart: always
-    ports:
-      - "6379:6379"
+
     volumes:
       - ./data/redis:/data
     networks:
       - ycf_network
 
-  # 后端服务
+  # 后端服务（仅宿主机可访问，由宿主机 Nginx 反代）
   backend:
     build:
       context: ./Backend
@@ -41,20 +39,20 @@ services:
     container_name: ycf_backend
     restart: always
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
       # 【关键配置】Docker内部连接走服务名，不用改 IP
       DB_HOST: mysql
       DB_PORT: 3306 
-      DB_USERNAME: user
-      DB_PASSWORD: user123
+      DB_USERNAME: WSYCF
+      DB_PASSWORD: WSYCF@2026.1993
       DB_DATABASE: ai_image_tool
       REDIS_HOST: redis
       REDIS_PORT: 6379
       # 下面是你的 API Key 等配置，请确保这里有值或通过 .env 文件传入
-      JWT_SECRET: ${JWT_SECRET:-your-secret-key}
+      JWT_SECRET: ${JWT_SECRET:-OuQuYcf@2026.1995}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://www.artycf.com,http://www.artycf.com}
     volumes:
       - ./Backend/uploads:/app/uploads
@@ -66,7 +64,7 @@ services:
     networks:
       - ycf_network
 
-  # 前端服务
+  # 前端服务（仅宿主机可访问，由宿主机 Nginx 反代）
   frontend:
     build:
       context: ./Frontend
@@ -74,7 +72,7 @@ services:
     container_name: ycf_frontend
     restart: always
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       - backend
     networks:

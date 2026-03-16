@@ -17,6 +17,11 @@
             </div>
             <!-- 加载中占位 -->
             <div v-if="isLoading" class="image-slot loading-slot"></div>
+            <!-- 生成失败占位 -->
+            <div v-else-if="isError" class="image-slot image-slot-error">
+                <span>生成失败</span>
+                <span class="image-slot-hint">请重试或检查上游节点</span>
+            </div>
             <!-- 实际图片（取消 lazy，避免缩放画布时被误判离开视口而不渲染） -->
             <el-image 
                 v-else
@@ -198,6 +203,12 @@ const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const imageAlias = ref<string>(props.data?.imageAlias || '');
 
 const displayAlias = computed(() => imageAlias.value || '图片');
+
+const isError = computed(() => {
+    const status = (props.data as any)?.status;
+    // 兼容：没有 imageUrl 且不在 loading 状态时，也视为失败
+    return status === 'error' || (!isLoading.value && !imageUrl.value);
+});
 
 // 计算当前节点位置
 const currentNode = computed(() => {
