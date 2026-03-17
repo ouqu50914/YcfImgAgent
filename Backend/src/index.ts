@@ -44,7 +44,10 @@ app.use(cors({
     credentials: true
 }));
 
-app.use(express.json());
+// 调大请求体大小上限，避免工作流自动保存被 100KB 默认限制拦截
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '10mb';
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // 处理尾部斜杠，使 /api/auth/login/ 能匹配 /api/auth/login
 app.use((req, res, next) => {
