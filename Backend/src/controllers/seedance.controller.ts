@@ -80,8 +80,16 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[SeedanceController] 创建任务失败:", error);
-        return res.status(500).json({
-            message: error.message || "创建 Seedance 视频生成任务失败",
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600
+                ? error.status
+                : 500;
+        return res.status(status).json({
+            message:
+                error.message ||
+                (status === 400
+                    ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
+                    : "创建 Seedance 视频生成任务失败"),
         });
     }
 };
@@ -108,8 +116,16 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[SeedanceController] 获取任务失败:", error);
-        return res.status(500).json({
-            message: error.message || "获取 Seedance 视频生成任务失败",
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600
+                ? error.status
+                : 500;
+        return res.status(status).json({
+            message:
+                error.message ||
+                (status === 400
+                    ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
+                    : "获取 Seedance 视频生成任务失败"),
         });
     }
 };
@@ -219,8 +235,16 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
         });
     } catch (error: any) {
         console.error("[SeedanceController] 创建高级任务失败:", error);
-        return res.status(500).json({
-            message: error.message || "创建 Seedance 高级视频生成任务失败",
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600
+                ? error.status
+                : 500;
+        return res.status(status).json({
+            message:
+                error.message ||
+                (status === 400
+                    ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
+                    : "创建 Seedance 高级视频生成任务失败"),
         });
     }
 };

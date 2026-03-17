@@ -225,6 +225,73 @@ export class SeedanceVideoAdapter {
     }
 
     /**
+     * 尝试从 Seedance 的错误响应中解析出更友好的错误信息与错误码。
+     * 部分接口会把真正的错误 JSON 字符串放在 data.message 里，需要额外解析。
+     */
+    private parseSeedanceError(data: any): { friendlyMessage: string; innerCode?: string } {
+        if (!data) {
+            return { friendlyMessage: "Seedance 接口调用失败，请稍后重试。" };
+        }
+
+        let rawMessage: string | undefined;
+        if (typeof data === "string") {
+            rawMessage = data;
+        } else if (typeof data === "object") {
+            rawMessage = (data as any).message || (data as any).error;
+        }
+
+        if (!rawMessage) {
+            return { friendlyMessage: "Seedance 接口调用失败，请稍后重试。" };
+        }
+
+        // 有些场景下 message 本身是一个 JSON 字符串，形如：
+        // {"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"...","type":"BadRequest"}}
+        try {
+            const parsed = JSON.parse(rawMessage);
+            const innerError = (parsed as any).error;
+            const innerCode = innerError?.code as string | undefined;
+            const innerMsg = innerError?.message as string | undefined;
+
+            if (innerCode === "InputImageSensitiveContentDetected.PrivacyInformation") {
+                // 输入图片包含真人/隐私信息，被 Seedance 拒绝，属于用户侧可读错误
+                const requestId = (innerError as any)?.requestId || (innerError as any)?.request_id;
+                const suffix = requestId ? `（请求 ID: ${requestId}）` : "";
+                const result: { friendlyMessage: string; innerCode?: string } = {
+                    friendlyMessage:
+                        "检测到输入图片可能包含真人或隐私敏感信息，Seedance 已拒绝生成，请更换为不含真人的素材后重试。" +
+                        suffix,
+                };
+                if (innerCode) {
+                    result.innerCode = innerCode;
+                }
+                return result;
+            }
+
+            // 其他错误码，优先使用平台自带文案
+            if (innerMsg) {
+                const result: { friendlyMessage: string; innerCode?: string } = {
+                    friendlyMessage: innerMsg,
+                };
+                if (innerCode) {
+                    result.innerCode = innerCode;
+                }
+                return result;
+            }
+
+            const result: { friendlyMessage: string; innerCode?: string } = {
+                friendlyMessage: rawMessage,
+            };
+            if (innerCode) {
+                result.innerCode = innerCode;
+            }
+            return result;
+        } catch {
+            // 不是 JSON，就直接返回原始 message
+            return { friendlyMessage: rawMessage };
+        }
+    }
+
+    /**
      * 创建 Seedance 视频生成任务
      */
     async createVideoTask(input: {
@@ -273,16 +340,21 @@ export class SeedanceVideoAdapter {
             if (axios.isAxiosError(error)) {
                 const status = error.response?.status;
                 const data = error.response?.data;
-                const msg =
-                    (data as any)?.message ||
-                    (data as any)?.error ||
-                    (typeof data === "string" ? data : "") ||
-                    error.message;
+                const parsed = this.parseSeedanceError(data);
                 console.error("[SeedanceVideoAdapter] 创建视频任务失败", {
                     status,
                     data,
                 });
-                throw new Error(`创建 Seedance 视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+
+                const err: any = new Error(parsed.friendlyMessage || error.message);
+                if (typeof status === "number") {
+                    err.status = status;
+                }
+                if (parsed.innerCode) {
+                    err.code = parsed.innerCode;
+                }
+                err.raw = data;
+                throw err;
             }
             throw error;
         }
@@ -427,16 +499,21 @@ export class SeedanceVideoAdapter {
             if (axios.isAxiosError(error)) {
                 const status = error.response?.status;
                 const data = error.response?.data;
-                const msg =
-                    (data as any)?.message ||
-                    (data as any)?.error ||
-                    (typeof data === "string" ? data : "") ||
-                    error.message;
+                const parsed = this.parseSeedanceError(data);
                 console.error("[SeedanceVideoAdapter] 创建高级视频任务失败", {
                     status,
                     data,
                 });
-                throw new Error(`创建 Seedance 高级视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+
+                const err: any = new Error(parsed.friendlyMessage || error.message);
+                if (typeof status === "number") {
+                    err.status = status;
+                }
+                if (parsed.innerCode) {
+                    err.code = parsed.innerCode;
+                }
+                err.raw = data;
+                throw err;
             }
             throw error;
         }

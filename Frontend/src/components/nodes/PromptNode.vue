@@ -18,6 +18,8 @@
                         placeholder="请输入提示词..."
                         maxlength="2000"
                         rows="4"
+                        @compositionstart="isComposing = true"
+                        @compositionend="handleCompositionEnd"
                         @input="handlePromptInput"
                         @keydown="handlePromptKeydown"
                     />
@@ -187,6 +189,9 @@ watch(
   { immediate: true }
 );
 
+// 是否处于输入法组合输入阶段（中文拼音等）
+const isComposing = ref(false);
+
 // 提示词模板相关
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
@@ -354,6 +359,11 @@ const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
 
 // 处理提示词输入
 const handlePromptInput = () => {
+    // 输入法组合过程中不做任何模板 / 别名联想与文本重写，避免中文输入导致的重复 / 光标错位
+    if (isComposing.value) {
+        return;
+    }
+
     props.data.text = text.value;
 
     const currentValue = text.value || '';
@@ -394,6 +404,12 @@ const handlePromptInput = () => {
         showAliasSuggestions.value = false;
         aliasSuggestions.value = [];
     }
+};
+
+// 组合输入结束时再统一执行一次输入处理逻辑
+const handleCompositionEnd = () => {
+    isComposing.value = false;
+    handlePromptInput();
 };
 
 // 处理键盘事件
