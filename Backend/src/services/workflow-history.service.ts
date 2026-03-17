@@ -69,14 +69,18 @@ export class WorkflowHistoryService {
 
     /**
      * 自动保存工作流历史。若传入 historyId 且属于当前用户则覆盖该条，否则新建（并保留最近20条）。
+     * 可选的 templateId 用于将历史记录归属到具体项目/模板。
      */
-    async autoSave(userId: number, workflowData: any, historyId?: number) {
+    async autoSave(userId: number, workflowData: any, historyId?: number, templateId?: number) {
         if (historyId != null) {
             const existing = await this.historyRepo.findOne({
                 where: { id: historyId, user_id: userId }
             });
             if (existing) {
                 existing.workflow_data = JSON.stringify(workflowData);
+                if (templateId !== undefined) {
+                    existing.template_id = templateId;
+                }
                 // 仅当名称仍为系统自动生成的“自动保存 ...”时才覆盖，保留用户手动重命名
                 const prefix = '自动保存 ';
                 if (!existing.snapshot_name || existing.snapshot_name.startsWith(prefix)) {
@@ -89,6 +93,9 @@ export class WorkflowHistoryService {
 
         const history = new WorkflowHistory();
         history.user_id = userId;
+        if (templateId !== undefined) {
+            history.template_id = templateId;
+        }
         history.workflow_data = JSON.stringify(workflowData);
         history.snapshot_name = `自动保存 ${new Date().toLocaleString('zh-CN')}`;
 
@@ -112,9 +119,13 @@ export class WorkflowHistoryService {
     /**
      * 获取用户的工作流历史列表（含解析出的 cover_image 供列表展示）
      */
-    async getHistoryList(userId: number, limit: number = 20) {
+    async getHistoryList(userId: number, limit: number = 20, templateId?: number) {
+        const where: any = { user_id: userId };
+        if (templateId !== undefined) {
+            where.template_id = templateId;
+        }
         const list = await this.historyRepo.find({
-            where: { user_id: userId },
+            where,
             order: { updated_at: 'DESC', created_at: 'DESC' },
             take: limit
         });
@@ -129,6 +140,7 @@ export class WorkflowHistoryService {
             return {
                 id: h.id,
                 user_id: h.user_id,
+                template_id: h.template_id,
                 workflow_data: h.workflow_data,
                 snapshot_name: h.snapshot_name,
                 created_at: h.created_at,

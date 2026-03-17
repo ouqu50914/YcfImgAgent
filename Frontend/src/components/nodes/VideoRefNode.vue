@@ -23,6 +23,7 @@
           :src="normalizedUrl"
           controls
           class="video-preview"
+          @click.stop="handleVideoClick($event, normalizedUrl)"
         />
         <div v-else class="placeholder">
           暂无预览
@@ -43,6 +44,33 @@
         cursor: 'crosshair'
       }"
     />
+
+    <!-- 全屏视频预览 -->
+    <el-dialog
+      v-model="showFullscreen"
+      :show-close="true"
+      :close-on-click-modal="true"
+      :close-on-press-escape="true"
+      :append-to-body="true"
+      :modal="true"
+      :modal-append-to-body="true"
+      modal-class="fullscreen-video-overlay"
+      width="100%"
+      top="0"
+      class="fullscreen-video-dialog"
+      @close="handleCloseFullscreen"
+    >
+      <div class="fullscreen-video-container" @click="handleCloseFullscreen">
+        <video
+          v-if="fullscreenUrl"
+          :src="fullscreenUrl"
+          controls
+          autoplay
+          class="fullscreen-video"
+          @click.stop
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -66,6 +94,8 @@ const mediaAliasStore = inject<MediaAliasStore | null>('mediaAliasStore', null);
 const url = ref<string>((props.data as any)?.url || '');
 const alias = ref<string>((props.data as any)?.resourceAlias || '');
 const uploading = ref(false);
+const showFullscreen = ref(false);
+const fullscreenUrl = ref<string | null>(null);
 
 const normalizedUrl = computed(() => {
   const v = url.value.trim();
@@ -132,6 +162,33 @@ const handleSelectFile = () => {
   };
 
   input.click();
+};
+
+const handleOpenFullscreen = (url: string) => {
+  if (!url) return;
+  fullscreenUrl.value = url;
+  showFullscreen.value = true;
+};
+
+const handleCloseFullscreen = () => {
+  showFullscreen.value = false;
+  fullscreenUrl.value = null;
+};
+
+const handleVideoClick = (event: MouseEvent, url: string) => {
+  if (!url) return;
+  const target = event.currentTarget as HTMLVideoElement | null;
+  if (!target) return;
+  const rect = target.getBoundingClientRect();
+  const controlHeight = 48;
+  if (event.clientY < rect.bottom - controlHeight) {
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      target.pause();
+    } catch {}
+    handleOpenFullscreen(url);
+  }
 };
 </script>
 
@@ -206,6 +263,70 @@ const handleSelectFile = () => {
 .placeholder {
   font-size: 12px;
   color: #808080;
+}
+
+/* 全屏视频预览样式（与其他视频节点保持一致） */
+.fullscreen-video-dialog {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.fullscreen-video-dialog :deep(.el-dialog) {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: rgba(0, 0, 0, 0.95) !important;
+  border-radius: 0 !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 10000 !important;
+}
+
+.fullscreen-video-dialog :deep(.el-dialog__header) {
+  padding: 0 !important;
+  margin: 0 !important;
+  height: 0 !important;
+  overflow: hidden;
+}
+
+.fullscreen-video-dialog :deep(.el-dialog__body) {
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+}
+
+.fullscreen-video-container {
+  width: 100vw !important;
+  height: 100vh !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden !important;
+}
+
+.fullscreen-video {
+  max-width: 95vw !important;
+  max-height: 95vh !important;
+  background: #000;
+}
+
+:deep(.fullscreen-video-overlay) {
+  position: fixed !important;
+  inset: 0 !important;
+  overflow: hidden !important;
 }
 
 /* 表单控件深色样式 */

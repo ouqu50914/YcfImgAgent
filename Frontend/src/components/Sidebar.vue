@@ -21,7 +21,7 @@
         </div>
       </el-tooltip>
 
-      <el-tooltip content="我的工作流" placement="right">
+      <el-tooltip content="我的项目" placement="right">
         <div 
           class="nav-item"
           :class="{ active: currentRoute === '/workflow-plaza' && !isPublic }"

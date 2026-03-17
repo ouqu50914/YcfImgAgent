@@ -9,6 +9,7 @@ import { CreditUsageLog } from "../entities/CreditUsageLog";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { SystemConfig } from "../entities/SystemConfig";
 import bcrypt from "bcrypt";
+import redis from "../utils/redis";
 import { LogService } from "./log.service";
 import { CreditService } from "./credit.service";
 
@@ -169,6 +170,7 @@ export class AdminService {
 
     /**
      * 重置用户密码
+     * 同时清除登录失败计数和锁定状态，确保用户可立即使用新密码登录
      */
     async resetPassword(userId: number, newPassword: string) {
         const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -179,6 +181,14 @@ export class AdminService {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         user.password = hashedPassword;
         await this.userRepo.save(user);
+
+        // 清除登录失败次数和锁定状态
+        if (user.username) {
+            const failKey = `login_fail:${user.username}`;
+            const lockKey = `login_lock:${user.username}`;
+            await redis.del(failKey);
+            await redis.del(lockKey);
+        }
     }
 
     /**

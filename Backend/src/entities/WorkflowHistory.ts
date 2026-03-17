@@ -10,6 +10,10 @@ export class WorkflowHistory {
     @Index()
     user_id!: number;
 
+    @Column({ type: 'bigint', nullable: true, comment: '关联的项目/模板ID' })
+    @Index()
+    template_id?: number;
+
     @Column({ type: 'longtext', comment: '工作流数据（JSON格式）' })
     workflow_data!: string;
 

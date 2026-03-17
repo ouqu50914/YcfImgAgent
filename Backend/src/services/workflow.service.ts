@@ -41,8 +41,21 @@ export class WorkflowService {
 
     /**
      * 保存工作流模板
+     * isTemp: 是否临时项目（例如从公开模板派生出来的个人草稿）
+     * sourceTemplateId: 若为临时项目，则记录来源公开模板 ID
      */
-    async saveTemplate(userId: number, name: string, workflowData: any, description?: string, isPublic: boolean = false, coverImage?: string, category?: string, isFavorite: boolean = false) {
+    async saveTemplate(
+        userId: number,
+        name: string,
+        workflowData: any,
+        description?: string,
+        isPublic: boolean = false,
+        coverImage?: string,
+        category?: string,
+        isFavorite: boolean = false,
+        isTemp: boolean = false,
+        sourceTemplateId?: number
+    ) {
         const template = new WorkflowTemplate();
         template.user_id = userId;
         template.name = name;
@@ -52,6 +65,10 @@ export class WorkflowService {
         template.workflow_data = JSON.stringify(workflowData);
         template.is_public = isPublic ? 1 : 0;
         template.is_favorite = isFavorite ? 1 : 0;
+        template.is_temp = isTemp ? 1 : 0;
+        if (sourceTemplateId !== undefined) {
+            template.source_template_id = sourceTemplateId;
+        }
         template.usage_count = 0;
         if (coverImage !== undefined) {
             template.cover_image = coverImage;
@@ -189,6 +206,8 @@ export class WorkflowService {
         is_favorite?: boolean;
         cover_image?: string;
         category?: string;
+        is_temp?: boolean;
+        source_template_id?: number | null;
     }) {
         const template = await this.templateRepo.findOne({
             where: { id: templateId, user_id: userId }
@@ -205,6 +224,8 @@ export class WorkflowService {
         if (updates.is_favorite !== undefined) template.is_favorite = updates.is_favorite ? 1 : 0;
         if (updates.cover_image !== undefined) template.cover_image = updates.cover_image;
         if (updates.category !== undefined) template.category = updates.category;
+        if (updates.is_temp !== undefined) template.is_temp = updates.is_temp ? 1 : 0;
+        if (updates.source_template_id !== undefined) template.source_template_id = updates.source_template_id ?? null;
 
         // 未公开且未收藏的项目：14天后自动删除；公开或收藏的永久保留
         if (template.is_public === 0 && template.is_favorite === 0) {

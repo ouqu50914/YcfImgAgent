@@ -9,7 +9,7 @@
           @click="router.push('/')"
           style="margin-right: 12px;"
         />
-        <h1 class="page-title">{{ isPublic ? '工作流广场' : '我的工作流' }}</h1>
+        <h1 class="page-title">{{ isPublic ? '工作流广场' : '我的项目' }}</h1>
       </div>
     </div>
 
@@ -38,7 +38,7 @@
       <el-button type="primary" @click="handleSearch">搜索</el-button>
       <el-button @click="handleReset">重置</el-button>
     </div>
-    <div v-else class="my-tip">管理你的工作流：未公开且未收藏的项目将在 14 天后自动删除，公开或收藏的项目永久保留。</div>
+    <div v-else class="my-tip">管理你的项目：未公开且未收藏的项目将在 14 天后自动删除，公开或收藏的项目永久保留。</div>
 
     <!-- 工作流列表（瀑布流布局） -->
     <div class="workflow-masonry" v-loading="loading">
@@ -116,6 +116,24 @@
             </div>
             <div class="card-meta">
               <span class="time">{{ formatTime(getItemTime(item)) }}</span>
+            </div>
+            <div class="card-tags" v-if="item.source === 'template'">
+              <el-tag
+                v-if="(item.data as any).is_temp === 1"
+                size="small"
+                type="warning"
+                effect="dark"
+              >
+                临时项目
+              </el-tag>
+              <el-tag
+                v-if="(item.data as any).source_template_id"
+                size="small"
+                type="info"
+                effect="plain"
+              >
+                来自公开项目
+              </el-tag>
             </div>
             <div class="card-actions">
               <el-tooltip content="公开后永久保留，不会被自动删除">
@@ -216,28 +234,16 @@ const loadList = async () => {
       templates.value = data?.list || [];
       total.value = data?.total || 0;
     } else {
-      const [tplRes, histRes] = await Promise.all([
-        getTemplates(),
-        getHistoryList(100)
-      ]);
-      const tplArr = Array.isArray((tplRes as any)?.data) ? (tplRes as any).data : [];
-      const histArr = Array.isArray((histRes as any)?.data) ? (histRes as any).data : [];
+      // 我的项目：仅展示模板（项目），不再直接展示自动保存的历史记录
+      const tplRes = await getTemplates();
+      const tplArr = Array.isArray((tplRes as any)?.data) ? (tplRes as any).data as WorkflowTemplate[] : [];
       const merged: typeof myItems.value = [];
-      for (const t of tplArr as WorkflowTemplate[]) {
+      for (const t of tplArr) {
         merged.push({ source: 'template', data: t });
       }
-      for (const h of histArr as WorkflowHistory[]) {
-        merged.push({
-          source: 'history',
-          data: {
-            ...h,
-            name: h.snapshot_name || `自动保存 ${formatTime(h.created_at)}`
-          }
-        });
-      }
       merged.sort((a, b) => {
-        const ta = a.source === 'template' ? new Date(a.data.updated_at || a.data.created_at).getTime() : new Date(a.data.updated_at || a.data.created_at).getTime();
-        const tb = b.source === 'template' ? new Date(b.data.updated_at || b.data.created_at).getTime() : new Date(b.data.updated_at || b.data.created_at).getTime();
+        const ta = new Date(a.data.updated_at || a.data.created_at).getTime();
+        const tb = new Date(b.data.updated_at || b.data.created_at).getTime();
         return tb - ta;
       });
       myItems.value = merged;
@@ -595,6 +601,12 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+
+.card-tags {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .card-stats {

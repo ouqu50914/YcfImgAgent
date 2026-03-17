@@ -38,6 +38,9 @@
                 <span v-else class="workflow-save-time workflow-save-time--pending">
                     尚未保存
                 </span>
+                <span v-if="autoSaveError" class="workflow-save-warning">
+                    {{ autoSaveError }}
+                </span>
             </div>
         </div>
 
@@ -580,6 +583,8 @@ const { addNodes, addEdges, getEdges, getNodes, setNodes, setEdges, removeNodes,
 const currentTemplateId = ref<number | null>(null);
 /** 当前打开的模板所属用户 id，与当前用户一致时保存为覆盖 */
 const templateOwnerId = ref<number | null>(null);
+/** 若当前为从公开模板派生的临时项目，则记录来源公开模板 ID */
+const sourceTemplateIdForTemp = ref<number | null>(null);
 const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
 const canvasWrapperRef = ref<HTMLElement | null>(null);
 /** 当前编辑对应的历史记录 id：从历史打开时设为该 id，首次自动保存后回填，后续保存均覆盖此条 */
@@ -587,6 +592,8 @@ const currentHistoryId = ref<number | null>(null);
 
 const manualSaving = ref(false);
 const lastSavedAt = ref<Date | null>(null);
+/** 最近一次自动保存/手动保存是否失败，用于在 UI 中提示用户 */
+const autoSaveError = ref<string | null>(null);
 const lastSavedAtText = computed(() => {
     if (!lastSavedAt.value) return '';
     try {
@@ -609,6 +616,41 @@ const clearUndoRedoAndPending = () => {
     hasPendingChanges.value = false;
 };
 
+/**
+ * 确保当前会话有对应的项目（模板）ID：
+ * - 若已从“我的项目”进入，则直接复用 existing templateId；
+ * - 若从新建 / 历史 / 公开项目进入，则在第一次持久化时创建一个“临时项目”。
+ */
+const ensureCurrentTemplate = async (workflowData: WorkflowDTO) => {
+    if (currentTemplateId.value != null) return;
+
+    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+    try {
+        const tempName = '临时项目';
+        const payload = {
+            name: tempName,
+            description: '',
+            workflowData,
+            isPublic: false,
+            coverImage: workflowData.cover_image,
+            // 使用一个固定的草稿分类，后端不会校验类别是否存在
+            category: 'draft',
+            // 标记为临时项目，并在从公开模板派生时记录来源 ID
+            isTemp: true,
+            ...(sourceTemplateIdForTemp.value != null ? { sourceTemplateId: sourceTemplateIdForTemp.value } : {}),
+        };
+        const res: any = await saveTemplate(payload);
+        const template: WorkflowTemplate | undefined = res?.data;
+        if (template && template.id != null) {
+            currentTemplateId.value = template.id;
+            templateOwnerId.value = myId;
+        }
+    } catch (error: any) {
+        console.error('创建临时项目失败:', error);
+        // 不抛出，让调用方处理是否继续仅依赖历史记录
+    }
+};
+
 const persistWorkflow = async () => {
     const currentNodes = getNodes.value;
     if (currentNodes.length === 0) return false;
@@ -616,38 +658,52 @@ const persistWorkflow = async () => {
     const workflowData: WorkflowDTO = buildWorkflowDataForSave();
     await ensureWorkflowCover(workflowData);
 
-    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
-    const isOwnTemplate =
-        currentTemplateId.value != null &&
-        templateOwnerId.value != null &&
-        myId != null &&
-        templateOwnerId.value === myId;
+    try {
+        // 确保当前会话有对应的项目 ID（从新建 / 历史 / 公开项目进入时会触发）
+        await ensureCurrentTemplate(workflowData);
 
-    let historyRes: any = null;
+        const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+        const isOwnTemplate =
+            currentTemplateId.value != null &&
+            templateOwnerId.value != null &&
+            myId != null &&
+            templateOwnerId.value === myId;
 
-    // 1. 先更新模板本身（如果当前是“我的项目”里的模板）
-    if (isOwnTemplate) {
-        await updateTemplate(currentTemplateId.value!, {
-            workflowData,
-            coverImage: workflowData.cover_image,
-        });
+        let historyRes: any = null;
+
+        // 1. 先更新模板本身（如果当前是“我的项目”里的模板）
+        if (isOwnTemplate) {
+            await updateTemplate(currentTemplateId.value!, {
+                workflowData,
+                coverImage: workflowData.cover_image,
+            });
+        }
+
+        // 2. 无论是否模板，都为当前编辑会话保留一条自动保存历史，用于刷新/重新进入时恢复
+        const templateIdForSave = currentTemplateId.value != null ? currentTemplateId.value : undefined;
+        if (currentHistoryId.value != null) {
+            historyRes = await autoSaveHistory(workflowData, currentHistoryId.value, templateIdForSave);
+        } else {
+            historyRes = await autoSaveHistory(workflowData, undefined, templateIdForSave);
+        }
+
+        if (historyRes?.data?.id != null) {
+            currentHistoryId.value = historyRes.data.id;
+            window.localStorage.setItem('workflow:lastHistoryId', String(historyRes.data.id));
+        }
+
+        hasPendingChanges.value = false;
+        lastSavedAt.value = new Date();
+        autoSaveError.value = null;
+        return true;
+    } catch (error: any) {
+        console.error('工作流持久化失败:', error);
+        const msg = error?.message || '自动保存失败，请手动保存或拆分项目';
+        autoSaveError.value = msg;
+        // 自动保存场景不打扰太多，这里使用 warning 提示
+        ElMessage.warning(msg);
+        return false;
     }
-
-    // 2. 无论是否模板，都为当前编辑会话保留一条自动保存历史，用于刷新/重新进入时恢复
-    if (currentHistoryId.value != null) {
-        historyRes = await autoSaveHistory(workflowData, currentHistoryId.value);
-    } else {
-        historyRes = await autoSaveHistory(workflowData);
-    }
-
-    if (historyRes?.data?.id != null) {
-        currentHistoryId.value = historyRes.data.id;
-        window.localStorage.setItem('workflow:lastHistoryId', String(historyRes.data.id));
-    }
-
-    hasPendingChanges.value = false;
-    lastSavedAt.value = new Date();
-    return true;
 };
 
 const workflowPersistenceStore: WorkflowPersistenceStore = {
@@ -732,9 +788,9 @@ const ensureWorkflowCover = async (workflowData: { nodes: any[]; edges: any[]; c
 
 // 节点尺寸映射（根据实际节点大小）
 const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
-    'image': { width: 240, height: 300 },
-    'prompt': { width: 320, height: 400 },
-    'dream': { width: 400, height: 500 },
+'image': { width: 240, height: 300 },
+'prompt': { width: 360, height: 460 },
+'dream': { width: 400, height: 500 },
     'upscale': { width: 280, height: 350 },
     'extend': { width: 280, height: 350 },
     'video': { width: 350, height: 450 },
@@ -2062,13 +2118,24 @@ const handleSaveTemplate = async () => {
             imageAliasCounter: imageAliasCounter.value,
             imageAliasMap: imageAliasMap.value,
         };
-        const payload = {
+        const payload: {
+            name: string;
+            description: string;
+            workflowData: WorkflowDTO;
+            isPublic: boolean;
+            coverImage: string;
+            category: string;
+            isTemp?: boolean;
+            sourceTemplateId?: number;
+        } = {
             name: saveForm.value.name,
             description: saveForm.value.description,
             workflowData,
             isPublic: saveForm.value.isPublic,
             coverImage: saveForm.value.coverImage,
-            category: saveForm.value.category
+            category: saveForm.value.category,
+            // 手动保存对话框一般用于“正式项目”，因此这里显式标记为非临时
+            isTemp: false
         };
 
         if (isOwn) {
@@ -2150,10 +2217,10 @@ const showLoadDialogHandler = () => {
     loadTemplates();
 };
 
-// 加载历史记录列表
+// 加载历史记录列表（仅当前项目）
 const loadHistories = async () => {
     try {
-        const res: any = await getHistoryList(20);
+        const res: any = await getHistoryList(20, currentTemplateId.value != null ? currentTemplateId.value : undefined);
         histories.value = res.data || [];
     } catch (error: any) {
         ElMessage.error(error.message || '加载历史记录失败');
@@ -2165,11 +2232,17 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
     try {
         const res: any = await getHistory(history.id);
         const workflowData = res.data.workflow_data;
+        const templateIdFromHistory = res.data?.template_id as number | undefined;
 
         if (workflowData.nodes && workflowData.edges) {
             setNodes(workflowData.nodes);
             setEdges(workflowData.edges);
             restoreImageAliasStateFromWorkflow(workflowData);
+            if (templateIdFromHistory != null) {
+                currentTemplateId.value = templateIdFromHistory;
+                const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+                templateOwnerId.value = myId;
+            }
             // 记住当前编辑的是哪条历史记录，并写入本地存储，便于刷新后自动恢复
             currentHistoryId.value = history.id;
             window.localStorage.setItem('workflow:lastHistoryId', String(history.id));
@@ -2382,11 +2455,17 @@ onMounted(async () => {
                 currentHistoryId.value = historyId;
                 const res: any = await getHistory(historyId);
                 const workflowData = res.data?.workflow_data;
+                const templateIdFromHistory = res.data?.template_id as number | undefined;
                 if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
                     clearUndoRedoAndPending();
                     window.localStorage.setItem('workflow:lastHistoryId', String(historyId));
+                    if (templateIdFromHistory != null) {
+                        currentTemplateId.value = templateIdFromHistory;
+                        const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+                        templateOwnerId.value = myId;
+                    }
                     ElMessage.success('已恢复自动保存的工作流');
                 } else {
                     ElMessage.warning('该历史记录数据不完整');
@@ -2414,6 +2493,8 @@ onMounted(async () => {
                 } else {
                     currentTemplateId.value = null;
                     templateOwnerId.value = null;
+                    // 从他人公开模板进入编辑时，后续创建的临时项目记录来源模板 ID
+                    sourceTemplateIdForTemp.value = templateId;
                 }
 
                 if (workflowData?.nodes && workflowData?.edges) {
@@ -2433,19 +2514,25 @@ onMounted(async () => {
     }
 
     // 如果既没有通过 URL 指定 historyId，也没有指定模板 id，
-    // 则尝试从本地存储中恢复最近一次自动保存的版本
-    if (!query.historyId && !query.id) {
+    // 且不是显式“新建项目”(new=1)，则尝试从本地存储中恢复最近一次自动保存的版本
+    if (!query.historyId && !query.id && !query.new) {
         const lastIdRaw = window.localStorage.getItem('workflow:lastHistoryId');
         const lastId = lastIdRaw ? parseInt(lastIdRaw, 10) : NaN;
         if (!Number.isNaN(lastId)) {
             try {
                 const res: any = await getHistory(lastId);
                 const workflowData = res.data?.workflow_data;
+                const templateIdFromHistory = res.data?.template_id as number | undefined;
                 if (workflowData?.nodes && workflowData?.edges) {
                     currentHistoryId.value = lastId;
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
                     clearUndoRedoAndPending();
+                    if (templateIdFromHistory != null) {
+                        currentTemplateId.value = templateIdFromHistory;
+                        const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+                        templateOwnerId.value = myId;
+                    }
                     ElMessage.success('已恢复最近一次自动保存的工作流');
                 }
             } catch (error: any) {
@@ -2631,6 +2718,32 @@ onUnmounted(() => {
     top: 10px;
     right: 16px;
     z-index: 30;
+}
+
+.workflow-save-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    justify-content: flex-end;
+}
+
+.workflow-save-time {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.workflow-save-time--pending {
+    color: var(--color-warning);
+}
+
+.workflow-save-warning {
+    font-size: 12px;
+    color: #ff4d4f;
+    max-width: 260px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
 }
 
 .workflow-user-info {

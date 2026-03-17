@@ -8,7 +8,7 @@ const historyService = new WorkflowHistoryService();
 export const saveTemplate = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { name, workflowData, description, isPublic, coverImage, category, isFavorite } = req.body;
+        const { name, workflowData, description, isPublic, coverImage, category, isFavorite, isTemp, sourceTemplateId } = req.body;
 
         if (!name || !workflowData) {
             return res.status(400).json({ message: "模板名称和工作流数据不能为空" });
@@ -26,7 +26,9 @@ export const saveTemplate = async (req: Request, res: Response) => {
             isPublic || false,
             coverImage,
             category,
-            isFavorite || false
+            isFavorite || false,
+            Boolean(isTemp),
+            typeof sourceTemplateId === 'number' ? sourceTemplateId : undefined
         );
 
         return res.status(200).json({
@@ -97,9 +99,19 @@ export const updateTemplate = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "无效的模板ID" });
         }
         const templateId = parseInt(idParam);
-        const { name, description, workflowData, isPublic, isFavorite, coverImage, category } = req.body;
+        const { name, description, workflowData, isPublic, isFavorite, coverImage, category, isTemp, sourceTemplateId } = req.body;
 
-        const template = await workflowService.updateTemplate(templateId, userId, {
+        const updates: {
+            name?: string;
+            description?: string;
+            workflow_data?: any;
+            is_public?: boolean;
+            is_favorite?: boolean;
+            cover_image?: string;
+            category?: string;
+            is_temp?: boolean;
+            source_template_id?: number | null;
+        } = {
             name,
             description,
             workflow_data: workflowData,
@@ -107,7 +119,16 @@ export const updateTemplate = async (req: Request, res: Response) => {
             is_favorite: isFavorite,
             cover_image: coverImage,
             category
-        });
+        };
+
+        if (typeof isTemp === 'boolean') {
+            updates.is_temp = isTemp;
+        }
+        if (typeof sourceTemplateId === 'number') {
+            updates.source_template_id = sourceTemplateId;
+        }
+
+        const template = await workflowService.updateTemplate(templateId, userId, updates);
 
         return res.status(200).json({
             message: "模板更新成功",
@@ -122,14 +143,21 @@ export const updateTemplate = async (req: Request, res: Response) => {
 export const autoSaveHistory = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { workflowData, historyId } = req.body;
+        const { workflowData, historyId, templateId } = req.body;
 
         if (!workflowData) {
             return res.status(400).json({ message: "工作流数据不能为空" });
         }
 
         const id = historyId != null ? parseInt(String(historyId), 10) : undefined;
-        const history = await historyService.autoSave(userId, workflowData, Number.isNaN(id) ? undefined : id);
+        const tplIdRaw = templateId != null ? String(templateId) : undefined;
+        const tplId = tplIdRaw != null ? parseInt(tplIdRaw, 10) : undefined;
+        const history = await historyService.autoSave(
+            userId,
+            workflowData,
+            Number.isNaN(id) ? undefined : id,
+            Number.isNaN(tplId as any) ? undefined : tplId
+        );
 
         return res.status(200).json({
             message: "自动保存成功",
@@ -145,8 +173,10 @@ export const getHistoryList = async (req: Request, res: Response) => {
         const userId = (req as any).user?.userId;
         const limitParam = req.query.limit as string | undefined;
         const limit = limitParam === '' || limitParam === undefined ? 100 : parseInt(limitParam) || 20;
+        const templateIdParam = req.query.templateId as string | undefined;
+        const templateId = templateIdParam ? parseInt(templateIdParam, 10) : undefined;
 
-        const histories = await historyService.getHistoryList(userId, limit);
+        const histories = await historyService.getHistoryList(userId, limit, Number.isNaN(templateId as any) ? undefined : templateId);
 
         return res.status(200).json({
             message: "获取成功",

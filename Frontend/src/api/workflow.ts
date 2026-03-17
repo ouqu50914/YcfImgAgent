@@ -15,6 +15,10 @@ export interface WorkflowTemplate {
   author_name?: string;
   expires_at?: string;
   category?: string;
+  /** 是否临时项目：1=临时，0=正式 */
+  is_temp?: number;
+  /** 若为临时项目，则记录来源公开模板 ID */
+  source_template_id?: number | null;
 }
 
 export const saveTemplate = (data: {
@@ -25,6 +29,8 @@ export const saveTemplate = (data: {
   isFavorite?: boolean;
   coverImage?: string;
   category: string;
+  isTemp?: boolean;
+  sourceTemplateId?: number;
 }) => {
   return request.post<{ message: string; data: WorkflowTemplate }>('/workflow/template', data);
 };
@@ -45,6 +51,8 @@ export const updateTemplate = (id: number, data: {
   isFavorite?: boolean;
   coverImage?: string;
   category?: string;
+  isTemp?: boolean;
+  sourceTemplateId?: number | null;
 }) => {
   return request.put<{ message: string; data: WorkflowTemplate }>(`/workflow/template/${id}`, data);
 };
@@ -56,6 +64,8 @@ export const deleteTemplate = (id: number) => {
 // 工作流历史相关
 export interface WorkflowHistory {
   id: number;
+  user_id?: number;
+  template_id?: number | null;
   workflow_data?: any;
   snapshot_name?: string;
   created_at: string;
@@ -66,16 +76,20 @@ export interface WorkflowHistory {
   cover_image?: string;
 }
 
-export const autoSaveHistory = (workflowData: any, historyId?: number) => {
+export const autoSaveHistory = (workflowData: any, historyId?: number, templateId?: number) => {
   return request.post<{ message: string; data: WorkflowHistory }>('/workflow/history/auto-save', {
     workflowData,
-    ...(historyId != null ? { historyId } : {})
+    ...(historyId != null ? { historyId } : {}),
+    ...(templateId != null ? { templateId } : {})
   });
 };
 
-export const getHistoryList = (limit?: number) => {
+export const getHistoryList = (limit?: number, templateId?: number) => {
   return request.get<{ message: string; data: WorkflowHistory[] }>('/workflow/history', {
-    params: { limit }
+    params: {
+      limit,
+      ...(templateId != null ? { templateId } : {})
+    }
   });
 };
 

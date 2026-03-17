@@ -38,6 +38,14 @@ export class WorkflowTemplate {
     @Index()
     category?: string;
 
+    @Column({ type: 'tinyint', default: 0, comment: '是否临时项目：0-否，1-是' })
+    @Index()
+    is_temp!: number;
+
+    @Column({ type: 'bigint', nullable: true, comment: '来源公开模板ID（从哪个公开项目派生）' })
+    @Index()
+    source_template_id?: number | null;
+
     @CreateDateColumn()
     created_at!: Date;
 

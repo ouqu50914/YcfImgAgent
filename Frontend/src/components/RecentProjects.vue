@@ -101,7 +101,8 @@ const handleImageError = (event: Event) => {
 };
 
 const handleNewProject = () => {
-  router.push('/workflow');
+  // 显式标记为“新建项目”，编辑页不再自动恢复上一次自动保存
+  router.push('/workflow?new=1');
 };
 
 const handleProjectClick = (project: any) => {
@@ -221,6 +222,8 @@ const loadProjects = async () => {
       // 这里用 cover_image 作为项目分组 key；若无封面则退回到 history id
       const grouped: Record<string, WorkflowHistory> = {};
       for (const item of historyRes.data as WorkflowHistory[]) {
+        // 已经绑定到具体项目的历史记录，不再单独作为“最近项目”卡片展示
+        if ((item as any).template_id != null) continue;
         const key = item.cover_image || `history_${item.id}`;
         const existing = grouped[key];
         if (!existing) {

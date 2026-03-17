@@ -1,5 +1,5 @@
 <template>
-    <div class="prompt-node">
+    <div class="prompt-node" :style="{ width: promptWidth + 'px' }">
       <div class="node-header">
         <el-icon><EditPen /></el-icon>
         <span>提示词输入</span>
@@ -170,12 +170,14 @@ type MediaAliasStore = {
 
 const props = defineProps<NodeProps>();
 const text = ref(props.data?.text || '');
+const promptWidth = ref(360);
 
 const { getEdges, findNode } = useVueFlow();
 
 // 当内部输入变化时，同步到节点数据
 watch(text, (val) => {
   props.data.text = val;
+  recomputePromptWidth();
 });
 
 // 当从历史记录 / 模板加载时，节点 data.text 可能先于组件创建好，这里反向同步到本地 text
@@ -228,6 +230,17 @@ const highlightedHtml = computed(() => {
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
 const savePromptDescription = ref('');
+
+// 根据文本长度粗略调整节点宽度，避免极窄极高
+function recomputePromptWidth() {
+    const len = (text.value || '').length;
+    let w = 400;
+    if (len > 200) w = 460;
+    if (len > 400) w = 520;
+    if (len > 800) w = 580;
+    if (len > 1200) w = 640;
+    promptWidth.value = w;
+}
 
 // 过滤模板（支持 /keyword 搜索）
 const filteredTemplates = computed(() => {
@@ -555,8 +568,8 @@ const handleClickOutside = (event: MouseEvent) => {
     }
 };
 
-const PROMPT_INPUT_MIN_H = 120;
-const PROMPT_INPUT_MAX_H = 360;
+const PROMPT_INPUT_MIN_H = 160;
+const PROMPT_INPUT_MAX_H = 700;
 
 function syncMirrorToTextarea() {
     nextTick(() => {
@@ -573,10 +586,22 @@ function syncMirrorToTextarea() {
 function fitTextareaHeight() {
     nextTick(() => {
         const ta = getTextareaEl();
+        const mirror = mirrorRef.value;
         if (!ta) return;
+
+        // 先让 textarea 自然扩展以获取真实内容高度
         ta.style.height = 'auto';
-        const h = Math.min(PROMPT_INPUT_MAX_H, Math.max(PROMPT_INPUT_MIN_H, ta.scrollHeight));
+        const natural = ta.scrollHeight;
+        const h = Math.min(PROMPT_INPUT_MAX_H, Math.max(PROMPT_INPUT_MIN_H, natural));
         ta.style.height = `${h}px`;
+
+        // 只有当内容超过最大高度时才开启内部滚动条
+        const needScroll = natural > PROMPT_INPUT_MAX_H;
+        ta.style.overflowY = needScroll ? 'auto' : 'hidden';
+        if (mirror) {
+            mirror.style.overflowY = needScroll ? 'auto' : 'hidden';
+        }
+
         syncMirrorToTextarea();
     });
 }
@@ -610,7 +635,7 @@ onUnmounted(() => {
     background: #2d2d2d;
     border: 1px solid #404040;
     border-radius: 30px;
-    width: 320px;
+  width: 360px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
@@ -661,8 +686,7 @@ onUnmounted(() => {
 
 .prompt-input-wrap {
     position: relative;
-    min-height: 120px;
-    max-height: 360px;
+    min-height: 140px;
 }
 
 .prompt-mirror {
@@ -670,7 +694,7 @@ onUnmounted(() => {
     /* 与 textarea 的 1px 边框一致，保证内容区域对齐 */
     inset: 1px;
     z-index: 0;
-    overflow-y: auto;
+    overflow-y: hidden;
     pointer-events: none;
     border-radius: 7px; /* textarea 8px - 1px 边框 */
 }
@@ -701,9 +725,8 @@ onUnmounted(() => {
     z-index: 1;
     display: block;
     width: 100%;
-    min-height: 120px;
-    max-height: 360px;
-    overflow-y: auto;
+    min-height: 140px;
+    overflow-y: hidden;
     line-height: 1.6;
     padding: 8px 10px;
     font-size: 13px;
