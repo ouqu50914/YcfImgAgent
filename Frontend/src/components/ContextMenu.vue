@@ -34,8 +34,22 @@
             @click="handleInsertVideo"
         >
             <el-icon><VideoCamera /></el-icon>
-            <span>插入视频节点</span>
+            <span>插入视频生成节点</span>
             <span class="shortcut">V</span>
+        </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertVideoRef"
+        >
+            <el-icon><VideoCamera /></el-icon>
+            <span>插入视频节点</span>
+        </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertAudioRef"
+        >
+            <el-icon><KnifeFork /></el-icon>
+            <span>插入音频节点</span>
         </div>
         <div 
             class="menu-item"
@@ -75,6 +89,8 @@ const emit = defineEmits<{
     insertImage: [];
     insertDream: [];
     insertVideo: [];
+    insertVideoRef: [];
+    insertAudioRef: [];
     insertLayerSeparation: [];
     addGroup: [];
     close: [];
@@ -97,6 +113,16 @@ const handleInsertDream = () => {
 
 const handleInsertVideo = () => {
     emit('insertVideo');
+    emit('close');
+};
+
+const handleInsertVideoRef = () => {
+    emit('insertVideoRef');
+    emit('close');
+};
+
+const handleInsertAudioRef = () => {
+    emit('insertAudioRef');
     emit('close');
 };
 

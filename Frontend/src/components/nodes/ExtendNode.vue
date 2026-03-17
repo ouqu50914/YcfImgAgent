@@ -393,10 +393,27 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
 }
 
 .param-select :deep(.el-input__wrapper) {
-    background: #393c45;
+    background: #252525;
     border-radius: 8px;
     box-shadow: none;
-    border: 1px solid #555;
+    border: 1px solid #404040;
+}
+
+.param-select :deep(.el-select__wrapper) {
+    background-color: #252525;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #404040;
+}
+
+.extend-node :deep(.el-input__inner),
+.extend-node :deep(.el-textarea__inner) {
+    color: #b0b0b0;
+}
+
+.extend-node :deep(.el-input__inner::placeholder),
+.extend-node :deep(.el-textarea__inner::placeholder) {
+    color: #808080;
 }
 
 .param-select :deep(.el-input__wrapper:hover) {

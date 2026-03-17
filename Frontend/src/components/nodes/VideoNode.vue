@@ -2,13 +2,34 @@
   <div class="video-node">
     <div class="node-header">
       <el-icon><VideoCamera /></el-icon>
-      <span>可灵 · 视频生成</span>
+      <span>视频生成节点</span>
+      <el-tag size="small" class="model-tag" effect="dark">
+        {{ providerLabel }}
+      </el-tag>
     </div>
 
     <div class="node-content">
       <!-- 上半部分：参数表单 -->
       <div class="params-section">
         <div class="param-item">
+          <div class="param-label">模型</div>
+          <el-select v-model="provider" size="small" class="param-select" disabled>
+            <!-- 目前仅支持 Seedance，暂时禁用 Kling 选项 -->
+            <el-option label="Seedance" value="seedance" />
+          </el-select>
+        </div>
+
+        <div v-if="provider === 'seedance'" class="param-item">
+          <div class="param-label">Seedance 类型</div>
+          <el-select v-model="seedanceMode" size="small" class="param-select">
+            <el-option label="文生视频" value="text" />
+            <el-option label="图生视频-首帧" value="image_first_frame" />
+            <el-option label="图生视频-首尾帧" value="image_first_last" />
+            <el-option label="多模态参考" value="multi_modal" />
+          </el-select>
+        </div>
+
+        <div v-if="provider === 'kling'" class="param-item">
           <div class="param-label">模式</div>
           <el-select v-model="mode" size="small" class="param-select">
             <el-option label="文生视频" value="text_to_video" />
@@ -17,7 +38,7 @@
         </div>
 
         <!-- 图生视频子模式 -->
-        <div v-if="mode === 'image_to_video'" class="param-item">
+        <div v-if="mode === 'image_to_video' && provider === 'kling'" class="param-item">
           <div class="param-label">图生类型</div>
           <el-select v-model="imageSubType" size="small" class="param-select">
             <el-option label="仅首帧" value="first_only" />
@@ -26,65 +47,101 @@
           </el-select>
         </div>
 
-        <!-- 首帧：仅首帧 或 首尾帧 时显示 -->
-        <template v-if="mode === 'image_to_video' && (imageSubType === 'first_only' || imageSubType === 'first_last')">
+        <!-- 首帧/尾帧：仅通过连线输入，不在节点内上传 -->
+        <template
+          v-if="(provider === 'kling' && mode === 'image_to_video' && (imageSubType === 'first_only' || imageSubType === 'first_last'))
+              || (provider === 'seedance' && (seedanceMode === 'image_first_frame' || seedanceMode === 'image_first_last'))"
+        >
           <div class="param-item image-input-row">
             <div class="param-label">首帧</div>
             <div class="image-slot">
               <img v-if="firstFramePreview" :src="firstFramePreview" class="thumb" alt="首帧" />
-              <span v-else class="placeholder">上传或连线</span>
-              <el-button size="small" type="primary" plain @click="triggerUploadFirst">上传</el-button>
-              <input ref="uploadFirstRef" type="file" accept="image/*" class="hidden-input" @change="onFirstFileChange" />
+              <span v-else class="placeholder">请从图片节点连线传入首帧（第 1 张图）</span>
             </div>
           </div>
-          <!-- 尾帧：仅首尾帧时显示 -->
-          <div v-if="imageSubType === 'first_last'" class="param-item image-input-row">
+          <div
+            v-if="(provider === 'kling' && imageSubType === 'first_last')
+                || (provider === 'seedance' && seedanceMode === 'image_first_last')"
+            class="param-item image-input-row"
+          >
             <div class="param-label">尾帧</div>
             <div class="image-slot">
               <img v-if="endFramePreview" :src="endFramePreview" class="thumb" alt="尾帧" />
-              <span v-else class="placeholder">上传或连线</span>
-              <el-button size="small" type="primary" plain @click="triggerUploadEnd">上传</el-button>
-              <input ref="uploadEndRef" type="file" accept="image/*" class="hidden-input" @change="onEndFileChange" />
+              <span v-else class="placeholder">请从图片节点连线传入尾帧（第 2 张图）</span>
             </div>
           </div>
         </template>
 
         <!-- 多图多镜头：展示已汇聚的图片数量 -->
-        <div v-if="mode === 'image_to_video' && imageSubType === 'multi_shot'" class="param-item">
+        <div v-if="provider === 'kling' && mode === 'image_to_video' && imageSubType === 'multi_shot'" class="param-item">
           <div class="param-label">多图</div>
-          <span class="param-hint">{{ connectedImageUrls.length }} 张（连线或上传）</span>
+          <span class="param-hint">{{ connectedImageUrls.length }} 张（连线）</span>
         </div>
+
+        <!-- Seedance 多模态：图片 + 来自参考节点的视频/音频 -->
+        <template v-if="provider === 'seedance' && seedanceMode === 'multi_modal'">
+          <div class="param-item">
+            <div class="param-label">参考图</div>
+            <span class="param-hint">{{ connectedImageUrls.length || (firstFramePreview ? 1 : 0) }} 张（连线）</span>
+          </div>
+          <div class="param-item">
+            <div class="param-label">参考视频</div>
+            <span class="param-hint">{{ connectedVideoRefUrls.length }} 个（通过视频参考节点连线）</span>
+          </div>
+          <div class="param-item">
+            <div class="param-label">参考音频</div>
+            <span class="param-hint">{{ connectedAudioRefUrls.length }} 个（通过音频参考节点连线）</span>
+          </div>
+        </template>
 
         <div class="param-item">
           <div class="param-label">时长(秒)</div>
-          <el-input-number v-model="duration" :min="3" :max="20" size="small" />
+          <!-- Seedance：支持自动(-1) 或 4-15 手动，避免数值跳动 -->
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <el-switch
+              v-model="durationAuto"
+              inline-prompt
+              active-text="自动"
+              inactive-text="自定义"
+              size="small"
+            />
+            <el-input-number
+              v-model="durationManual"
+              :min="4"
+              :max="15"
+              :step="1"
+              size="small"
+              :disabled="durationAuto"
+              :controls="false"
+            />
+          </div>
         </div>
 
         <div class="param-item">
           <div class="param-label">分辨率</div>
           <el-select v-model="resolution" size="small" class="param-select">
-            <el-option label="720p" value="720p" />
-            <el-option label="1080p" value="1080p" />
+            <template v-if="provider === 'seedance'">
+              <el-option label="480p" value="480p" />
+              <el-option label="720p" value="720p" />
+            </template>
+            <template v-else>
+              <el-option label="720p" value="720p" />
+              <el-option label="1080p" value="1080p" />
+            </template>
           </el-select>
         </div>
 
         <div class="param-item">
           <div class="param-label">比例</div>
           <el-select v-model="aspectRatio" size="small" class="param-select">
-            <el-option label="16:9 横版" value="16:9" />
-            <el-option label="9:16 竖版" value="9:16" />
-            <el-option label="1:1 方形" value="1:1" />
+            <el-option label="自适应 (adaptive)" value="adaptive" />
+            <el-option label="16:9" value="16:9" />
+            <el-option label="4:3" value="4:3" />
+            <el-option label="1:1" value="1:1" />
+            <el-option label="3:4" value="3:4" />
+            <el-option label="9:16" value="9:16" />
+            <el-option label="21:9" value="21:9" />
           </el-select>
-        </div>
-
-        <div class="param-item">
-          <div class="param-label">风格</div>
-          <el-input
-            v-model="style"
-            size="small"
-            placeholder="如 写实 / 动漫 / 产品展示"
-            class="param-input"
-          />
         </div>
 
         <el-button
@@ -174,39 +231,123 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
-import { uploadImage } from '@/api/upload';
 import { getUploadUrl } from '@/utils/image-loader';
+import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
 
 defineEmits<{
   updateNodeInternals: [];
 }>();
 
 const props = defineProps<NodeProps>();
-const { getEdges, findNode } = useVueFlow();
+const { getEdges, findNode, addNodes, addEdges, getNodes } = useVueFlow();
 
-// 输入：从上游节点采集的提示词 & 图片
+type WorkflowPersistenceStore = {
+  saveImmediately: () => void;
+};
+
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
+const saveWorkflowImmediately = () => {
+  if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+    try {
+      workflowPersistence.saveImmediately();
+    } catch (e) {
+      console.error('[VideoNode] 保存工作流失败:', e);
+    }
+  }
+};
+
+// 模型提供方：kling / seedance（Seedance 仅支持文生视频）
+const provider = ref<'kling' | 'seedance'>('seedance');
+
+// Seedance 内部模式：文生 / 图生首帧 / 首尾帧 / 多参考图
+const seedanceMode = ref<SeedanceAdvancedAction>('text');
+
+// 输入：从上游节点采集的提示词 & 图片 / 视频 / 音频参考
 const connectedPrompt = ref('');
 const connectedImageUrl = ref<string | null>(null);
 const connectedEndImageUrl = ref<string | null>(null);
 const connectedImageUrls = ref<string[]>([]);
+const imageSourceCount = ref(0);
 
-// 节点内上传的首帧/尾帧 URL（相对路径如 /uploads/xxx）
-const uploadedFirstUrl = ref<string | null>(null);
-const uploadedEndUrl = ref<string | null>(null);
+const connectedVideoRefUrls = ref<string[]>([]);
+const connectedAudioRefUrls = ref<string[]>([]);
 
-const uploadFirstRef = ref<HTMLInputElement | null>(null);
-const uploadEndRef = ref<HTMLInputElement | null>(null);
+const currentNode = computed(() => {
+  return getNodes.value.find(n => n.id === props.id);
+});
+
+// 创建或更新“视频结果节点”：从创建任务开始就存在，并在轮询过程中实时同步状态
+const syncResultVideoNode = () => {
+  const self = currentNode.value;
+  if (!self) return;
+
+  const url = videoUrls.value[0] || '';
+
+  // 若已存在当前 VideoNode 派生的结果节点，则直接更新其数据
+  const existing = getNodes.value.find(
+    n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
+  );
+  if (existing) {
+    existing.data = {
+      ...(existing.data || {}),
+      fromNodeId: props.id,
+      videoUrl: url,
+      status: status.value,
+      progress: progress.value,
+      errorMessage: errorMessage.value,
+    };
+    saveWorkflowImmediately();
+    return;
+  }
+
+  // 否则创建新的结果节点（即使此时还没有 videoUrl）
+  const nodeWidth = self.dimensions?.width || 360;
+  const startX = self.position.x + nodeWidth + 100;
+  const startY = self.position.y;
+
+  const nodeId = `video_result_${Date.now()}`;
+  const edgeId = `edge_${props.id}_to_${nodeId}_${Date.now()}`;
+
+  addNodes({
+    id: nodeId,
+    type: 'videoResult',
+    position: {
+      x: startX,
+      y: startY,
+    },
+    data: {
+      fromNodeId: props.id,
+      videoUrl: url,
+      status: status.value,
+      progress: progress.value,
+      errorMessage: errorMessage.value,
+    },
+  });
+
+  addEdges({
+    id: edgeId,
+    source: props.id,
+    target: nodeId,
+    sourceHandle: 'source',
+    targetHandle: 'target',
+    type: 'default',
+    animated: true,
+  });
+
+  // 新建结果节点后立即保存一次工作流，避免用户在首次创建结果节点后立刻刷新导致该节点未写入历史记录
+  saveWorkflowImmediately();
+};
 
 // 表单状态（imageSubType 需在 watch 前声明）
 const mode = ref<VideoMode>('text_to_video');
 const imageSubType = ref<ImageSubType>('first_only');
 
-// 监听连接变化，提取提示词和图片（支持首帧、尾帧、多图）
+// 监听连接变化，提取提示词、图片、视频参考、音频参考
 watch(
   () => [getEdges.value, imageSubType.value],
   () => {
@@ -217,8 +358,12 @@ watch(
     connectedImageUrl.value = null;
     connectedEndImageUrl.value = null;
     connectedImageUrls.value = [];
+    connectedVideoRefUrls.value = [];
+    connectedAudioRefUrls.value = [];
 
     const imageSources: string[] = [];
+    const videoRefSources: string[] = [];
+    const audioRefSources: string[] = [];
     for (const edge of targetEdges) {
       const sourceNode = findNode(edge.source);
       if (!sourceNode) continue;
@@ -236,30 +381,101 @@ watch(
           if (typeof u === 'string' && u) imageSources.push(u);
         }
       }
+
+      if (sourceNode.type === 'videoRef' && sourceNode.data?.url) {
+        const v = sourceNode.data.url as string;
+        if (typeof v === 'string' && v.trim()) videoRefSources.push(v.trim());
+      }
+      if (sourceNode.type === 'videoResult' && sourceNode.data?.videoUrl) {
+        const v = sourceNode.data.videoUrl as string;
+        if (typeof v === 'string' && v.trim()) videoRefSources.push(v.trim());
+      }
+
+      if (sourceNode.type === 'audioRef' && sourceNode.data?.url) {
+        const v = sourceNode.data.url as string;
+        if (typeof v === 'string' && v.trim()) audioRefSources.push(v.trim());
+      }
     }
 
-  if (imageSubType.value === 'multi_shot') {
-    connectedImageUrls.value = [...new Set(imageSources)];
-    if (imageSources.length > 0) {
-      connectedImageUrl.value = imageSources[0] ?? null;
+    imageSourceCount.value = imageSources.length;
+
+    connectedVideoRefUrls.value = [...new Set(videoRefSources)];
+    connectedAudioRefUrls.value = [...new Set(audioRefSources)];
+
+    // Kling 多图多镜头：把所有图片作为序列
+    if (provider.value === 'kling' && imageSubType.value === 'multi_shot') {
+      connectedImageUrls.value = [...new Set(imageSources)];
+      if (imageSources.length > 0) {
+        connectedImageUrl.value = imageSources[0] ?? null;
+      }
+    } else if (provider.value === 'seedance' && seedanceMode.value === 'multi_modal') {
+      // Seedance 多模态：所有连上的图片都作为 referenceImageUrls
+      connectedImageUrls.value = [...new Set(imageSources)];
+      if (imageSources.length > 0) {
+        connectedImageUrl.value = imageSources[0] ?? null;
+      }
+      if (imageSources.length > 1) {
+        connectedEndImageUrl.value = imageSources[1] ?? null;
+      }
+    } else {
+      // 其他模式：首帧 / 尾帧逻辑
+      if (imageSources.length > 0) {
+        connectedImageUrl.value = imageSources[0] ?? null;
+      }
+      if (imageSources.length > 1) {
+        connectedEndImageUrl.value = imageSources[1] ?? null;
+      }
     }
-  } else {
-    if (imageSources.length > 0) {
-      connectedImageUrl.value = imageSources[0] ?? null;
+
+    // Seedance 模式下，根据连线自动调整为多模态模式，并提示用户
+    if (provider.value === 'seedance') {
+      const hasImages = imageSourceCount.value > 0;
+      const hasExtraImagesForFirst =
+        seedanceMode.value === 'image_first_frame' && imageSourceCount.value > 1;
+      const hasExtraImagesForFirstLast =
+        seedanceMode.value === 'image_first_last' && imageSourceCount.value > 2;
+      const hasVideoRefs = connectedVideoRefUrls.value.length > 0;
+      const hasAudioRefs = connectedAudioRefUrls.value.length > 0;
+
+      // 文生视频模式 + 接入了任意图片 / 视频 / 音频 ⇒ 自动切到多模态
+      if (
+        seedanceMode.value === 'text' &&
+        (hasImages || hasVideoRefs || hasAudioRefs)
+      ) {
+        seedanceMode.value = 'multi_modal';
+        ElMessage.info('检测到已连接图片或视频/音频参考，已自动切换到 Seedance 多模态参考模式。');
+      }
+
+      // 首帧模式：如果图片数量 >1，或连入了视频/音频，也自动切到多模态
+      if (
+        seedanceMode.value === 'image_first_frame' &&
+        (hasExtraImagesForFirst || hasVideoRefs || hasAudioRefs)
+      ) {
+        seedanceMode.value = 'multi_modal';
+        ElMessage.info('首帧模式仅支持 1 张图片，检测到多张图片或视频/音频参考，已自动切换为多模态参考模式。');
+      }
+
+      // 首帧+尾帧模式：如果图片数量 >2，或连入了视频/音频，也自动切到多模态
+      if (
+        seedanceMode.value === 'image_first_last' &&
+        (hasExtraImagesForFirstLast || hasVideoRefs || hasAudioRefs)
+      ) {
+        seedanceMode.value = 'multi_modal';
+        ElMessage.info('首帧+尾帧模式仅支持 2 张图片，检测到更多图片或视频/音频参考，已自动切换为多模态参考模式。');
+      }
     }
-    if (imageSources.length > 1) {
-      connectedEndImageUrl.value = imageSources[1] ?? null;
-    }
-  }
   },
   { immediate: true, deep: true }
 );
 
 // 表单状态（其余）
-const duration = ref<number>(6);
+// 时长：自动(-1) 或手动 4-15 秒
+const durationAuto = ref(false);
+const durationManual = ref<number>(4);
 const resolution = ref<'720p' | '1080p' | '4k'>('720p');
-const aspectRatio = ref<string>('16:9');
-const style = ref('');
+const aspectRatio = ref<string>('adaptive');
+
+const providerLabel = computed(() => (provider.value === 'kling' ? 'Kling' : 'Seedance'));
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -268,57 +484,13 @@ const normalizeImageUrl = (url: string | null | undefined): string => {
 
 // 首帧/尾帧预览用 URL（连线优先，否则用上传的）
 const firstFramePreview = computed(() => {
-  const u = connectedImageUrl.value || uploadedFirstUrl.value;
+  const u = connectedImageUrl.value;
   return u ? normalizeImageUrl(u) : '';
 });
 const endFramePreview = computed(() => {
-  const u = connectedEndImageUrl.value || uploadedEndUrl.value;
+  const u = connectedEndImageUrl.value;
   return u ? normalizeImageUrl(u) : '';
 });
-
-const triggerUploadFirst = () => uploadFirstRef.value?.click();
-const triggerUploadEnd = () => uploadEndRef.value?.click();
-
-const onFirstFileChange = async (e: Event) => {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  try {
-    const res: any = await uploadImage(file);
-    const url = res?.data?.url;
-    if (url) {
-      uploadedFirstUrl.value = url;
-      ElMessage.success('首帧上传成功');
-    }
-  } catch (err: any) {
-    console.error('[VideoNode] 首帧上传失败', err);
-    // 具体错误提示由全局拦截器处理，这里仅在无响应时兜底
-    if (!(err as any)?.response) {
-      ElMessage.error('首帧上传失败，请稍后重试');
-    }
-  }
-  input.value = '';
-};
-
-const onEndFileChange = async (e: Event) => {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  try {
-    const res: any = await uploadImage(file);
-    const url = res?.data?.url;
-    if (url) {
-      uploadedEndUrl.value = url;
-      ElMessage.success('尾帧上传成功');
-    }
-  } catch (err: any) {
-    console.error('[VideoNode] 尾帧上传失败', err);
-    if (!(err as any)?.response) {
-      ElMessage.error('尾帧上传失败，请稍后重试');
-    }
-  }
-  input.value = '';
-};
 
 // 任务状态
 const taskId = ref<number | null>(null);
@@ -326,6 +498,29 @@ const status = ref<'pending' | 'running' | 'succeeded' | 'failed' | 'canceled'>(
 const progress = ref<number | null>(null);
 const errorMessage = ref<string | null>(null);
 const videoUrls = ref<string[]>([]);
+
+const CONTENT_LIMIT_HINT = '图片内容可能受限，请确认图片内容';
+
+const normalizeErrorMessage = (raw: unknown): string | null => {
+  if (!raw) return null;
+  const text = String(raw);
+  const lower = text.toLowerCase();
+
+  const contentLimitPatterns = [
+    'failed to process generated image',
+    'failed to process image urls to base64',
+    'unable to show the generated image',
+  ];
+
+  const isContentLimited = contentLimitPatterns.some((p) => lower.includes(p));
+
+  if (isContentLimited) {
+    ElMessage.warning(CONTENT_LIMIT_HINT);
+    return CONTENT_LIMIT_HINT;
+  }
+
+  return text;
+};
 
 const loading = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -347,23 +542,59 @@ const statusText = computed(() => {
   }
 });
 
+watch(
+  () => videoUrls.value[0],
+  (val) => {
+    if (val) {
+      syncResultVideoNode();
+    }
+  }
+);
+
 // 是否可以执行
 const canExecute = computed(() => {
+  // Seedance：根据子类型判断
+  if (provider.value === 'seedance') {
+    if (seedanceMode.value === 'text') {
+      return !!connectedPrompt.value;
+    }
+    if (seedanceMode.value === 'image_first_frame') {
+      const first = !!connectedImageUrl.value;
+      // 必须且只能 1 张图
+      return !!connectedPrompt.value && first && imageSourceCount.value === 1;
+    }
+    if (seedanceMode.value === 'image_first_last') {
+      const first = !!connectedImageUrl.value;
+      const end = !!connectedEndImageUrl.value;
+      // 必须且只能 2 张图
+      return !!connectedPrompt.value && first && end && imageSourceCount.value === 2;
+    }
+    if (seedanceMode.value === 'multi_modal') {
+      // 多模态：根据文档，文本必填，图片/视频/音频为可选组合
+      return !!connectedPrompt.value;
+    }
+    return !!connectedPrompt.value;
+  }
+
   if (mode.value === 'text_to_video') {
     return !!connectedPrompt.value;
   }
   if (mode.value === 'image_to_video') {
-    const first = !!(connectedImageUrl.value || uploadedFirstUrl.value);
-    if (imageSubType.value === 'first_only') return !!connectedPrompt.value && first;
+    const first = !!connectedImageUrl.value;
+    if (imageSubType.value === 'first_only') {
+      // Kling 首帧：必须且只能 1 张图
+      return !!connectedPrompt.value && first && imageSourceCount.value === 1;
+    }
     if (imageSubType.value === 'first_last') {
-      const end = !!(connectedEndImageUrl.value || uploadedEndUrl.value);
-      return !!connectedPrompt.value && first && end;
+      const end = !!connectedEndImageUrl.value;
+      // Kling 首尾帧：必须且只能 2 张图
+      return !!connectedPrompt.value && first && end && imageSourceCount.value === 2;
     }
     if (imageSubType.value === 'multi_shot') {
       return !!connectedPrompt.value && connectedImageUrls.value.length >= 2;
     }
   }
-  return !!connectedPrompt.value || !!(connectedImageUrl.value || uploadedFirstUrl.value);
+  return !!connectedPrompt.value || !!connectedImageUrl.value;
 });
 
 const executeButtonText = computed(() => {
@@ -373,34 +604,36 @@ const executeButtonText = computed(() => {
   return '生成视频';
 });
 
-// 根据连接自动调整模式：有图片则优先图生视频
+// 根据连接自动调整模式：有图片则优先图生视频（仅对 kling 生效）
 watch(
   () => connectedImageUrl.value,
   (val) => {
-    if (val) {
+    if (val && provider.value === 'kling') {
       mode.value = 'image_to_video';
-    } else if (mode.value === 'image_to_video') {
+    } else if (provider.value === 'kling' && mode.value === 'image_to_video') {
       mode.value = 'text_to_video';
     }
   },
   { immediate: true }
 );
 
-const startPolling = (id: number) => {
+const startPollingKling = (id: number) => {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     try {
-      const res = await getVideoTask(id);
-      const t = res.data;
+      const res = await getVideoTask(id) as any;
+      const t = (res?.data ?? res) as any;
       status.value = (t.status as any) || 'pending';
-      progress.value = t.progress;
-      errorMessage.value = t.error_message;
+      progress.value = t?.progress ?? null;
+      errorMessage.value = normalizeErrorMessage(t?.error_message);
 
-      if (Array.isArray(t.video_urls) && t.video_urls.length > 0) {
-        videoUrls.value = t.video_urls.map(u => normalizeImageUrl(u));
+      if (Array.isArray(t?.video_urls) && t.video_urls.length > 0) {
+        videoUrls.value = t.video_urls.map((u: string) => normalizeImageUrl(u));
       }
 
       if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
+        syncResultVideoNode();
+        saveWorkflowImmediately();
         if (pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
@@ -421,20 +654,181 @@ const handleGenerate = async () => {
   loading.value = true;
   errorMessage.value = null;
 
+  // 无论后端是否成功，先创建 / 更新一次结果节点，显示“排队中”
+  status.value = 'pending';
+  progress.value = null;
+  syncResultVideoNode();
+
   try {
+    if (provider.value === 'seedance') {
+      const basePrompt = connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。';
+
+      // 纯文生视频仍走简单接口
+      if (seedanceMode.value === 'text') {
+        const payload = {
+          prompt: basePrompt,
+          ratio: aspectRatio.value,
+          duration: durationAuto.value ? -1 : durationManual.value,
+          resolution: resolution.value,
+          generateAudio: true,
+          enableWebSearch: false,
+        };
+        const res = await createSeedanceGeneration(payload);
+        const raw = (res as any);
+        const d = raw?.data?.data ?? raw?.data ?? raw;
+        taskId.value = null;
+        status.value = 'pending';
+        progress.value = (d as any)?.progress ?? null;
+        videoUrls.value = [];
+        syncResultVideoNode();
+        const taskKeySimple = d.task_id || d.id;
+        if (!taskKeySimple) {
+          ElMessage.error('Seedance 返回结果缺少任务 ID');
+          return;
+        }
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        pollTimer = setInterval(async () => {
+          try {
+            const r = await getSeedanceGenerationStatus(taskKeySimple);
+            const rawStatus = (r as any);
+            const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
+            if (!data) return;
+            status.value = (data.status as any) || 'pending';
+            progress.value = (data as any).progress ?? null;
+            errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
+            if ((data as any).videoUrl) {
+              videoUrls.value = [(data as any).videoUrl];
+            }
+            syncResultVideoNode();
+            if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
+              saveWorkflowImmediately();
+              if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+              }
+            }
+          } catch (err) {
+            console.error('[VideoNode] Seedance 轮询失败', err);
+          }
+        }, 8000);
+        ElMessage.success('Seedance 任务已创建，开始生成…');
+        return;
+      }
+
+      // 高级模式：图生首帧 / 首尾帧 / 多参考图
+      const action: SeedanceAdvancedAction = seedanceMode.value;
+      const firstUrlRaw = connectedImageUrl.value;
+      const endUrlRaw = connectedEndImageUrl.value;
+
+      const payloadAdv: any = {
+        prompt: basePrompt,
+        action,
+        ratio: aspectRatio.value,
+        duration: durationAuto.value ? -1 : durationManual.value,
+        resolution: resolution.value,
+        generateAudio: true,
+        enableWebSearch: false,
+      };
+
+      if (action === 'image_first_frame') {
+        if (!firstUrlRaw) {
+          ElMessage.warning('请提供首帧图片（连线或上传）');
+          loading.value = false;
+          return;
+        }
+        payloadAdv.firstImageUrl = normalizeImageUrl(firstUrlRaw);
+      } else if (action === 'image_first_last') {
+        if (!firstUrlRaw || !endUrlRaw) {
+          ElMessage.warning('请提供首帧与尾帧图片（连线或上传）');
+          loading.value = false;
+          return;
+        }
+        payloadAdv.firstImageUrl = normalizeImageUrl(firstUrlRaw);
+        payloadAdv.lastImageUrl = normalizeImageUrl(endUrlRaw);
+      } else if (action === 'multi_modal') {
+        const refs = connectedImageUrls.value.length
+          ? connectedImageUrls.value
+          : (firstUrlRaw ? [firstUrlRaw] : []);
+        if (!refs.length) {
+          ElMessage.warning('请至少连入 1 张参考图片');
+          loading.value = false;
+          return;
+        }
+        payloadAdv.referenceImageUrls = refs.slice(0, 9).map(u => normalizeImageUrl(u));
+
+        const videoUrlsFromNodes = connectedVideoRefUrls.value;
+        if (videoUrlsFromNodes.length) {
+          payloadAdv.referenceVideoUrls = Array.from(new Set(videoUrlsFromNodes)).slice(0, 3);
+        }
+
+        const audioUrlsFromNodes = connectedAudioRefUrls.value;
+        if (audioUrlsFromNodes.length) {
+          payloadAdv.referenceAudioUrls = Array.from(new Set(audioUrlsFromNodes)).slice(0, 3);
+        }
+      }
+
+      const res = await createSeedanceAdvanced(payloadAdv);
+      const raw = (res as any);
+      const d = raw?.data?.data ?? raw?.data ?? raw;
+      taskId.value = null;
+      status.value = 'pending';
+      progress.value = (d as any)?.progress ?? null;
+      videoUrls.value = [];
+      syncResultVideoNode();
+      // 轮询 Seedance 任务
+      const taskKey = d.task_id || d.id;
+      if (!taskKey) {
+        ElMessage.error('Seedance 返回结果缺少任务 ID');
+        return;
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      pollTimer = setInterval(async () => {
+        try {
+          const r = await getSeedanceGenerationStatus(taskKey);
+          const rawStatus = (r as any);
+          const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
+          if (!data) return;
+          status.value = (data.status as any) || 'pending';
+          progress.value = (data as any).progress ?? null;
+          errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
+          if ((data as any).videoUrl) {
+            videoUrls.value = [(data as any).videoUrl];
+          }
+          syncResultVideoNode();
+          if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
+            saveWorkflowImmediately();
+            if (pollTimer) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+          }
+        } catch (err) {
+          console.error('[VideoNode] Seedance 轮询失败', err);
+        }
+      }, 8000);
+      ElMessage.success('Seedance 任务已创建，开始生成…');
+      return;
+    }
+
+    // Kling 流程
     const body: any = {
       mode: mode.value,
       prompt: connectedPrompt.value || '生成一个简短的视频',
-      duration: duration.value,
+      duration: durationAuto.value ? -1 : durationManual.value,
       resolution: resolution.value,
-      aspectRatio: aspectRatio.value,
-      style: style.value || undefined,
+        aspectRatio: aspectRatio.value,
     };
 
     if (mode.value === 'image_to_video') {
       body.imageSubType = imageSubType.value;
-      const firstUrl = connectedImageUrl.value || uploadedFirstUrl.value;
-      const endUrl = connectedEndImageUrl.value || uploadedEndUrl.value;
+      const firstUrl = connectedImageUrl.value;
+      const endUrl = connectedEndImageUrl.value;
 
       if (imageSubType.value === 'first_only') {
         if (!firstUrl) {
@@ -461,19 +855,29 @@ const handleGenerate = async () => {
       }
     }
 
-    const res = await createVideoTask(body);
-    const t = res.data;
+    const res = await createVideoTask(body) as any;
+    const t = (res?.data ?? res) as any;
+    if (!t || typeof t !== 'object') {
+      throw new Error('创建视频任务返回结果异常');
+    }
+
     taskId.value = t.id;
     status.value = (t.status as any) || 'pending';
-    progress.value = t.progress;
+    progress.value = t.progress ?? null;
     videoUrls.value = Array.isArray(t.video_urls)
-      ? t.video_urls.map(u => normalizeImageUrl(u))
+      ? t.video_urls.map((u: string) => normalizeImageUrl(u))
       : [];
 
+    syncResultVideoNode();
+
     ElMessage.success('视频任务已创建，开始生成…');
-    startPolling(t.id);
+    startPollingKling(t.id);
   } catch (e: any) {
     console.error('[VideoNode] 创建任务失败', e);
+    // 失败时也同步到结果节点，显示错误状态与文案
+    status.value = 'failed';
+    errorMessage.value = normalizeErrorMessage(e?.message) || '创建视频任务失败';
+    syncResultVideoNode();
     // 统一错误提示交给全局拦截器，这里不再重复 toast
   } finally {
     loading.value = false;
@@ -483,14 +887,17 @@ const handleGenerate = async () => {
 const manualRefresh = async () => {
   if (!taskId.value) return;
   try {
-    const res = await getVideoTask(taskId.value);
-    const t = res.data;
-    status.value = (t.status as any) || 'pending';
-    progress.value = t.progress;
-    errorMessage.value = t.error_message;
-    videoUrls.value = Array.isArray(t.video_urls)
-      ? t.video_urls.map(u => normalizeImageUrl(u))
-      : [];
+    if (provider.value === 'kling') {
+      const res = await getVideoTask(taskId.value) as any;
+      const t = (res?.data ?? res) as any;
+      status.value = (t.status as any) || 'pending';
+      progress.value = t?.progress ?? null;
+      errorMessage.value = normalizeErrorMessage(t?.error_message);
+      videoUrls.value = Array.isArray(t?.video_urls)
+        ? t.video_urls.map((u: string) => normalizeImageUrl(u))
+        : [];
+      syncResultVideoNode();
+    }
   } catch (e: any) {
     console.error('[VideoNode] 手动刷新失败', e);
     // 统一错误提示交给全局拦截器
@@ -554,9 +961,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.model-tag {
+  margin-left: auto;
+}
+
 .node-content {
   padding: 14px 14px 12px;
-  color: #e0e0e0;
+  color: #b0b0b0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -676,9 +1087,38 @@ onUnmounted(() => {
 .error-row {
   font-size: 12px;
   color: #f56c6c;
-  background: rgba(245, 108, 108, 0.1);
+  background: rgba(245, 108, 108, 0.16);
   border-radius: 6px;
   padding: 6px 8px;
+}
+
+/* 统一表单控件深色样式 */
+.video-node :deep(.el-input__wrapper),
+.video-node :deep(.el-textarea__inner),
+.video-node :deep(.el-select__wrapper),
+.video-node :deep(.el-input-number__decrease),
+.video-node :deep(.el-input-number__increase) {
+  background-color: #252525;
+  border-color: #404040;
+  box-shadow: none;
+  color: #b0b0b0;
+}
+
+.video-node :deep(.el-input__inner),
+.video-node :deep(.el-select__placeholder),
+.video-node :deep(.el-input-number__input) {
+  color: #b0b0b0;
+}
+
+.video-node :deep(.el-input__inner::placeholder),
+.video-node :deep(.el-textarea__inner::placeholder) {
+  color: #808080;
+}
+
+.video-node :deep(.el-input__wrapper.is-focus),
+.video-node :deep(.el-select__wrapper.is-focused) {
+  border-color: #409eff;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.35);
 }
 
 .player-wrapper {

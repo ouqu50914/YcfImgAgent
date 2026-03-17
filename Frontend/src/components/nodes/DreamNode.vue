@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
 import { generateImage } from '../../api/image';
@@ -151,6 +151,10 @@ defineEmits<{
 
 // 定义 Vue Flow 节点所需的 props
 const props = defineProps<NodeProps>();
+
+type WorkflowPersistenceStore = {
+    saveImmediately: () => void;
+};
 
 const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
 const userStore = useUserStore();
@@ -498,6 +502,7 @@ const handleGenerate = async () => {
                 if (!fillPlaceholderImageNodes(fullUrls, allImages) && fullUrls.length > 0 && currentNode.value) {
                     createImageNodes(fullUrls, allImages);
                 }
+                saveWorkflowImmediately();
             } else if (res.data.image_url) {
                 // 兼容旧格式：只有 image_url
                 const url = res.data.image_url.startsWith('http')
@@ -517,6 +522,7 @@ const handleGenerate = async () => {
                 if (!fillPlaceholderImageNodes([url], [res.data.image_url]) && currentNode.value) {
                     createImageNodes([url], [res.data.image_url]);
                 }
+                saveWorkflowImmediately();
             } else {
                 console.warn('后端返回数据:', res.data);
                 ElMessage.warning('生成成功，但未获取到图片URL');
@@ -549,6 +555,7 @@ const handleGenerate = async () => {
         }
 
         ElMessage.error('图片生成失败，请稍后重试');
+        saveWorkflowImmediately();
     } finally {
         loading.value = false;
     }
@@ -611,6 +618,7 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     });
 
     console.log(`✅ 已为 ${fullUrls.length} 张图片创建独立节点`);
+    saveWorkflowImmediately();
 };
 
 // 预创建占位图片节点（仅有 loading 骨架，无实际图片）
@@ -660,6 +668,7 @@ const createPlaceholderImageNodes = (count: number) => {
 
     pendingImageNodeIds.value = ids;
     console.log(`✅ 已预创建 ${ids.length} 个占位图片节点`, ids);
+    saveWorkflowImmediately();
 };
 
 // 将真实结果填充到占位图片节点；若没有占位返回 false
@@ -685,7 +694,19 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
     );
 
     pendingImageNodeIds.value = [];
+    saveWorkflowImmediately();
     return true;
+};
+
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
+const saveWorkflowImmediately = () => {
+    if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+        try {
+            workflowPersistence.saveImmediately();
+        } catch (e) {
+            console.error('[DreamNode] 保存工作流失败:', e);
+        }
+    }
 };
 </script>
 
@@ -784,10 +805,26 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
 }
 
 .param-select :deep(.el-input__wrapper) {
-    background: #393c45;
+    background: #252525;
     border-radius: 8px;
     box-shadow: none;
-    border: 1px solid #555;
+    border: 1px solid #404040;
+}
+
+.param-select :deep(.el-select__wrapper) {
+    background-color: #252525;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #404040;
+}
+
+.dream-node :deep(.el-input__inner),
+.dream-node :deep(.el-select__placeholder) {
+    color: #b0b0b0;
+}
+
+.dream-node :deep(.el-input__inner::placeholder) {
+    color: #808080;
 }
 
 .param-select :deep(.el-input__wrapper:hover) {

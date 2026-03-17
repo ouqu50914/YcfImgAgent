@@ -187,7 +187,8 @@ const loadProjects = async () => {
   try {
     const [templatesRes, historyRes] = await Promise.all([
       getTemplates(),
-      getHistoryList(5),
+      // 首页最近项目：工作流历史多取一些，前端按项目去重后再截取
+      getHistoryList(20),
     ]);
     const list: Array<{
       id: number;
@@ -216,22 +217,41 @@ const loadProjects = async () => {
       }
     }
     if (historyRes.data && Array.isArray(historyRes.data)) {
+      // 将同一个项目的多条自动保存历史合并为一条（取最新的那条）
+      // 这里用 cover_image 作为项目分组 key；若无封面则退回到 history id
+      const grouped: Record<string, WorkflowHistory> = {};
       for (const item of historyRes.data as WorkflowHistory[]) {
-        const t = new Date(item.created_at || 0).getTime();
+        const key = item.cover_image || `history_${item.id}`;
+        const existing = grouped[key];
+        if (!existing) {
+          grouped[key] = item;
+          continue;
+        }
+        const existingTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+        const currentTime = new Date(item.updated_at || item.created_at || 0).getTime();
+        if (currentTime > existingTime) {
+          grouped[key] = item;
+        }
+      }
+
+      const mergedHistories = Object.values(grouped);
+      for (const item of mergedHistories) {
+        const t = new Date(item.updated_at || item.created_at || 0).getTime();
         // 列表接口已返回 cover_image；若无则尝试从 workflow_data 解析（可能为字符串）
         const preview = item.cover_image ?? (typeof item.workflow_data === 'object' ? getPreviewFromWorkflowData(item.workflow_data) : undefined);
         list.push({
           id: item.id,
-          name: item.snapshot_name || `自动保存 ${formatTime(item.created_at)}`,
+          name: item.snapshot_name || '自动保存工作流',
           preview,
           created_at: item.created_at,
-          updated_at: item.created_at,
+          updated_at: item.updated_at,
           source: 'history',
           _sortTime: t,
         });
       }
     }
     list.sort((a, b) => b._sortTime - a._sortTime);
+    // 首页最多展示 5 条最近项目（模板 + 历史）
     projects.value = list.slice(0, 5).map(({ _sortTime, ...rest }) => rest);
   } catch (error) {
     console.error('加载最近项目失败:', error);

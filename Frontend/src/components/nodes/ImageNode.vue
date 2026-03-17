@@ -7,9 +7,7 @@
 
         <!-- 图片展示区域（类似参考图样式） -->
         <div 
-            class="image-content" 
-            @mouseenter="handleImageMouseEnter"
-            @mouseleave="handleImageMouseLeave"
+            class="image-content"
         >
             <div class="section-title">
                 <span class="title-dot"></span>
@@ -189,6 +187,10 @@ type ImageAliasStore = {
     getAllAliases: () => { key: string; alias: string }[];
 };
 
+type WorkflowPersistenceStore = {
+    saveImmediately: () => void;
+};
+
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
@@ -201,6 +203,17 @@ const showFullscreenPreview = ref(false);
 
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const imageAlias = ref<string>(props.data?.imageAlias || '');
+
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
+const saveWorkflowImmediately = () => {
+    if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+        try {
+            workflowPersistence.saveImmediately();
+        } catch (e) {
+            console.error('[ImageNode] 保存工作流失败:', e);
+        }
+    }
+};
 
 const displayAlias = computed(() => imageAlias.value || '图片');
 
@@ -285,32 +298,16 @@ onMounted(() => {
 
 let menuTimeout: ReturnType<typeof setTimeout> | null = null;
 
-// 鼠标进入节点
+// 鼠标进入节点（整个节点 hover 即显示菜单）
 const handleMouseEnter = () => {
-    // 节点级别的鼠标进入不做处理，由图片区域处理
+    if (!imageUrl.value) return;
+    if (menuTimeout) clearTimeout(menuTimeout);
+    showActionMenu.value = true;
 };
 
 // 鼠标离开节点
 const handleMouseLeave = () => {
     // 延迟检查，避免快速移动时菜单闪烁
-    if (menuTimeout) clearTimeout(menuTimeout);
-    menuTimeout = setTimeout(() => {
-        showActionMenu.value = false;
-    }, 200);
-};
-
-// 鼠标进入图片区域
-const handleImageMouseEnter = () => {
-    if (imageUrl.value) {
-        if (menuTimeout) clearTimeout(menuTimeout);
-        showActionMenu.value = true;
-        console.log('鼠标进入图片区域，显示菜单');
-    }
-};
-
-// 鼠标离开图片区域
-const handleImageMouseLeave = () => {
-    // 延迟隐藏，给菜单留出时间
     if (menuTimeout) clearTimeout(menuTimeout);
     menuTimeout = setTimeout(() => {
         showActionMenu.value = false;
@@ -393,6 +390,7 @@ const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => 
 
     showActionMenu.value = false;
     ElMessage.success(`已添加${actionType === 'upscale' ? '放大' : actionType === 'extend' ? '扩展' : '变体'}节点`);
+    saveWorkflowImmediately();
 };
 
 // 图层拆分：创建独立的 LayerNode 节点承接结果

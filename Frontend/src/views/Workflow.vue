@@ -22,6 +22,23 @@
                     </span>
                 </div>
             </div>
+            <div class="workflow-save-info">
+                <el-button
+                    size="small"
+                    type="primary"
+                    text
+                    :loading="manualSaving"
+                    @click="handleManualSave"
+                >
+                    保存工作流
+                </el-button>
+                <span v-if="lastSavedAt" class="workflow-save-time">
+                    已保存：{{ lastSavedAtText }}
+                </span>
+                <span v-else class="workflow-save-time workflow-save-time--pending">
+                    尚未保存
+                </span>
+            </div>
         </div>
 
         <!-- 申请积分弹窗 -->
@@ -84,6 +101,20 @@
                         <el-button circle class="side-btn" @click="addLayerSeparationNode">
                             <el-icon>
                                 <Grid />
+                            </el-icon>
+                        </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="添加视频节点" placement="right">
+                        <el-button circle class="side-btn" @click="addVideoRefNode">
+                            <el-icon>
+                                <VideoCamera />
+                            </el-icon>
+                        </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="添加音频节点" placement="right">
+                        <el-button circle class="side-btn" @click="addAudioRefNode">
+                            <el-icon>
+                                <Headset />
                             </el-icon>
                         </el-button>
                     </el-tooltip>
@@ -154,7 +185,19 @@
             </VueFlow>
 
             <!-- 右键菜单 -->
-            <ContextMenu :visible="contextMenuVisible" :position="contextMenuPosition" @insert-prompt="insertPromptNode" @insert-image="insertImageNode" @insert-dream="insertDreamNode" @insert-video="insertVideoNode" @insert-layer-separation="insertLayerSeparationNode" @add-group="handleAddGroup" @close="contextMenuVisible = false" />
+            <ContextMenu
+                :visible="contextMenuVisible"
+                :position="contextMenuPosition"
+                @insert-prompt="insertPromptNode"
+                @insert-image="insertImageNode"
+                @insert-dream="insertDreamNode"
+                @insert-video="insertVideoNode"
+                @insert-video-ref="insertVideoRefNode"
+                @insert-audio-ref="insertAudioRefNode"
+                @insert-layer-separation="insertLayerSeparationNode"
+                @add-group="handleAddGroup"
+                @close="contextMenuVisible = false"
+            />
 
             <!-- 连接菜单 -->
             <ConnectionMenu :visible="connectionMenuVisible" :position="connectionMenuPosition"
@@ -248,11 +291,11 @@ import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid } from '@element-plus/icons-vue';
+import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid, VideoCamera, Headset } from '@element-plus/icons-vue';
 import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
 import { applyCredits } from '@/api/user';
-import { uploadImage } from '@/api/upload';
+import { uploadImage, uploadVideo, uploadAudio } from '@/api/upload';
 import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
@@ -273,6 +316,9 @@ import LayerNode from '@/components/nodes/LayerNode.vue';
 import PromptNode from '@/components/nodes/PromptNode.vue';
 import VideoNode from '@/components/nodes/VideoNode.vue';
 import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
+import VideoRefNode from '@/components/nodes/VideoRefNode.vue';
+import AudioRefNode from '@/components/nodes/AudioRefNode.vue';
+import VideoResultNode from '@/components/nodes/VideoResultNode.vue';
 
 // 注册节点类型
 const nodeTypes = {
@@ -284,6 +330,21 @@ const nodeTypes = {
     prompt: markRaw(PromptNode),
     video: markRaw(VideoNode),
     layerSeparation: markRaw(LayerSeparationNode),
+    videoRef: markRaw(VideoRefNode),
+    audioRef: markRaw(AudioRefNode),
+    videoResult: markRaw(VideoResultNode),
+};
+
+type WorkflowDTO = {
+    nodes: any[];
+    edges: any[];
+    cover_image?: string;
+    imageAliasCounter?: number;
+    imageAliasMap?: Record<string, string>;
+};
+
+type WorkflowPersistenceStore = {
+    saveImmediately: () => void;
 };
 
 // 初始节点数据（默认一个提示词节点）
@@ -372,10 +433,55 @@ provide<ImageAliasStore>('imageAliasStore', {
     getAllAliases: getAllImageAliases,
 });
 
+// 视频 / 音频别名：按工作流范围自增（视频1、音频1...），用于 @ 引用
+type MediaAliasStore = {
+    getOrCreateVideoAlias: (key: string) => string;
+    getOrCreateAudioAlias: (key: string) => string;
+};
+
+const videoAliasCounter = ref(0);
+const audioAliasCounter = ref(0);
+const videoAliasMap = ref<Record<string, string>>({});
+const audioAliasMap = ref<Record<string, string>>({});
+
+const getOrCreateVideoAlias = (key: string): string => {
+    if (!key) return '';
+    const existing = videoAliasMap.value[key];
+    if (existing) return existing;
+    const nextIndex = videoAliasCounter.value + 1;
+    const alias = `视频${nextIndex}`;
+    videoAliasCounter.value = nextIndex;
+    videoAliasMap.value = {
+        ...videoAliasMap.value,
+        [key]: alias,
+    };
+    return alias;
+};
+
+const getOrCreateAudioAlias = (key: string): string => {
+    if (!key) return '';
+    const existing = audioAliasMap.value[key];
+    if (existing) return existing;
+    const nextIndex = audioAliasCounter.value + 1;
+    const alias = `音频${nextIndex}`;
+    audioAliasCounter.value = nextIndex;
+    audioAliasMap.value = {
+        ...audioAliasMap.value,
+        [key]: alias,
+    };
+    return alias;
+};
+
+provide<MediaAliasStore>('mediaAliasStore', {
+    getOrCreateVideoAlias,
+    getOrCreateAudioAlias,
+});
+
 // 撤销/重做栈管理
 const undoStack = ref<any[]>([]);
 const redoStack = ref<any[]>([]);
 const MAX_UNDO_STACK_SIZE = 50; // 最大撤销栈大小
+const hasPendingChanges = ref(false);
 
 // 保存当前状态到撤销栈
 const saveState = () => {
@@ -390,6 +496,9 @@ const saveState = () => {
 
     // 添加到撤销栈
     undoStack.value.push(currentState);
+
+    // 标记有未保存的更改
+    hasPendingChanges.value = true;
 
     // 限制栈大小
     if (undoStack.value.length > MAX_UNDO_STACK_SIZE) {
@@ -476,6 +585,82 @@ const canvasWrapperRef = ref<HTMLElement | null>(null);
 /** 当前编辑对应的历史记录 id：从历史打开时设为该 id，首次自动保存后回填，后续保存均覆盖此条 */
 const currentHistoryId = ref<number | null>(null);
 
+const manualSaving = ref(false);
+const lastSavedAt = ref<Date | null>(null);
+const lastSavedAtText = computed(() => {
+    if (!lastSavedAt.value) return '';
+    try {
+        return lastSavedAt.value.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+        return '';
+    }
+});
+
+const buildWorkflowDataForSave = (): WorkflowDTO => ({
+    nodes: getNodes.value,
+    edges: getEdges.value,
+    imageAliasCounter: imageAliasCounter.value,
+    imageAliasMap: imageAliasMap.value,
+});
+
+const clearUndoRedoAndPending = () => {
+    undoStack.value = [];
+    redoStack.value = [];
+    hasPendingChanges.value = false;
+};
+
+const persistWorkflow = async () => {
+    const currentNodes = getNodes.value;
+    if (currentNodes.length === 0) return false;
+
+    const workflowData: WorkflowDTO = buildWorkflowDataForSave();
+    await ensureWorkflowCover(workflowData);
+
+    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
+    const isOwnTemplate =
+        currentTemplateId.value != null &&
+        templateOwnerId.value != null &&
+        myId != null &&
+        templateOwnerId.value === myId;
+
+    let historyRes: any = null;
+
+    // 1. 先更新模板本身（如果当前是“我的项目”里的模板）
+    if (isOwnTemplate) {
+        await updateTemplate(currentTemplateId.value!, {
+            workflowData,
+            coverImage: workflowData.cover_image,
+        });
+    }
+
+    // 2. 无论是否模板，都为当前编辑会话保留一条自动保存历史，用于刷新/重新进入时恢复
+    if (currentHistoryId.value != null) {
+        historyRes = await autoSaveHistory(workflowData, currentHistoryId.value);
+    } else {
+        historyRes = await autoSaveHistory(workflowData);
+    }
+
+    if (historyRes?.data?.id != null) {
+        currentHistoryId.value = historyRes.data.id;
+        window.localStorage.setItem('workflow:lastHistoryId', String(historyRes.data.id));
+    }
+
+    hasPendingChanges.value = false;
+    lastSavedAt.value = new Date();
+    return true;
+};
+
+const workflowPersistenceStore: WorkflowPersistenceStore = {
+    saveImmediately: () => {
+        hasPendingChanges.value = true;
+        persistWorkflow().catch((error: any) => {
+            console.error('关键操作保存失败（workflowPersistenceStore）:', error);
+        });
+    },
+};
+
+provide<WorkflowPersistenceStore>('workflowPersistence', workflowPersistenceStore);
+
 // 提供给 Gemini 聊天的工作流上下文（精简版）
 const workflowContextForChat = computed(() => {
     const nodes = getNodes.value;
@@ -555,7 +740,10 @@ const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
     'video': { width: 350, height: 450 },
     'layer': { width: 300, height: 400 },
     'split': { width: 280, height: 350 },
-    'layerSeparation': { width: 280, height: 400 }
+    'layerSeparation': { width: 280, height: 400 },
+    'videoRef': { width: 260, height: 220 },
+    'audioRef': { width: 260, height: 220 },
+    'videoResult': { width: 320, height: 280 },
 };
 
 // 间距配置
@@ -671,41 +859,32 @@ const calculateOptimalPosition = (
 
 // 封装一次保存当前工作流的逻辑：离开编辑器页面时统一调用
 const saveCurrentWorkflowBeforeLeave = async () => {
-    const currentNodes = getNodes.value;
-    if (currentNodes.length === 0) return;
-
-    const workflowData: { nodes: any[]; edges: any[]; cover_image?: string } = {
-        nodes: currentNodes,
-        edges: getEdges.value
-    };
-    await ensureWorkflowCover(workflowData);
-
-    const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
-    const isOwnTemplate =
-        currentTemplateId.value != null &&
-        templateOwnerId.value != null &&
-        myId != null &&
-        templateOwnerId.value === myId;
-
-    if (isOwnTemplate) {
-        // 从「我的工作流」进入的模板：更新原模板
-        await updateTemplate(currentTemplateId.value!, {
-            workflowData,
-            coverImage: workflowData.cover_image
-        });
-    } else if (currentHistoryId.value != null) {
-        // 从历史记录进入：更新历史记录
-        await autoSaveHistory(workflowData, currentHistoryId.value);
-    } else {
-        // 新建项目：创建新的历史记录
-        const res: any = await autoSaveHistory(workflowData);
-        if (res?.data?.id != null) currentHistoryId.value = res.data.id;
-    }
+    await persistWorkflow();
 };
 
 // 返回上一页：只负责路由返回，真正的保存逻辑在 onBeforeRouteLeave 中统一处理
 const handleGoBack = () => {
     router.back();
+};
+
+const handleManualSave = async () => {
+    if (manualSaving.value) return;
+    if (getNodes.value.length === 0) {
+        ElMessage.warning('当前没有工作流内容可保存');
+        return;
+    }
+    manualSaving.value = true;
+    try {
+        const ok = await persistWorkflow();
+        if (ok) {
+            ElMessage.success('工作流已保存');
+        }
+    } catch (error: any) {
+        console.error('手动保存失败:', error);
+        ElMessage.error(error?.message || '保存失败，请稍后重试');
+    } finally {
+        manualSaving.value = false;
+    }
 };
 
 
@@ -836,8 +1015,8 @@ const isValidConnection = (connection: Connection) => {
         return false;
     }
 
-    // 图片/提示词/视频节点作为 target 的限制
-    if (targetNode.type === 'image' || targetNode.type === 'prompt' || targetNode.type === 'video') {
+    // 图片/提示词节点作为 target 的限制
+    if (targetNode.type === 'image' || targetNode.type === 'prompt') {
         // ✅ 允许“由生图节点生成的图片节点”作为输入被连线（它们的 data.fromNodeId 存在）
         if (targetNode.type === 'image' && (targetNode.data as any)?.fromNodeId) {
             return true;
@@ -846,6 +1025,16 @@ const isValidConnection = (connection: Connection) => {
         // 其他情况一律禁止作为输入（包括用户上传的图片节点）
         ElMessage.warning('该节点不支持作为输入被连接');
         return false;
+    }
+
+    // 视频节点作为 target：允许来自 prompt / image / videoRef / audioRef / videoResult
+    if (targetNode.type === 'video') {
+        const allowedSources = new Set(['prompt', 'image', 'videoRef', 'audioRef', 'videoResult']);
+        if (!allowedSources.has(sourceNode.type || '')) {
+            ElMessage.warning('视频节点仅接受提示词、图片、视频参考或音频参考节点的输入');
+            return false;
+        }
+        return true;
     }
 
     // 拆分节点作为 target 的限制：只接受图片节点的输入
@@ -986,9 +1175,11 @@ const handleDragOver = (event: DragEvent) => {
     }
 };
 
-// 支持的图片格式
+// 支持的图片 / 视频 / 音频格式（拖拽上传时区分节点类型）
 const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
-const isSupportedImageFile = (file: File) => file.type && SUPPORTED_IMAGE_TYPES.includes(file.type);
+const isImageFile = (file: File) => file.type && SUPPORTED_IMAGE_TYPES.includes(file.type);
+const isVideoFile = (file: File) => !!file.type && file.type.startsWith('video/');
+const isAudioFile = (file: File) => !!file.type && file.type.startsWith('audio/');
 
 const handleDrop = async (event: DragEvent) => {
     event.preventDefault();
@@ -997,10 +1188,17 @@ const handleDrop = async (event: DragEvent) => {
     if (!event.dataTransfer) return;
 
     const allFiles = Array.from(event.dataTransfer.files);
-    const files = allFiles.filter(isSupportedImageFile);
+    if (allFiles.length === 0) {
+        ElMessage.warning('请拖放文件');
+        return;
+    }
 
-    if (files.length === 0) {
-        ElMessage.warning(allFiles.length > 0 ? '不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片' : '请拖放图片文件');
+    const imageFiles = allFiles.filter(isImageFile);
+    const videoFiles = allFiles.filter(isVideoFile);
+    const audioFiles = allFiles.filter(isAudioFile);
+
+    if (!imageFiles.length && !videoFiles.length && !audioFiles.length) {
+        ElMessage.warning('不支持的文件格式，请上传图片 / 视频 / 音频文件');
         return;
     }
 
@@ -1010,10 +1208,13 @@ const handleDrop = async (event: DragEvent) => {
         y: event.clientY
     });
 
-    // 上传文件并创建节点
+    // 上传文件并创建对应类型的节点
     try {
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
+        let createdCount = 0;
+
+        // 图片 -> ImageNode
+        for (let i = 0; i < imageFiles.length; i++) {
+            const file = imageFiles[i];
             if (!file) continue;
 
             const uploadRes: any = await uploadImage(file);
@@ -1026,14 +1227,13 @@ const handleDrop = async (event: DragEvent) => {
                 const imageKey: string = uploadRes.data.filename || originalUrl;
                 const alias = getOrCreateImageAlias(imageKey);
 
-                // 创建 ImageNode
                 const nodeId = `image_node_${Date.now()}_${i}`;
                 addNodes({
                     id: nodeId,
                     type: 'image',
                     position: {
-                        x: position.x + i * 20,
-                        y: position.y + i * 20
+                        x: position.x + createdCount * 20,
+                        y: position.y + createdCount * 20
                     },
                     data: {
                         imageUrl,
@@ -1043,10 +1243,67 @@ const handleDrop = async (event: DragEvent) => {
                         imageKey,
                     }
                 });
+                createdCount++;
             }
         }
 
-        ElMessage.success(`成功创建 ${files.length} 个图片节点`);
+        // 视频 -> VideoRefNode（视频节点）
+        for (let i = 0; i < videoFiles.length; i++) {
+            const file = videoFiles[i];
+            if (!file) continue;
+
+            const uploadRes: any = await uploadVideo(file);
+            if (uploadRes.data && uploadRes.data.url) {
+                const originalUrl: string = uploadRes.data.url;
+                const nodeId = `video_ref_node_${Date.now()}_${i}`;
+                addNodes({
+                    id: nodeId,
+                    type: 'videoRef',
+                    position: {
+                        x: position.x + createdCount * 20,
+                        y: position.y + createdCount * 20
+                    },
+                    data: {
+                        url: originalUrl,
+                        originalFilename: uploadRes.data.filename,
+                    }
+                });
+                createdCount++;
+            }
+        }
+
+        // 音频 -> AudioRefNode（音频节点）
+        for (let i = 0; i < audioFiles.length; i++) {
+            const file = audioFiles[i];
+            if (!file) continue;
+
+            const uploadRes: any = await uploadAudio(file);
+            if (uploadRes.data && uploadRes.data.url) {
+                const originalUrl: string = uploadRes.data.url;
+                const nodeId = `audio_ref_node_${Date.now()}_${i}`;
+                addNodes({
+                    id: nodeId,
+                    type: 'audioRef',
+                    position: {
+                        x: position.x + createdCount * 20,
+                        y: position.y + createdCount * 20
+                    },
+                    data: {
+                        url: originalUrl,
+                        originalFilename: uploadRes.data.filename,
+                    }
+                });
+                createdCount++;
+            }
+        }
+
+        if (createdCount > 0) {
+            ElMessage.success(`成功创建 ${createdCount} 个媒体节点`);
+            saveState();
+            persistWorkflow().catch((error: any) => {
+                console.error('关键操作保存失败（拖拽创建媒体节点）:', error);
+            });
+        }
     } catch (error: any) {
         console.error('上传失败:', error);
         ElMessage.error(error.message || '图片上传失败');
@@ -1176,8 +1433,11 @@ const insertPromptNode = () => {
         data: { text: '' }
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入提示词节点）:', error);
+    });
 };
 
 const insertImageNode = () => {
@@ -1189,7 +1449,7 @@ const insertImageNode = () => {
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
-        if (!isSupportedImageFile(file)) {
+        if (!isImageFile(file)) {
             ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
             return;
         }
@@ -1224,8 +1484,11 @@ const insertImageNode = () => {
                 });
                 ElMessage.success('已插入图片节点');
 
-                // 保存状态到撤销栈
+                // 保存状态到撤销栈并立即持久化
                 saveState();
+                persistWorkflow().catch((error: any) => {
+                    console.error('关键操作保存失败（插入图片节点）:', error);
+                });
             } else {
                 ElMessage.error('图片上传失败：返回数据异常');
             }
@@ -1252,8 +1515,11 @@ const insertDreamNode = () => {
         data: {}
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入生图节点）:', error);
+    });
 };
 
 const insertVideoNode = () => {
@@ -1270,8 +1536,11 @@ const insertVideoNode = () => {
         data: {}
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入视频节点）:', error);
+    });
 };
 
 const insertLayerSeparationNode = () => {
@@ -1288,10 +1557,56 @@ const insertLayerSeparationNode = () => {
         data: {}
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入图层分离节点）:', error);
+    });
 };
 
+const insertVideoRefNode = () => {
+    const position = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+
+    const nodeId = `video_ref_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'videoRef',
+        position,
+        data: {
+            urls: [],
+        }
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入视频参考节点）:', error);
+    });
+};
+
+const insertAudioRefNode = () => {
+    const position = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+
+    const nodeId = `audio_ref_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'audioRef',
+        position,
+        data: {
+            urls: [],
+        }
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入音频参考节点）:', error);
+    });
+};
 
 
 const handleAddGroup = () => {
@@ -1310,8 +1625,11 @@ const addPromptNodeFromToolbar = () => {
         data: { text: '' },
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加提示词节点）:', error);
+    });
 };
 
 // 左侧工具栏：添加图片节点（上传图片）
@@ -1324,7 +1642,7 @@ const addImageNodeFromToolbar = () => {
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
-        if (!isSupportedImageFile(file)) {
+        if (!isImageFile(file)) {
             ElMessage.warning('不支持的图片格式，请上传 JPG、PNG、GIF、WebP 等图片');
             return;
         }
@@ -1356,8 +1674,11 @@ const addImageNodeFromToolbar = () => {
                 });
                 ElMessage.success('已添加图片节点');
 
-                // 保存状态到撤销栈
+                // 保存状态到撤销栈并立即持久化
                 saveState();
+                persistWorkflow().catch((error: any) => {
+                    console.error('关键操作保存失败（添加图片节点）:', error);
+                });
             } else {
                 ElMessage.error('图片上传失败：返回数据异常');
             }
@@ -1622,8 +1943,11 @@ const addNode = () => {
         data: { label: `节点 ${id}` },
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加生图节点）:', error);
+    });
 };
 
 const addUpscaleNode = () => {
@@ -1636,8 +1960,11 @@ const addUpscaleNode = () => {
         data: {},
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加放大节点）:', error);
+    });
 };
 
 const addExtendNode = () => {
@@ -1650,8 +1977,11 @@ const addExtendNode = () => {
         data: {},
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加扩展节点）:', error);
+    });
 };
 
 
@@ -1666,8 +1996,47 @@ const addLayerSeparationNode = () => {
         data: {},
     });
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加图层分离节点）:', error);
+    });
+};
+
+const addVideoRefNode = () => {
+    const position = calculateOptimalPosition('videoRef');
+    const id = Date.now().toString();
+    addNodes({
+        id,
+        type: 'videoRef',
+        position,
+        data: {
+            urls: [],
+        },
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加视频参考节点）:', error);
+    });
+};
+
+const addAudioRefNode = () => {
+    const position = calculateOptimalPosition('audioRef');
+    const id = Date.now().toString();
+    addNodes({
+        id,
+        type: 'audioRef',
+        position,
+        data: {
+            urls: [],
+        },
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（添加音频参考节点）:', error);
+    });
 };
 
 // 保存模板：进入自己的项目则覆盖，进入别人的项目则另存为自己的
@@ -1752,6 +2121,7 @@ const handleLoadTemplate = async (template: WorkflowTemplate) => {
             restoreImageAliasStateFromWorkflow(workflowData);
             ElMessage.success('模板加载成功');
             showLoadDialog.value = false;
+            clearUndoRedoAndPending();
         } else {
             ElMessage.warning('模板数据格式不正确');
         }
@@ -1800,8 +2170,12 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
             setNodes(workflowData.nodes);
             setEdges(workflowData.edges);
             restoreImageAliasStateFromWorkflow(workflowData);
+            // 记住当前编辑的是哪条历史记录，并写入本地存储，便于刷新后自动恢复
+            currentHistoryId.value = history.id;
+            window.localStorage.setItem('workflow:lastHistoryId', String(history.id));
             ElMessage.success('历史记录恢复成功');
             showHistoryDialog.value = false;
+            clearUndoRedoAndPending();
         } else {
             ElMessage.warning('历史记录数据格式不正确');
         }
@@ -1832,20 +2206,11 @@ const startAutoSave = () => {
 
     autoSaveTimer = setInterval(async () => {
         try {
-            const workflowData: { nodes: any[]; edges: any[]; cover_image?: string; imageAliasCounter?: number; imageAliasMap?: Record<string, string> } = {
-                nodes: getNodes.value,
-                edges: getEdges.value,
-                imageAliasCounter: imageAliasCounter.value,
-                imageAliasMap: imageAliasMap.value,
-            };
-
-            // 为自动保存补全封面：优先最后一张图片，其次画布截图
-            await ensureWorkflowCover(workflowData);
-
-            // 只有在有节点时才保存；传入 currentHistoryId 则覆盖原记录，否则新建并在响应后回填 id
-            if (workflowData.nodes.length > 0) {
-                const res: any = await autoSaveHistory(workflowData, currentHistoryId.value ?? undefined);
-                if (res?.data?.id != null && currentHistoryId.value == null) currentHistoryId.value = res.data.id;
+            if (!hasPendingChanges.value) {
+                return;
+            }
+            const ok = await persistWorkflow();
+            if (ok) {
                 console.log('工作流自动保存成功');
             }
         } catch (error: any) {
@@ -1898,6 +2263,11 @@ const handleKeyDown = (event: KeyboardEvent) => {
             const nodeIds = selectedNodes.map(node => node.id);
             removeNodes(nodeIds);
             ElMessage.success(`已删除 ${selectedNodes.length} 个节点`);
+
+            // 删除节点视为关键操作，立即尝试持久化
+            persistWorkflow().catch((error: any) => {
+                console.error('关键操作保存失败（删除节点）:', error);
+            });
         }
     }
 
@@ -1935,7 +2305,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
         insertDreamNode();
     }
 
-    // 快捷键：Ctrl+B / Cmd+B - 插入视频节点
+// 快捷键：Ctrl+B / Cmd+B - 插入视频生成节点
     if ((event.ctrlKey || event.metaKey) && event.key === 'b' && !isInputElement) {
         event.preventDefault();
         insertVideoNode();
@@ -2015,6 +2385,8 @@ onMounted(async () => {
                 if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
+                    clearUndoRedoAndPending();
+                    window.localStorage.setItem('workflow:lastHistoryId', String(historyId));
                     ElMessage.success('已恢复自动保存的工作流');
                 } else {
                     ElMessage.warning('该历史记录数据不完整');
@@ -2047,6 +2419,7 @@ onMounted(async () => {
                 if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
+                    clearUndoRedoAndPending();
                     ElMessage.success('模板加载成功');
                 } else {
                     ElMessage.warning('模板数据格式不正确');
@@ -2056,6 +2429,28 @@ onMounted(async () => {
         } catch (error: any) {
             console.error('加载模板失败:', error);
             // 如果加载失败，继续处理其他参数
+        }
+    }
+
+    // 如果既没有通过 URL 指定 historyId，也没有指定模板 id，
+    // 则尝试从本地存储中恢复最近一次自动保存的版本
+    if (!query.historyId && !query.id) {
+        const lastIdRaw = window.localStorage.getItem('workflow:lastHistoryId');
+        const lastId = lastIdRaw ? parseInt(lastIdRaw, 10) : NaN;
+        if (!Number.isNaN(lastId)) {
+            try {
+                const res: any = await getHistory(lastId);
+                const workflowData = res.data?.workflow_data;
+                if (workflowData?.nodes && workflowData?.edges) {
+                    currentHistoryId.value = lastId;
+                    setNodes(workflowData.nodes);
+                    setEdges(workflowData.edges);
+                    clearUndoRedoAndPending();
+                    ElMessage.success('已恢复最近一次自动保存的工作流');
+                }
+            } catch (error: any) {
+                console.error('自动恢复最近历史失败:', error);
+            }
         }
     }
 
@@ -2287,6 +2682,46 @@ onUnmounted(() => {
 .canvas-wrapper :deep(.vue-flow__selection) {
     border: 1px dashed rgba(37, 99, 235, 0.9);
     background-color: var(--color-primary-soft);
+}
+
+/* 全局下拉菜单暗色主题（作用于工作流内所有 Element Plus 下拉） */
+.workflow-container :deep(.el-select-dropdown) {
+    background-color: #252525;
+    border: 1px solid #404040;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.65);
+}
+
+.workflow-container :deep(.el-select-dropdown__item) {
+    color: #b0b0b0;
+}
+
+.workflow-container :deep(.el-select-dropdown__item.is-selected) {
+    color: #ffffff;
+    background-color: #333333;
+}
+
+.workflow-container :deep(.el-select-dropdown__item.hover),
+.workflow-container :deep(.el-select-dropdown__item:hover) {
+    background-color: #333333;
+}
+
+/* 工作流内滚动条统一深色样式 */
+.workflow-container :deep(*::-webkit-scrollbar) {
+    width: 6px;
+    height: 6px;
+}
+
+.workflow-container :deep(*::-webkit-scrollbar-track) {
+    background: #151515;
+}
+
+.workflow-container :deep(*::-webkit-scrollbar-thumb) {
+    background-color: #555555;
+    border-radius: 3px;
+}
+
+.workflow-container :deep(*::-webkit-scrollbar-thumb:hover) {
+    background-color: #777777;
 }
 
 /* 右下角小地图预览：背景与节点色 */

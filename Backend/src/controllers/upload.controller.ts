@@ -8,13 +8,28 @@ import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "..
 
 const axiosNoProxy = axios.create({ proxy: false });
 
-const multerLimits = { fileSize: 10 * 1024 * 1024 }; // 10MB
+// 统一服务端上传大小上限：200MB（前端会按节点类型做更细的限制）
+const multerLimits = { fileSize: 200 * 1024 * 1024 }; // 200MB
+
+// 支持图片 / 视频 / 音频等常见媒体类型；更细的类型与大小限制由前端和具体业务控制
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-    const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
-    if (extname && mimetype) cb(null, true);
-    else cb(new Error("只允许上传图片文件（jpeg, jpg, png, gif, webp）"));
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mimetype = file.mimetype || "";
+
+    const isImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(ext);
+    const isImageMime = mimetype.startsWith("image/");
+
+    const isVideoExt = [".mp4", ".mov", ".mkv", ".webm", ".avi"].includes(ext);
+    const isVideoMime = mimetype.startsWith("video/");
+
+    const isAudioExt = [".mp3", ".wav", ".aac", ".flac", ".m4a"].includes(ext);
+    const isAudioMime = mimetype.startsWith("audio/");
+
+    if ((isImageExt && isImageMime) || (isVideoExt && isVideoMime) || (isAudioExt && isAudioMime)) {
+        cb(null, true);
+    } else {
+        cb(new Error("只允许上传图片、视频或音频等常见媒体文件"));
+    }
 };
 
 // 本地落盘（未启用 COS 时使用）

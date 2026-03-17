@@ -377,10 +377,17 @@ const previewLayer = (url: string) => {
 }
 
 .param-select :deep(.el-input__wrapper) {
-    background: #393c45;
+    background: #252525;
     border-radius: 8px;
     box-shadow: none;
-    border: 1px solid #555;
+    border: 1px solid #404040;
+}
+
+.param-select :deep(.el-select__wrapper) {
+    background-color: #252525;
+    border-radius: 8px;
+    box-shadow: none;
+    border: 1px solid #404040;
 }
 
 .param-select :deep(.el-input__wrapper:hover) {
@@ -395,6 +402,16 @@ const previewLayer = (url: string) => {
 .param-input {
     width: 132px;
     margin-bottom: 0;
+}
+
+.layer-separation-node :deep(.el-input__inner),
+.layer-separation-node :deep(.el-textarea__inner) {
+    color: #b0b0b0;
+}
+
+.layer-separation-node :deep(.el-input__inner::placeholder),
+.layer-separation-node :deep(.el-textarea__inner::placeholder) {
+    color: #808080;
 }
 
 .model-select {

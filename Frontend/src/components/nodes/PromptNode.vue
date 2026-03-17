@@ -161,6 +161,11 @@ type ImageAliasStore = {
     getAllAliases: () => { key: string; alias: string }[];
 };
 
+type MediaAliasStore = {
+    getOrCreateVideoAlias: (key: string) => string;
+    getOrCreateAudioAlias: (key: string) => string;
+};
+
 const props = defineProps<NodeProps>();
 const text = ref(props.data?.text || '');
 
@@ -190,6 +195,8 @@ const promptInputRef = ref<HTMLTextAreaElement | null>(null);
 
 // 图片别名 @图1 自动补全
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
+// 视频 / 音频别名自动补全
+const mediaAliasStore = inject<MediaAliasStore | null>('mediaAliasStore', null);
 const showAliasSuggestions = ref(false);
 const aliasSuggestions = ref<{ key: string; alias: string }[]>([]);
 const selectedAliasIndex = ref(0);
@@ -240,53 +247,109 @@ const loadPromptTemplates = async () => {
     }
 };
 
-// 计算与当前提示词节点通过同一生图节点关联的图片别名列表
-const getRelatedImageAliases = (): { key: string; alias: string }[] => {
-    if (!imageAliasStore) return [];
+// 计算与当前提示词节点通过同一生图 / 视频生成节点关联的资源别名列表
+// 图片：与提示词节点通过同一「生图节点」或「视频生成节点」相连时，使用图别名（图1、图2）
+// 视频/音频参考：与提示词节点通过同一「视频生成节点」相连时，使用自动生成的“视频1、音频1”等别名
+const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
+    const result: { key: string; alias: string }[] = [];
 
     const edges = getEdges.value || [];
-    if (!Array.isArray(edges) || edges.length === 0) return [];
+    if (!Array.isArray(edges) || edges.length === 0) return result;
 
-    const dreamNodeIds = new Set<string>();
+    // ---------- 图片：通过同一生图节点 / 视频生成节点 关联 ----------
+    if (imageAliasStore) {
+        const bridgeNodeIds = new Set<string>(); // 生图节点 + 视频生成节点
+
+        for (const edge of edges) {
+            if (!edge?.source || !edge?.target) continue;
+            if (edge.source !== props.id) continue;
+            const targetNode = findNode(edge.target);
+            if (targetNode && (targetNode.type === 'dream' || targetNode.type === 'video')) {
+                bridgeNodeIds.add(targetNode.id);
+            }
+        }
+
+        if (bridgeNodeIds.size > 0) {
+            const aliasMap: Record<string, string> = {};
+
+            for (const edge of edges) {
+                if (!edge?.source || !edge?.target) continue;
+                if (!bridgeNodeIds.has(edge.target)) continue;
+
+                const imageNode = findNode(edge.source);
+                if (!imageNode || imageNode.type !== 'image') continue;
+
+                const data: any = imageNode.data || {};
+                const key: string | undefined =
+                    data.imageKey || data.originalImageUrl || data.imageUrl;
+                if (!key) continue;
+
+                let alias: string | undefined = data.imageAlias;
+                if (!alias) {
+                    alias = imageAliasStore.getOrCreateAlias(key);
+                    data.imageAlias = alias;
+                    data.imageKey = key;
+                }
+
+                if (!aliasMap[key]) {
+                    aliasMap[key] = alias;
+                }
+            }
+
+            for (const [key, alias] of Object.entries(aliasMap)) {
+                result.push({ key, alias });
+            }
+        }
+    }
+
+    // ---------- 视频 / 音频参考节点：通过同一视频生成节点关联 ----------
+    const videoNodeIds = new Set<string>();
 
     for (const edge of edges) {
         if (!edge?.source || !edge?.target) continue;
         if (edge.source !== props.id) continue;
         const targetNode = findNode(edge.target);
-        if (targetNode && targetNode.type === 'dream') {
-            dreamNodeIds.add(targetNode.id);
+        if (targetNode && targetNode.type === 'video') {
+            videoNodeIds.add(targetNode.id);
         }
     }
 
-    if (dreamNodeIds.size === 0) return [];
+    if (videoNodeIds.size > 0) {
+        const seenKeys = new Set<string>(result.map(r => r.key));
 
-    const aliasMap: Record<string, string> = {};
+        for (const edge of edges) {
+            if (!edge?.source || !edge?.target) continue;
+            if (!videoNodeIds.has(edge.target)) continue;
 
-    for (const edge of edges) {
-        if (!edge?.source || !edge?.target) continue;
-        if (!dreamNodeIds.has(edge.target)) continue;
+            const node = findNode(edge.source);
+            if (!node) continue;
 
-        const imageNode = findNode(edge.source);
-        if (!imageNode || imageNode.type !== 'image') continue;
+            if (node.type !== 'videoRef' && node.type !== 'audioRef') continue;
 
-        const data: any = imageNode.data || {};
-        const key: string | undefined =
-            data.imageKey || data.originalImageUrl || data.imageUrl;
-        if (!key) continue;
+            const data: any = node.data || {};
+            const key: string = node.id;
 
-        let alias: string | undefined = data.imageAlias;
-        if (!alias) {
-            alias = imageAliasStore.getOrCreateAlias(key);
-            data.imageAlias = alias;
-            data.imageKey = key;
-        }
+            // 自动生成或复用别名，优先从节点 data.resourceAlias 读取
+            let alias: string | undefined = (data.resourceAlias as string | undefined)?.trim();
+            if (!alias && mediaAliasStore) {
+                if (node.type === 'videoRef') {
+                    alias = mediaAliasStore.getOrCreateVideoAlias(key);
+                } else {
+                    alias = mediaAliasStore.getOrCreateAudioAlias(key);
+                }
+                data.resourceAlias = alias;
+            }
 
-        if (!aliasMap[key]) {
-            aliasMap[key] = alias;
+            if (!alias) continue;
+
+            if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                result.push({ key, alias });
+            }
         }
     }
 
-    return Object.entries(aliasMap).map(([key, alias]) => ({ key, alias }));
+    return result;
 };
 
 // 处理提示词输入
@@ -305,8 +368,8 @@ const handlePromptInput = () => {
         showPromptSuggestions.value = false;
     }
 
-    // @ 图片别名提示（仅当注入存在时）
-    if (imageAliasStore && atIndex !== -1 && atIndex >= 0) {
+    // @ 资源名提示（图片别名 / 视频参考 / 音频参考）
+    if (atIndex !== -1 && atIndex >= 0) {
         const textareaEl = getTextareaEl();
         const cursorPos = textareaEl?.selectionStart ?? currentValue.length;
 
@@ -315,7 +378,7 @@ const handlePromptInput = () => {
             const rawKeyword = currentValue.slice(atIndex + 1, cursorPos);
             const keyword = rawKeyword.trim();
 
-            const all = getRelatedImageAliases();
+            const all = getRelatedResourceAliases();
             const list = all.filter(item =>
                 !keyword ||
                 item.alias.includes(keyword)
@@ -655,10 +718,10 @@ onUnmounted(() => {
     top: 100%;
     left: 0;
     right: 0;
-    background: white;
-    border: 1px solid #e0e0e0;
+    background: #252525;
+    border: 1px solid #404040;
     border-radius: 6px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
     z-index: 1000;
     max-height: 240px;
     overflow-y: auto;
@@ -676,7 +739,7 @@ onUnmounted(() => {
 
 .suggestion-item:hover,
 .suggestion-item.active {
-    background-color: #f5f7fa;
+    background-color: #333333;
 }
 
 .suggestion-dot {
@@ -689,7 +752,7 @@ onUnmounted(() => {
 
 .suggestion-name {
     font-size: 13px;
-    color: #303133;
+    color: #b0b0b0;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
