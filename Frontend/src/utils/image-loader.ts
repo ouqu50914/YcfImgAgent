@@ -62,7 +62,11 @@ const UPLOAD_BASE = import.meta.env.VITE_UPLOAD_BASE_URL || window.location.orig
  */
 export function getUploadUrl(url: string): string {
   if (!url) return '';
+  // 文档允许 asset:// 素材 ID；音频也可能是 data:base64
+  // 这些不应被拼接成 /uploads/ 路径
   if (url.startsWith('http')) return url;
+  if (url.startsWith('asset://')) return url;
+  if (url.startsWith('data:')) return url;
   if (url.startsWith('/uploads/')) {
     return `${UPLOAD_BASE}${url}`;
   }

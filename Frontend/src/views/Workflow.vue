@@ -304,6 +304,7 @@ import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
 import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
 import { getUploadUrl } from '@/utils/image-loader';
+import { getMediaMetadataFromFile } from '@/utils/media-metadata';
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
@@ -1308,6 +1309,33 @@ const handleDrop = async (event: DragEvent) => {
             const file = videoFiles[i];
             if (!file) continue;
 
+            // Seedance 参考视频格式限制：mp4、mov
+            const vName = (file.name || '').toLowerCase();
+            const vIsMp4 = file.type === 'video/mp4' || vName.endsWith('.mp4');
+            const vIsMov = file.type === 'video/quicktime' || vName.endsWith('.mov');
+            if (!vIsMp4 && !vIsMov) {
+                ElMessage.error('参考视频仅支持 mp4、mov 格式（Seedance 文档限制）');
+                continue;
+            }
+
+            // Seedance 参考视频文档限制：<=50MB，时长 2-15s
+            if (file.size > 50 * 1024 * 1024) {
+                ElMessage.error('参考视频不能超过 50MB（Seedance 文档限制）');
+                continue;
+            }
+            let videoDurationSeconds: number | null = null;
+            try {
+                const meta = await getMediaMetadataFromFile('video', file);
+                videoDurationSeconds = meta.durationSeconds;
+                if (videoDurationSeconds < 2 || videoDurationSeconds > 15) {
+                    ElMessage.error('参考视频时长需在 2-15 秒范围内（Seedance 文档限制）');
+                    continue;
+                }
+            } catch {
+                // 拖拽批量上传时不强制阻断 metadata 解析失败，但会缺少时长校验能力
+                videoDurationSeconds = null;
+            }
+
             const uploadRes: any = await uploadVideo(file);
             if (uploadRes.data && uploadRes.data.url) {
                 const originalUrl: string = uploadRes.data.url;
@@ -1322,6 +1350,9 @@ const handleDrop = async (event: DragEvent) => {
                     data: {
                         url: originalUrl,
                         originalFilename: uploadRes.data.filename,
+                        ...(videoDurationSeconds != null ? { durationSeconds: videoDurationSeconds } : {}),
+                        sizeBytes: file.size,
+                        mimeType: file.type,
                     }
                 });
                 createdCount++;
@@ -1332,6 +1363,32 @@ const handleDrop = async (event: DragEvent) => {
         for (let i = 0; i < audioFiles.length; i++) {
             const file = audioFiles[i];
             if (!file) continue;
+
+            // Seedance 参考音频格式限制：mp3、wav
+            const aName = (file.name || '').toLowerCase();
+            const aIsMp3 = file.type === 'audio/mpeg' || aName.endsWith('.mp3');
+            const aIsWav = file.type === 'audio/wav' || aName.endsWith('.wav');
+            if (!aIsMp3 && !aIsWav) {
+                ElMessage.error('参考音频仅支持 mp3、wav 格式（Seedance 文档限制）');
+                continue;
+            }
+
+            // Seedance 参考音频文档限制：<=15MB，时长 2-15s
+            if (file.size > 15 * 1024 * 1024) {
+                ElMessage.error('参考音频不能超过 15MB（Seedance 文档限制）');
+                continue;
+            }
+            let audioDurationSeconds: number | null = null;
+            try {
+                const meta = await getMediaMetadataFromFile('audio', file);
+                audioDurationSeconds = meta.durationSeconds;
+                if (audioDurationSeconds < 2 || audioDurationSeconds > 15) {
+                    ElMessage.error('参考音频时长需在 2-15 秒范围内（Seedance 文档限制）');
+                    continue;
+                }
+            } catch {
+                audioDurationSeconds = null;
+            }
 
             const uploadRes: any = await uploadAudio(file);
             if (uploadRes.data && uploadRes.data.url) {
@@ -1347,6 +1404,9 @@ const handleDrop = async (event: DragEvent) => {
                     data: {
                         url: originalUrl,
                         originalFilename: uploadRes.data.filename,
+                        ...(audioDurationSeconds != null ? { durationSeconds: audioDurationSeconds } : {}),
+                        sizeBytes: file.size,
+                        mimeType: file.type,
                     }
                 });
                 createdCount++;

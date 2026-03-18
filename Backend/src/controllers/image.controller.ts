@@ -64,7 +64,10 @@ export const generateImage = async (req: Request, res: Response) => {
             imageUrl: req.body.imageUrl,
             imageUrls: req.body.imageUrls
         });
-        return res.status(500).json({ 
+        const status = typeof error?.status === 'number' ? error.status : 500;
+        const code = typeof error?.code === 'string' && error.code.trim() ? error.code : undefined;
+        return res.status(status).json({ 
+            code,
             message: error.message || '图片生成失败',
             error: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });

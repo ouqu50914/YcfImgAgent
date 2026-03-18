@@ -28,6 +28,7 @@
     "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
+    "music-metadata": "^11.12.3",
     "mysql2": "^3.16.2",
     "reflect-metadata": "^0.2.2",
     "typeorm": "^0.3.28",

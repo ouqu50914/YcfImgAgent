@@ -81,6 +81,7 @@ import { VideoCamera } from '@element-plus/icons-vue';
 import { getUploadUrl } from '@/utils/image-loader';
 import { uploadVideo } from '@/api/upload';
 import { ElMessage } from 'element-plus';
+import { getMediaMetadataFromFile } from '@/utils/media-metadata';
 
 const props = defineProps<NodeProps>();
 
@@ -135,7 +136,7 @@ onMounted(() => {
 const handleSelectFile = () => {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'video/*';
+  input.accept = 'video/mp4,video/quicktime,.mp4,.mov';
 
   input.onchange = async () => {
     const file = input.files?.[0];
@@ -143,6 +144,25 @@ const handleSelectFile = () => {
 
     uploading.value = true;
     try {
+      // 文档约束：参考视频格式 mp4、mov
+      const name = (file.name || '').toLowerCase();
+      const isMp4 = file.type === 'video/mp4' || name.endsWith('.mp4');
+      const isMov = file.type === 'video/quicktime' || name.endsWith('.mov');
+      if (!isMp4 && !isMov) {
+        ElMessage.error('参考视频仅支持 mp4、mov 格式（Seedance 文档限制）');
+        return;
+      }
+      // 文档约束：单个参考视频 <= 50MB，时长 2-15s
+      if (file.size > 50 * 1024 * 1024) {
+        ElMessage.error('参考视频不能超过 50MB（Seedance 文档限制）');
+        return;
+      }
+      const meta = await getMediaMetadataFromFile('video', file);
+      if (meta.durationSeconds < 2 || meta.durationSeconds > 15) {
+        ElMessage.error('参考视频时长需在 2-15 秒范围内（Seedance 文档限制）');
+        return;
+      }
+
       const res: any = await uploadVideo(file);
       const originalUrl: string | undefined = res?.data?.url;
       if (!originalUrl) {
@@ -150,6 +170,10 @@ const handleSelectFile = () => {
         return;
       }
       url.value = originalUrl;
+      if (!props.data) (props as any).data = {};
+      (props.data as any).durationSeconds = meta.durationSeconds;
+      (props.data as any).sizeBytes = file.size;
+      (props.data as any).mimeType = file.type;
       ElMessage.success('视频上传成功');
     } catch (e: any) {
       console.error('[VideoRefNode] 视频上传失败', e);

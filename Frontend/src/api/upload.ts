@@ -2,7 +2,7 @@ import request from '@/utils/request.ts';
 import { ElMessage } from 'element-plus';
 
 // 图片上传限制
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB，与后端保持一致
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
 const validateSingleImage = (file: File): boolean => {

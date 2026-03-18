@@ -53,6 +53,7 @@ import { Headset } from '@element-plus/icons-vue';
 import { getUploadUrl } from '@/utils/image-loader';
 import { uploadAudio } from '@/api/upload';
 import { ElMessage } from 'element-plus';
+import { getMediaMetadataFromFile } from '@/utils/media-metadata';
 
 const props = defineProps<NodeProps>();
 
@@ -105,7 +106,7 @@ onMounted(() => {
 const handleSelectFile = () => {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'audio/*';
+  input.accept = 'audio/mpeg,audio/wav,.mp3,.wav';
 
   input.onchange = async () => {
     const file = input.files?.[0];
@@ -113,6 +114,25 @@ const handleSelectFile = () => {
 
     uploading.value = true;
     try {
+      // 文档约束：参考音频格式 wav、mp3
+      const name = (file.name || '').toLowerCase();
+      const isMp3 = file.type === 'audio/mpeg' || name.endsWith('.mp3');
+      const isWav = file.type === 'audio/wav' || name.endsWith('.wav');
+      if (!isMp3 && !isWav) {
+        ElMessage.error('参考音频仅支持 mp3、wav 格式（Seedance 文档限制）');
+        return;
+      }
+      // 文档约束：单个参考音频 <= 15MB，时长 2-15s
+      if (file.size > 15 * 1024 * 1024) {
+        ElMessage.error('参考音频不能超过 15MB（Seedance 文档限制）');
+        return;
+      }
+      const meta = await getMediaMetadataFromFile('audio', file);
+      if (meta.durationSeconds < 2 || meta.durationSeconds > 15) {
+        ElMessage.error('参考音频时长需在 2-15 秒范围内（Seedance 文档限制）');
+        return;
+      }
+
       const res: any = await uploadAudio(file);
       const originalUrl: string | undefined = res?.data?.url;
       if (!originalUrl) {
@@ -120,6 +140,10 @@ const handleSelectFile = () => {
         return;
       }
       url.value = originalUrl;
+      if (!props.data) (props as any).data = {};
+      (props.data as any).durationSeconds = meta.durationSeconds;
+      (props.data as any).sizeBytes = file.size;
+      (props.data as any).mimeType = file.type;
       ElMessage.success('音频上传成功');
     } catch (e: any) {
       console.error('[AudioRefNode] 音频上传失败', e);

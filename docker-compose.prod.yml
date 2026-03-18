@@ -7,11 +7,11 @@ services:
     container_name: ycf_mysql
     restart: always
     environment:
-      # 这里设置数据库 root 密码，请确保与后端 .env 一致
-      MYSQL_ROOT_PASSWORD: OuQuYcf@2026
-      MYSQL_DATABASE: ai_image_tool
-      MYSQL_USER: WSYCF
-      MYSQL_PASSWORD: WSYCF@2026.1993
+      # ⚠️ 生产环境不要在 compose 中明文写口令；请通过宿主机环境变量或 env_file 注入
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_image_tool}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
 
     volumes:
       - ./data/mysql:/var/lib/mysql
@@ -40,24 +40,28 @@ services:
     restart: always
     ports:
       - "127.0.0.1:3000:3000"
+    # 建议：在服务器上创建单独的 .env.prod（不要提交到 git），由 compose 自动加载
+    # 也可以不使用 env_file，改用部署系统注入环境变量
+    env_file:
+      - ./.env.prod
     environment:
       NODE_ENV: production
       PORT: 3000
       # 【关键配置】Docker内部连接走服务名，不用改 IP
       DB_HOST: mysql
       DB_PORT: 3306 
-      DB_USERNAME: WSYCF
-      DB_PASSWORD: WSYCF@2026.1993
-      DB_DATABASE: ai_image_tool
+      DB_USERNAME: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_DATABASE: ${MYSQL_DATABASE:-ai_image_tool}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # 下面是你的 API Key 等配置，请确保这里有值或通过 .env 文件传入
-      JWT_SECRET: ${JWT_SECRET:-OuQuYcf@2026.1995}
+      # 下面是你的 API Key 等配置，请确保由环境变量或 env_file 注入
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://www.artycf.com,http://www.artycf.com}
     volumes:
       - ./Backend/uploads:/app/uploads
       - ./Backend/temp:/app/temp
-      - ./Backend/.env:/app/.env
     depends_on:
       - mysql
       - redis

@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { pipeline } from 'stream/promises';
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from '../services/cos.service';
+import { detectImageFormat } from '../utils/image-format';
 
 // 创建禁用代理的 axios 实例，确保 Dream API（火山引擎）与 Ace Nano API 不使用代理
 const axiosNoProxy = axios.create({
@@ -456,9 +457,9 @@ private async generateImagesInParallel(
 
     // 辅助方法：下载图片并保存（启用 COS 时只上传 COS 不落盘）
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
-        const fileName = `dream_${uuidv4()}.png`;
         const response = await axiosNoProxy.get(remoteUrl, { responseType: 'arraybuffer' });
         let buffer = Buffer.from(response.data);
+        const originalContentType = (response.headers as any)?.['content-type'];
 
         if (process.env.ENABLE_WATERMARK === 'true') {
             try {
@@ -467,9 +468,21 @@ private async generateImagesInParallel(
                 console.warn('[DreamAPI] 添加水印失败，继续使用原图:', error.message);
             }
         }
+        const pathname = (() => {
+            try { return new URL(remoteUrl).pathname; } catch { return undefined; }
+        })();
+        const detectParams: { firstBytes: Buffer; contentTypeHeader?: string; urlPathname?: string } = {
+            firstBytes: buffer.subarray(0, 32),
+        };
+        if (process.env.ENABLE_WATERMARK !== 'true' && typeof originalContentType === 'string' && originalContentType.trim()) {
+            detectParams.contentTypeHeader = originalContentType;
+        }
+        if (typeof pathname === 'string' && pathname) detectParams.urlPathname = pathname;
+        const detected = detectImageFormat(detectParams);
+        const fileName = `dream_${uuidv4()}${detected.ext}`;
 
         if (isCosEnabled()) {
-            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, 'image/png');
+            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
             console.log(`✅ [DreamAPI] 图片已上传至 COS: ${fileName}`);
             return `/uploads/${fileName}`;
         }

@@ -54,7 +54,80 @@ const errorMessages: Record<string, string> = {
 
   // 账户相关
   ACCOUNT_IN_ARREARS: '账户余额不足，请先充值后再使用。',
+
+  // 配额/限流相关（部分后端未返回 code 时会走关键字识别）
+  QUOTA_EXCEEDED: '模型配额不足或已耗尽，请稍后重试或联系管理员扩容/充值。',
+  UPSTREAM_BALANCE_NOT_ENOUGH: '上游模型账户余额不足，请联系管理员充值后再试。',
+  RATE_LIMITED: '请求过于频繁，请稍后再试。',
 };
+
+const normalizeText = (v: unknown) => (v == null ? '' : String(v));
+
+function guessFriendlyMessage(params: {
+  status?: number;
+  backendCode?: string;
+  backendMsg?: string;
+  retryAfter?: number;
+}) {
+  const status = params.status;
+  const code = normalizeText(params.backendCode).trim();
+  const msg = normalizeText(params.backendMsg).trim();
+  const lower = msg.toLowerCase();
+
+  // 1) 明确 code 优先
+  if (code && errorMessages[code]) return errorMessages[code];
+
+  // 2) HTTP 429：限流 或 上游配额/余额不足（部分第三方用 429 表示）
+  if (status === 429) {
+    if (
+      lower.includes('balance not enough') ||
+      lower.includes('insufficient balance') ||
+      lower.includes('insufficient_quota') ||
+      lower.includes('quota') && lower.includes('insufficient') ||
+      lower.includes('credits') && lower.includes('insufficient')
+    ) {
+      return errorMessages.UPSTREAM_BALANCE_NOT_ENOUGH;
+    }
+    if (typeof params.retryAfter === 'number' && params.retryAfter > 0) {
+      return `请求过于频繁，请${params.retryAfter}秒后再试`;
+    }
+    return errorMessages.RATE_LIMITED;
+  }
+
+  // 3) 常见“配额不足/额度用尽”关键字（英文为主）
+  if (
+    lower.includes('insufficient_quota') ||
+    lower.includes('quota exceeded') ||
+    lower.includes('exceeded quota') ||
+    lower.includes('rate limit') ||
+    lower.includes('too many requests') ||
+    lower.includes('resource exhausted') ||
+    lower.includes('billing') && lower.includes('quota')
+  ) {
+    // 如果是明显限流，单独提示
+    if (lower.includes('rate limit') || lower.includes('too many requests')) {
+      return errorMessages.RATE_LIMITED;
+    }
+    return errorMessages.QUOTA_EXCEEDED;
+  }
+
+  // 4) 上游余额不足关键字
+  if (
+    lower.includes('balance not enough') ||
+    lower.includes('insufficient balance') ||
+    lower.includes('payment required') ||
+    lower.includes('not enough balance')
+  ) {
+    return errorMessages.UPSTREAM_BALANCE_NOT_ENOUGH;
+  }
+
+  // 5) 积分不足（后端 credit.service 抛的是中文，这里主要兜英文）
+  if (lower.includes('insufficient') && lower.includes('credit')) {
+    return errorMessages.ACCOUNT_IN_ARREARS;
+  }
+
+  return '';
+}
 
 const isUploadRequest = (config?: AxiosRequestConfig) => {
   if (!config || !config.url) return false;
@@ -84,6 +157,7 @@ service.interceptors.response.use(
     const backendCode: string | undefined = data.code;
     const backendMsg: string | undefined = data.message;
     const isUpload = isUploadRequest(originalRequest);
+    const retryAfter: number | undefined = typeof data.retryAfter === 'number' ? data.retryAfter : undefined;
     const fallbackMsg = '请求失败，请稍后重试';
 
     // 如果是401错误且是token过期
@@ -149,8 +223,14 @@ service.interceptors.response.use(
       router.push('/login');
     } else if (error.response?.status !== 401) {
       // 非401错误，统一中文错误提示（toast）
-      if (backendCode && errorMessages[backendCode]) {
-        ElMessage.error(errorMessages[backendCode]);
+      const guessed = guessFriendlyMessage({
+        status: error.response?.status,
+        backendCode,
+        backendMsg,
+        retryAfter,
+      });
+      if (guessed) {
+        ElMessage.error(guessed);
       } else if (isUpload && backendMsg) {
         // 上传接口：后端 message 已是中文时可直接展示
         ElMessage.error(backendMsg);

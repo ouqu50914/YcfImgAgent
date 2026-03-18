@@ -7,6 +7,7 @@ import { ApiConfig } from '../entities/ApiConfig';
 import { DreamAdapter } from '../adapters/dream.adapter';
 import { CreditService } from './credit.service';
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from './cos.service';
+import { detectImageFormat } from '../utils/image-format';
 
 export class LayerService {
     private creditService = new CreditService();
@@ -101,12 +102,22 @@ export class LayerService {
     }
 
     private async downloadAndSaveImage(remoteUrl: string, prefix: string = 'layer'): Promise<string> {
-        const fileName = `${prefix}_${uuidv4()}.png`;
         const response = await axios.get(remoteUrl, { responseType: 'arraybuffer', timeout: 1800000 });
         const buffer = Buffer.from(response.data);
+        const ct = (response.headers as any)?.['content-type'];
+        const pathname = (() => {
+            try { return new URL(remoteUrl).pathname; } catch { return undefined; }
+        })();
+        const detectParams: { firstBytes: Buffer; contentTypeHeader?: string; urlPathname?: string } = {
+            firstBytes: buffer.subarray(0, 32),
+        };
+        if (typeof ct === 'string' && ct.trim()) detectParams.contentTypeHeader = ct;
+        if (typeof pathname === 'string' && pathname) detectParams.urlPathname = pathname;
+        const detected = detectImageFormat(detectParams);
+        const fileName = `${prefix}_${uuidv4()}${detected.ext}`;
 
         if (isCosEnabled()) {
-            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, 'image/png');
+            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
             return `/uploads/${fileName}`;
         }
         const uploadDir = path.join(process.cwd(), 'uploads');

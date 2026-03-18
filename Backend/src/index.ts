@@ -17,6 +17,7 @@ import layerRoutes from "./routes/layer.routes";
 import workflowRoutes from "./routes/workflow.routes";
 import videoRoutes from "./routes/video.routes";
 import seedanceRoutes from "./routes/seedance.routes";
+import mediaRoutes from "./routes/media.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 import { errorHandler } from "./middlewares/error.middleware";
 
@@ -76,6 +77,7 @@ app.use("/api/layer", layerRoutes);
 app.use("/api/workflow", workflowRoutes);
 app.use("/api/video", videoRoutes);
 app.use("/api/seedance", seedanceRoutes);
+app.use("/api/media", mediaRoutes);
 
 // 静态资源 / 腾讯云 COS 预签名重定向
 app.use("/uploads", (req, res, next) => {

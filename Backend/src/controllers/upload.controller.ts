@@ -5,6 +5,7 @@ import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
+import { detectImageFormat } from "../utils/image-format";
 
 const axiosNoProxy = axios.create({ proxy: false });
 
@@ -164,12 +165,25 @@ export const downloadImage = async (req: Request, res: Response) => {
         }
 
         const ext = path.extname(suggestedName).toLowerCase();
-        const contentType =
+        let contentType =
             [".jpg", ".jpeg"].includes(ext) ? "image/jpeg"
             : ext === ".png" ? "image/png"
             : ext === ".gif" ? "image/gif"
             : ext === ".webp" ? "image/webp"
             : "application/octet-stream";
+
+        // 兜底：如果扩展名缺失/不可信，基于文件头魔数与上游 Content-Type 推断真实类型
+        if (contentType === "application/octet-stream") {
+            const detected = detectImageFormat({
+                urlPathname: suggestedName,
+                firstBytes: buffer.subarray(0, 32),
+            });
+            contentType = detected.mime;
+            if (detected.ext !== ".bin") {
+                const base = path.basename(suggestedName, path.extname(suggestedName) || "");
+                suggestedName = `${base}${detected.ext}`;
+            }
+        }
 
         res.setHeader("Content-Type", contentType);
         res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(suggestedName)}"`);

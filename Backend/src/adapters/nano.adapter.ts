@@ -9,6 +9,7 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
+import { detectImageFormat } from "../utils/image-format";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -26,7 +27,41 @@ const NANO_DRY_RUN = process.env.ACE_NANO_DRY_RUN === "true";
 // 直链模式：不下载 Ace 返回的图片，直接返回 Ace CDN URL 给前端，由浏览器直连 Ace，节省服务器带宽（适合 1M 等低带宽）
 const ACE_RETURN_REMOTE_URL = process.env.ACE_RETURN_REMOTE_URL === "true";
 
+class ProviderError extends Error {
+    code: string;
+    status: number;
+    constructor(params: { code: string; message: string; status?: number }) {
+        super(params.message);
+        this.code = params.code;
+        this.status = params.status ?? 502;
+    }
+}
+
 export class NanoAdapter implements AiProvider {
+    private mapAceFailureToProviderError(rawMessage: string): ProviderError {
+        const m = (rawMessage || "").trim();
+        const lower = m.toLowerCase();
+        if (lower.includes("failed to process image urls to base64")) {
+            return new ProviderError({
+                code: "ACE_IMAGE_URL_TO_BASE64_FAILED",
+                status: 422,
+                message: "参考图片处理失败：无法将图片 URL 转为 Base64。请检查参考图链接是否可公网访问、未过期且返回的是图片内容。",
+            });
+        }
+        if (lower.includes("failed to process generated image") && lower.includes("no content available")) {
+            return new ProviderError({
+                code: "ACE_GENERATED_IMAGE_EMPTY",
+                status: 502,
+                message: "生成失败：上游返回的图片内容为空。请稍后重试；若持续出现，可更换参考图或降低分辨率/质量后再试。",
+            });
+        }
+        return new ProviderError({
+            code: "ACE_TASK_FAILED",
+            status: 502,
+            message: `Ace 任务失败: ${m || "未知错误"}`,
+        });
+    }
+
     private formatAceErrorMessage(data: unknown, fallback: string): string {
         if (typeof data === "string" && data.trim()) return data;
         if (data && typeof data === "object") {
@@ -71,15 +106,25 @@ export class NanoAdapter implements AiProvider {
     }
 
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
-        const fileName = `nano_${uuidv4()}.png`;
         const res = await axiosClient.get(remoteUrl, {
             responseType: "arraybuffer",
             timeout: NANO_REQUEST_TIMEOUT_MS,
         });
         const buffer = Buffer.from(res.data);
+        const ct = (res.headers as any)?.["content-type"];
+        const pathname = (() => {
+            try { return new URL(remoteUrl).pathname; } catch { return undefined; }
+        })();
+        const detectParams: { firstBytes: Buffer; contentTypeHeader?: string; urlPathname?: string } = {
+            firstBytes: buffer.subarray(0, 32),
+        };
+        if (typeof ct === "string" && ct.trim()) detectParams.contentTypeHeader = ct;
+        if (typeof pathname === "string" && pathname) detectParams.urlPathname = pathname;
+        const detected = detectImageFormat(detectParams);
+        const fileName = `nano_${uuidv4()}${detected.ext}`;
 
         if (isCosEnabled()) {
-            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, "image/png");
+            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
             return `/uploads/${fileName}`;
         }
         const uploadDir = path.join(process.cwd(), "uploads");
@@ -305,6 +350,7 @@ export class NanoAdapter implements AiProvider {
             }
 
             const urls = this.extractImageUrls(data);
+            // 兼容：任务状态字段可能出现在多层嵌套中
             const rawStatus: unknown =
                 data?.status ||
                 data?.task_status ||
@@ -312,7 +358,13 @@ export class NanoAdapter implements AiProvider {
                 data?.items?.[0]?.status ||
                 data?.items?.[0]?.state ||
                 data?.items?.[0]?.response?.status ||
-                data?.items?.[0]?.response?.state;
+                data?.items?.[0]?.response?.state ||
+                data?.items?.[0]?.response?.task_status ||
+                data?.items?.[0]?.response?.taskStatus ||
+                data?.items?.[0]?.response?.data?.status ||
+                data?.items?.[0]?.response?.data?.state ||
+                data?.items?.[0]?.response?.data?.task_status ||
+                data?.items?.[0]?.response?.data?.taskStatus;
             const status = typeof rawStatus === "string" ? rawStatus.toLowerCase() : "";
 
             console.log("[NanoAdapter] 轮询 Ace 任务状态", {
@@ -325,14 +377,61 @@ export class NanoAdapter implements AiProvider {
                 return urls;
             }
 
-            // 显式错误：Ace 控制台已标记失败，但未设置 status 字段
+            // 显式错误：兼容不同返回结构（有些失败只给 message）
+            const resp0 = data?.items?.[0]?.response;
             const explicitError: unknown =
                 data?.error ||
                 data?.items?.[0]?.error ||
-                data?.items?.[0]?.response?.error;
+                resp0?.error ||
+                resp0?.data?.error;
+
+            // 尝试从尽可能多的位置提取失败 message（Ace 的结构经常变化）
+            const messageCandidates: unknown[] = [
+                data?.message,
+                data?.msg,
+                data?.items?.[0]?.message,
+                data?.items?.[0]?.msg,
+                resp0?.message,
+                resp0?.msg,
+                resp0?.data?.message,
+                resp0?.data?.msg,
+                resp0?.error?.message,
+                resp0?.data?.error?.message,
+            ];
+            // 有些返回会把 message 放在 response.data[] 的每个元素里
+            if (Array.isArray(resp0?.data)) {
+                for (const it of resp0.data) {
+                    if (!it) continue;
+                    messageCandidates.push((it as any)?.message);
+                    messageCandidates.push((it as any)?.msg);
+                    messageCandidates.push((it as any)?.error);
+                    messageCandidates.push((it as any)?.error?.message);
+                }
+            }
+            const explicitMessage: unknown = messageCandidates.find(
+                (v) => typeof v === "string" && (v as string).trim().length > 0
+            );
+
+            const explicitOkFlag: unknown =
+                (data as any)?.success === false ||
+                (data as any)?.ok === false ||
+                resp0?.success === false ||
+                resp0?.ok === false ||
+                resp0?.data?.success === false ||
+                resp0?.data?.ok === false;
+
             if (explicitError) {
                 const msg = this.formatAceErrorMessage(explicitError, "Ace 任务失败");
                 throw new Error(`Ace 任务失败: ${msg}`);
+            }
+
+            // 有些接口失败不会带 error 字段，但 message 会直接包含 Failed / Error 等关键字
+            if (typeof explicitMessage === "string" && explicitMessage.trim()) {
+                const m = explicitMessage.trim();
+                const lower = m.toLowerCase();
+                if (explicitOkFlag || lower.includes("failed") || lower.includes("error") || lower.includes("cancel")) {
+                    throw this.mapAceFailureToProviderError(m);
+                }
             }
 
             // 失败状态（通过状态字符串判断）
@@ -341,8 +440,9 @@ export class NanoAdapter implements AiProvider {
                 status.includes("error") ||
                 status.includes("cancel")
             ) {
-                const msg: unknown = data?.message || data?.error || rawStatus || "未知错误";
-                throw new Error(`Ace 任务失败: ${String(msg)}`);
+                const msg: unknown = explicitMessage || data?.error || rawStatus || "未知错误";
+                const m = String(msg);
+                throw this.mapAceFailureToProviderError(m);
             }
 
             // 其它状态（pending / running / queued / processing 等）视为仍在进行中

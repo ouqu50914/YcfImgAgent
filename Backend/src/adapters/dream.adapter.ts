@@ -9,6 +9,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from '../services/cos.service';
+import { detectImageFormat } from '../utils/image-format';
 
 const axiosNoProxy = axios.create({ proxy: false });
 const ACE_REQUEST_TIMEOUT_MS = Number(process.env.ACE_SEEDREAM_TIMEOUT_MS || '1800000'); // 30 分钟
@@ -398,9 +399,9 @@ export class DreamAdapter implements AiProvider {
     }
 
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
-        const fileName = `dream_${uuidv4()}.png`;
         const response = await axiosNoProxy.get(remoteUrl, { responseType: 'arraybuffer' });
         let buffer = Buffer.from(response.data);
+        const originalContentType = (response.headers as any)?.['content-type'];
         if (process.env.ENABLE_WATERMARK === 'true') {
             try {
                 buffer = await this.addWatermarkToBuffer(buffer);
@@ -408,8 +409,21 @@ export class DreamAdapter implements AiProvider {
                 console.warn('[DreamAPI] 添加水印失败，继续使用原图:', e.message);
             }
         }
+        // 若加了水印，输出格式可能变化；此时更信任 buffer 魔数而不是上游 Content-Type
+        const pathname = (() => {
+            try { return new URL(remoteUrl).pathname; } catch { return undefined; }
+        })();
+        const detectParams: { firstBytes: Buffer; contentTypeHeader?: string; urlPathname?: string } = {
+            firstBytes: buffer.subarray(0, 32),
+        };
+        if (process.env.ENABLE_WATERMARK !== 'true' && typeof originalContentType === 'string' && originalContentType.trim()) {
+            detectParams.contentTypeHeader = originalContentType;
+        }
+        if (typeof pathname === 'string' && pathname) detectParams.urlPathname = pathname;
+        const detected = detectImageFormat(detectParams);
+        const fileName = `dream_${uuidv4()}${detected.ext}`;
         if (isCosEnabled()) {
-            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, 'image/png');
+            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
             return `/uploads/${fileName}`;
         }
         const uploadDir = path.join(process.cwd(), 'uploads');

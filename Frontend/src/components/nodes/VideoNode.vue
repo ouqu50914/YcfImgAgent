@@ -266,6 +266,7 @@ import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
 import { getUploadUrl } from '@/utils/image-loader';
 import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
+import { probeMediaUrl } from '@/api/media';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -304,6 +305,13 @@ const imageSourceCount = ref(0);
 
 const connectedVideoRefUrls = ref<string[]>([]);
 const connectedAudioRefUrls = ref<string[]>([]);
+
+type MediaRefMeta = {
+  url: string;
+  durationSeconds?: number;
+};
+const connectedVideoRefMeta = ref<MediaRefMeta[]>([]);
+const connectedAudioRefMeta = ref<MediaRefMeta[]>([]);
 
 const currentNode = computed(() => {
   return getNodes.value.find(n => n.id === props.id);
@@ -388,10 +396,14 @@ watch(
     connectedImageUrls.value = [];
     connectedVideoRefUrls.value = [];
     connectedAudioRefUrls.value = [];
+    connectedVideoRefMeta.value = [];
+    connectedAudioRefMeta.value = [];
 
     const imageSources: string[] = [];
     const videoRefSources: string[] = [];
     const audioRefSources: string[] = [];
+    const videoRefMetaSources: MediaRefMeta[] = [];
+    const audioRefMetaSources: MediaRefMeta[] = [];
     for (const edge of targetEdges) {
       const sourceNode = findNode(edge.source);
       if (!sourceNode) continue;
@@ -412,16 +424,37 @@ watch(
 
       if (sourceNode.type === 'videoRef' && sourceNode.data?.url) {
         const v = sourceNode.data.url as string;
-        if (typeof v === 'string' && v.trim()) videoRefSources.push(v.trim());
+        if (typeof v === 'string' && v.trim()) {
+          const u = getUploadUrl(v.trim());
+          videoRefSources.push(u);
+          const d = Number((sourceNode.data as any)?.durationSeconds);
+          videoRefMetaSources.push({
+            url: u,
+            ...(Number.isFinite(d) && d > 0 ? { durationSeconds: d } : {}),
+          });
+        }
       }
       if (sourceNode.type === 'videoResult' && sourceNode.data?.videoUrl) {
         const v = sourceNode.data.videoUrl as string;
-        if (typeof v === 'string' && v.trim()) videoRefSources.push(v.trim());
+        if (typeof v === 'string' && v.trim()) {
+          const u = getUploadUrl(v.trim());
+          videoRefSources.push(u);
+          // videoResult 节点一般拿不到时长 metadata
+          videoRefMetaSources.push({ url: u });
+        }
       }
 
       if (sourceNode.type === 'audioRef' && sourceNode.data?.url) {
         const v = sourceNode.data.url as string;
-        if (typeof v === 'string' && v.trim()) audioRefSources.push(v.trim());
+        if (typeof v === 'string' && v.trim()) {
+          const u = getUploadUrl(v.trim());
+          audioRefSources.push(u);
+          const d = Number((sourceNode.data as any)?.durationSeconds);
+          audioRefMetaSources.push({
+            url: u,
+            ...(Number.isFinite(d) && d > 0 ? { durationSeconds: d } : {}),
+          });
+        }
       }
     }
 
@@ -429,6 +462,23 @@ watch(
 
     connectedVideoRefUrls.value = [...new Set(videoRefSources)];
     connectedAudioRefUrls.value = [...new Set(audioRefSources)];
+    // meta 也按 url 去重（优先保留有 duration 的记录）
+    const dedupeMeta = (items: MediaRefMeta[]) => {
+      const map = new Map<string, MediaRefMeta>();
+      for (const it of items) {
+        const existing = map.get(it.url);
+        if (!existing) {
+          map.set(it.url, it);
+          continue;
+        }
+        if (existing.durationSeconds == null && it.durationSeconds != null) {
+          map.set(it.url, it);
+        }
+      }
+      return Array.from(map.values());
+    };
+    connectedVideoRefMeta.value = dedupeMeta(videoRefMetaSources);
+    connectedAudioRefMeta.value = dedupeMeta(audioRefMetaSources);
 
     // Kling 多图多镜头：把所有图片作为序列
     if (provider.value === 'kling' && imageSubType.value === 'multi_shot') {
@@ -508,6 +558,13 @@ const providerLabel = computed(() => (provider.value === 'kling' ? 'Kling' : 'Se
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
   return getUploadUrl(url);
+};
+
+const normalizeMediaUrl = (url: string | null | undefined): string => {
+  if (!url) return '';
+  const v = String(url).trim();
+  if (!v) return '';
+  return getUploadUrl(v);
 };
 
 // 首帧/尾帧预览用 URL（连线优先，否则用上传的）
@@ -779,25 +836,134 @@ const handleGenerate = async () => {
         payloadAdv.firstImageUrl = normalizeImageUrl(firstUrlRaw);
         payloadAdv.lastImageUrl = normalizeImageUrl(endUrlRaw);
       } else if (action === 'multi_modal') {
-        const refs = connectedImageUrls.value.length
+        // 文档允许的组合包含：文本(可选)+视频、文本(可选)+视频+音频 等，因此不强制要求图片。
+        // 但音频不可单独存在，必须至少包含 1 个参考图片或视频。
+        const imageRefsRaw = connectedImageUrls.value.length
           ? connectedImageUrls.value
           : (firstUrlRaw ? [firstUrlRaw] : []);
-        if (!refs.length) {
-          ElMessage.warning('请至少连入 1 张参考图片');
+        const imageRefs = imageRefsRaw
+          .map((u) => normalizeImageUrl(u))
+          .filter(Boolean);
+
+        const videoRefs = Array.from(new Set(connectedVideoRefUrls.value))
+          .map((u) => normalizeMediaUrl(u))
+          .filter(Boolean);
+
+        const audioRefs = Array.from(new Set(connectedAudioRefUrls.value))
+          .map((u) => normalizeMediaUrl(u))
+          .filter(Boolean);
+
+        if (audioRefs.length > 0 && imageRefs.length === 0 && videoRefs.length === 0) {
+          ElMessage.warning('音频参考不能单独使用，请同时连入参考图片或参考视频');
           loading.value = false;
           return;
         }
-        payloadAdv.referenceImageUrls = refs.slice(0, 9).map(u => normalizeImageUrl(u));
 
-        const videoUrlsFromNodes = connectedVideoRefUrls.value;
-        if (videoUrlsFromNodes.length) {
-          payloadAdv.referenceVideoUrls = Array.from(new Set(videoUrlsFromNodes)).slice(0, 3);
+        // 文档约束：参考视频/音频必须满足单条时长 [2,15] 秒；总时长不超过 15 秒
+        // 此处强制对“缺少 duration metadata 的外链”进行后端探测，不允许绕过。
+        const pickMeta = (wantedUrls: string[], metas: MediaRefMeta[]) => {
+          const m = new Map<string, MediaRefMeta>();
+          for (const it of metas) m.set(normalizeMediaUrl(it.url), it);
+          return wantedUrls.map((u) => m.get(normalizeMediaUrl(u)) || { url: u });
+        };
+        const videoMetaPicked = pickMeta(videoRefs, connectedVideoRefMeta.value);
+        const audioMetaPicked = pickMeta(audioRefs, connectedAudioRefMeta.value);
+
+        const probeMissing = async (kind: 'video' | 'audio', items: MediaRefMeta[]): Promise<MediaRefMeta[]> => {
+          const maxBytes = kind === 'video' ? 50 * 1024 * 1024 : 15 * 1024 * 1024;
+          const label = kind === 'video' ? '视频' : '音频';
+          const out: MediaRefMeta[] = [];
+          for (const it of items) {
+            if (Number.isFinite(it.durationSeconds)) {
+              out.push(it);
+              continue;
+            }
+            // asset:// 或 data: 无法探测时长，按“必须校验”策略直接阻断
+            if (it.url.startsWith('asset://') || it.url.startsWith('data:')) {
+              ElMessage.error(`${label}参考使用素材ID/Base64 时，当前无法自动探测时长，请改用可访问的公网 URL`);
+              throw new Error('MEDIA_PROBE_UNSUPPORTED');
+            }
+            const r: any = await probeMediaUrl({ url: it.url, kind });
+            const d = r?.data?.data ?? r?.data ?? r;
+            const durationSeconds = Number(d?.durationSeconds);
+            const sizeBytes = Number(d?.sizeBytes);
+            const mimeType = typeof d?.mimeType === 'string' ? d.mimeType.toLowerCase() : '';
+            const container = typeof d?.container === 'string' ? d.container.toLowerCase() : '';
+            if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+              ElMessage.error(`无法解析${label}参考时长`);
+              throw new Error('MEDIA_PROBE_FAILED');
+            }
+            if (Number.isFinite(sizeBytes) && sizeBytes > maxBytes) {
+              ElMessage.error(`${label}参考文件大小超限（Seedance 文档限制）`);
+              throw new Error('MEDIA_TOO_LARGE');
+            }
+            // 格式校验：视频 mp4/mov；音频 mp3/wav
+            if (kind === 'video') {
+              const ok = mimeType.includes('video/mp4') || mimeType.includes('video/quicktime') || container === 'mpeg-4' || container === 'mp4' || container === 'quicktime' || container === 'mov';
+              if (!ok) {
+                ElMessage.error('参考视频仅支持 mp4、mov 格式（Seedance 文档限制）');
+                throw new Error('MEDIA_FORMAT_NOT_ALLOWED');
+              }
+            } else {
+              const ok = mimeType.includes('audio/mpeg') || mimeType.includes('audio/mp3') || mimeType.includes('audio/wav') || mimeType.includes('audio/x-wav') || container === 'wav' || container === 'mpeg' || container === 'mp3';
+              if (!ok) {
+                ElMessage.error('参考音频仅支持 mp3、wav 格式（Seedance 文档限制）');
+                throw new Error('MEDIA_FORMAT_NOT_ALLOWED');
+              }
+            }
+            out.push({ url: it.url, durationSeconds });
+          }
+          return out;
+        };
+
+        let videoMetaFinal: MediaRefMeta[] = [];
+        let audioMetaFinal: MediaRefMeta[] = [];
+        try {
+          videoMetaFinal = await probeMissing('video', videoMetaPicked);
+          audioMetaFinal = await probeMissing('audio', audioMetaPicked);
+        } catch {
+          loading.value = false;
+          return;
         }
 
-        const audioUrlsFromNodes = connectedAudioRefUrls.value;
-        if (audioUrlsFromNodes.length) {
-          payloadAdv.referenceAudioUrls = Array.from(new Set(audioUrlsFromNodes)).slice(0, 3);
+        const validateDurations = (kindLabel: string, items: MediaRefMeta[]) => {
+          const known = items.filter((x) => Number.isFinite(x.durationSeconds));
+          for (const it of known) {
+            const d = Number(it.durationSeconds);
+            if (d < 2 || d > 15) {
+              ElMessage.error(`${kindLabel}参考时长需在 2-15 秒范围内（Seedance 文档限制）`);
+              return false;
+            }
+          }
+          const total = known.reduce((sum, it) => sum + Number(it.durationSeconds), 0);
+          if (total > 15 + 1e-6) {
+            ElMessage.error(`${kindLabel}参考总时长不能超过 15 秒（Seedance 文档限制）`);
+            return false;
+          }
+          return true;
+        };
+
+        if (!validateDurations('视频', videoMetaFinal) || !validateDurations('音频', audioMetaFinal)) {
+          loading.value = false;
+          return;
         }
+
+        // 前端也按文档限制进行截断：总媒体(图片+视频+音频)最多 9；视频最多 3；音频最多 3；图片最多 9
+        const TOTAL_LIMIT = 9;
+        let remaining = TOTAL_LIMIT;
+
+        const finalImages = imageRefs.slice(0, Math.min(9, remaining));
+        remaining -= finalImages.length;
+
+        const finalVideos = videoRefs.slice(0, Math.min(3, remaining));
+        remaining -= finalVideos.length;
+
+        const finalAudios = audioRefs.slice(0, Math.min(3, remaining));
+        remaining -= finalAudios.length;
+
+        if (finalImages.length) payloadAdv.referenceImageUrls = finalImages;
+        if (finalVideos.length) payloadAdv.referenceVideoUrls = finalVideos;
+        if (finalAudios.length) payloadAdv.referenceAudioUrls = finalAudios;
       }
 
       const res = await createSeedanceAdvanced(payloadAdv);
