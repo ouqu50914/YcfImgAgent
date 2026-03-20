@@ -275,7 +275,7 @@ defineEmits<{
 }>();
 
 const props = defineProps<NodeProps>();
-const { getEdges, findNode, addNodes, addEdges, getNodes } = useVueFlow();
+const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } = useVueFlow();
 const userStore = useUserStore();
 
 function notifyVideoGen(success: boolean, message: string) {
@@ -355,6 +355,8 @@ const syncResultVideoNode = () => {
       progress: progress.value,
       errorMessage: errorMessage.value,
     };
+    // 视频 URL/状态变化可能导致节点高度变化，刷新内部端口锚点位置
+    updateNodeInternals([existing.id]);
     saveWorkflowImmediately();
     return;
   }
@@ -383,12 +385,17 @@ const syncResultVideoNode = () => {
     },
   });
 
+  // 新建节点后先刷新一次端口布局
+  updateNodeInternals([nodeId]);
+
   addEdges({
     id: edgeId,
     source: props.id,
     target: nodeId,
     sourceHandle: 'source',
-    targetHandle: 'target',
+    // VideoResultNode 目前只有一个 Handle：id='source'（type='source', position='left'）
+    // 这里必须对齐 handle id，否则 VueFlow 会回退到默认锚点，导致连线位置偏移。
+    targetHandle: 'source',
     type: 'default',
     animated: true,
   });
