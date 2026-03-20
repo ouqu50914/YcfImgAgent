@@ -62,15 +62,21 @@ const UPLOAD_BASE = import.meta.env.VITE_UPLOAD_BASE_URL || window.location.orig
  */
 export function getUploadUrl(url: string): string {
   if (!url) return '';
+  const v = String(url).trim();
+  if (!v) return '';
   // 文档允许 asset:// 素材 ID；音频也可能是 data:base64
   // 这些不应被拼接成 /uploads/ 路径
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('asset://')) return url;
-  if (url.startsWith('data:')) return url;
-  if (url.startsWith('/uploads/')) {
-    return `${UPLOAD_BASE}${url}`;
+  if (v.startsWith('http://') || v.startsWith('https://')) return v;
+  if (v.startsWith('asset://')) return v;
+  if (v.startsWith('data:')) return v;
+  if (v.startsWith('/uploads/')) {
+    return `${UPLOAD_BASE}${v}`;
   }
-  return `${UPLOAD_BASE}/uploads/${url}`;
+  if (v.startsWith('uploads/')) {
+    return `${UPLOAD_BASE}/${v}`;
+  }
+  const normalizedPath = v.startsWith('/') ? v.slice(1) : v;
+  return `${UPLOAD_BASE}/uploads/${normalizedPath}`;
 }
 
 /**

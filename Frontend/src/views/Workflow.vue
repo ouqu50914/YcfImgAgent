@@ -18,6 +18,9 @@
                     <span class="workflow-username">{{ userStore.userInfo.username || '用户' }}</span>
                     <span class="workflow-credits" v-if="userStore.userInfo.role !== 1">
                         积分 {{ userStore.userInfo.credits ?? 0 }}
+                        <span v-if="sessionCreditsSpent > 0" class="workflow-credits-spent">
+                            （本次消耗 {{ sessionCreditsSpent }}）
+                        </span>
                         <el-button text type="primary" size="small" @click="showApplyCreditsModal = true">申请</el-button>
                     </span>
                 </div>
@@ -178,7 +181,7 @@
                 :delete-key-code="null"
                 :pan-on-drag="panOnDrag"
                 :pan-on-scroll="true" :zoom-on-scroll="true" :zoom-on-double-click="true" :min-zoom="0.2" :max-zoom="4"
-                :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="true"
+                :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="false"
                 @mousemove="handleCanvasMouseMove"
                 @connect="onConnect" @connect-start="handleConnectStart" @connect-end="handleConnectEnd"
                 @pane-contextmenu="handlePaneContextMenu">
@@ -565,6 +568,22 @@ const userStore = useUserStore();
 const showApplyCreditsModal = ref(false);
 const applyCreditsForm = reactive({ amount: 10, reason: '' });
 const applyCreditsLoading = ref(false);
+
+// 本次会话累计消耗积分（用于 UI 展示；由各节点在扣费发生后上报）
+type CreditTrackerStore = {
+    addSpent: (amount: number) => void;
+    getTotalSpent: () => number;
+};
+const sessionCreditsSpent = ref(0);
+const creditTrackerStore: CreditTrackerStore = {
+    addSpent: (amount: number) => {
+        const n = Number(amount);
+        if (!Number.isFinite(n) || n <= 0) return;
+        sessionCreditsSpent.value += Math.floor(n);
+    },
+    getTotalSpent: () => sessionCreditsSpent.value,
+};
+provide<CreditTrackerStore>('creditTracker', creditTrackerStore);
 const handleApplyCredits = async () => {
     applyCreditsLoading.value = true;
     try {
@@ -2401,6 +2420,50 @@ const handleKeyDown = (event: KeyboardEvent) => {
             persistWorkflow().catch((error: any) => {
                 console.error('关键操作保存失败（删除节点）:', error);
             });
+        } else {
+            // 如果没有选中的节点，则尝试删除选中的连接线（边）
+            // 规则：仅允许删除由 prompt / image / videoRef / audioRef 节点右侧 source 端口输出的边
+            let selectedEdges = getEdges.value.filter((edge: any) => edge?.selected);
+            // 兜底：部分版本/场景下 `edge.selected` 可能不可靠，尝试从 VueFlow 实例直接读取
+            if (selectedEdges.length === 0) {
+                const flowInstance = vueFlowRef.value as any;
+                const maybeSelected = typeof flowInstance?.getSelectedEdges === 'function'
+                    ? flowInstance.getSelectedEdges()
+                    : [];
+                if (Array.isArray(maybeSelected)) selectedEdges = maybeSelected;
+            }
+            if (selectedEdges.length > 0) {
+                event.preventDefault();
+
+                // 只有“提示词/图片/视频引用/音频引用”等输入类节点的右侧输出线允许删除。
+                // 生成类节点（例如 `dream` 生成图片、`video` 生成视频）的右侧输出线不可删除。
+                const deletableSourceTypes = new Set(['prompt', 'image', 'videoRef', 'audioRef']);
+                const deletableEdgeIds = selectedEdges
+                    .filter((edge: any) => {
+                        if (!edge?.source) return false;
+                        const sourceNode = findNode(edge.source);
+                        return !!sourceNode && deletableSourceTypes.has(sourceNode.type);
+                    })
+                    .map((edge: any) => edge.id);
+
+                if (deletableEdgeIds.length === 0) {
+                    ElMessage.warning('该连接线不可删除');
+                    return;
+                }
+                const toDeleteEdgeIdSet = new Set(deletableEdgeIds);
+
+                // 先把「删除前」的状态保存到撤销栈，方便 Ctrl+Z 恢复
+                saveState();
+
+                const nextEdges = getEdges.value.filter((edge: any) => !toDeleteEdgeIdSet.has(edge.id));
+                setEdges(nextEdges);
+                ElMessage.success(`已删除 ${deletableEdgeIds.length} 条连接线`);
+
+                // 删除边视为关键操作，立即尝试持久化
+                persistWorkflow().catch((error: any) => {
+                    console.error('关键操作保存失败（删除连接线）:', error);
+                });
+            }
         }
     }
 
@@ -2837,6 +2900,11 @@ onUnmounted(() => {
 .workflow-credits {
     font-size: 11px;
     color: var(--text-subtle);
+}
+
+.workflow-credits-spent {
+    margin-left: 6px;
+    color: var(--text-muted);
 }
 
 .canvas-wrapper {

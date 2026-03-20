@@ -224,9 +224,11 @@ export class NanoAdapter implements AiProvider {
                     message: error.message,
                 });
                 // 有些情况下 Ace 可能返回 5xx，但同时给出 task_id（任务实际已创建）。
-                // 这种情况转为走轮询，以便拿到最终结果或更明确的失败原因。
+                // 仅当响应中没有显式 error 对象时，才认为任务已创建并转为轮询；
+                // 像你贴的这种 { success:false, error:{message:...} } 视为任务失败，直接抛错给前端。
                 const taskIdFromError: unknown = (data as any)?.task_id || (data as any)?.taskId;
-                if (typeof taskIdFromError === "string" && taskIdFromError.length > 0) {
+                const aceErrorObj: unknown = (data as any)?.error;
+                if (typeof taskIdFromError === "string" && taskIdFromError.length > 0 && !aceErrorObj) {
                     console.warn("[NanoAdapter] Ace 返回错误但包含 task_id，转为轮询任务", {
                         status,
                         taskId: taskIdFromError,
@@ -234,7 +236,8 @@ export class NanoAdapter implements AiProvider {
                     return { taskId: taskIdFromError };
                 }
                 const msg = this.formatAceErrorMessage(data, error.message);
-                throw new Error(`提交 Ace 任务失败 (${status ?? "未知状态"}): ${msg}`);
+                // 统一按上游失败映射为 ProviderError，带上清晰的 message/status
+                throw this.mapAceFailureToProviderError(msg);
             }
             throw error;
         }
@@ -364,7 +367,11 @@ export class NanoAdapter implements AiProvider {
                 data?.items?.[0]?.response?.data?.status ||
                 data?.items?.[0]?.response?.data?.state ||
                 data?.items?.[0]?.response?.data?.task_status ||
-                data?.items?.[0]?.response?.data?.taskStatus;
+                data?.items?.[0]?.response?.data?.taskStatus ||
+                data?.data?.[0]?.status ||
+                data?.data?.[0]?.state ||
+                data?.data?.[0]?.task_status ||
+                data?.data?.[0]?.taskStatus;
             const status = typeof rawStatus === "string" ? rawStatus.toLowerCase() : "";
 
             console.log("[NanoAdapter] 轮询 Ace 任务状态", {
@@ -378,7 +385,8 @@ export class NanoAdapter implements AiProvider {
             }
 
             // 显式错误：兼容不同返回结构（有些失败只给 message）
-            const resp0 = data?.items?.[0]?.response;
+            // 优先使用 items[0].response；若不存在，则回退到顶层 response（与你贴的示例结构一致）
+            const resp0 = data?.items?.[0]?.response ?? data?.response;
             const explicitError: unknown =
                 data?.error ||
                 data?.items?.[0]?.error ||
@@ -389,6 +397,8 @@ export class NanoAdapter implements AiProvider {
             const messageCandidates: unknown[] = [
                 data?.message,
                 data?.msg,
+                data?.data?.message,
+                data?.data?.msg,
                 data?.items?.[0]?.message,
                 data?.items?.[0]?.msg,
                 resp0?.message,
@@ -398,6 +408,16 @@ export class NanoAdapter implements AiProvider {
                 resp0?.error?.message,
                 resp0?.data?.error?.message,
             ];
+            // 有些返回会把 message 放在顶层 data[] 的每个元素里
+            if (Array.isArray(data?.data)) {
+                for (const it of data.data) {
+                    if (!it) continue;
+                    messageCandidates.push((it as any)?.message);
+                    messageCandidates.push((it as any)?.msg);
+                    messageCandidates.push((it as any)?.error);
+                    messageCandidates.push((it as any)?.error?.message);
+                }
+            }
             // 有些返回会把 message 放在 response.data[] 的每个元素里
             if (Array.isArray(resp0?.data)) {
                 for (const it of resp0.data) {

@@ -110,6 +110,7 @@
 import { ref, computed } from 'vue';
 import { Handle, Position, type NodeProps } from '@vue-flow/core';
 import { VideoCamera, Download } from '@element-plus/icons-vue';
+import { getUploadUrl } from '@/utils/image-loader';
 
 const props = defineProps<NodeProps>();
 
@@ -120,13 +121,13 @@ const fullscreenUrl = ref<string | null>(null);
 const videoUrl = computed(() => {
   const data = (props.data || {}) as any;
   const url = data.videoUrl as string | undefined;
-  const err = data.errorMessage as string | undefined;
-  // 优先使用正常的 videoUrl；没有时尝试从 errorMessage 中兜底
-  const candidate = url || err;
-
-  if (typeof candidate === 'string' && candidate.startsWith('http')) {
-    return candidate;
-  }
+  // 只信任明确的 videoUrl 字段，避免把 errorMessage（纯文本）误拼成 /uploads/...
+  if (typeof url !== 'string') return '';
+  const v = url.trim();
+  if (!v) return '';
+  // 允许：http(s)://...、asset://...、data:...、以及后端返回的 /uploads/... 或 uploads/...
+  if (v.startsWith('http') || v.startsWith('asset://') || v.startsWith('data:')) return v;
+  if (v.startsWith('/uploads/') || v.startsWith('uploads/')) return getUploadUrl(v);
   return '';
 });
 
@@ -142,6 +143,9 @@ const progress = computed(() => {
 
 const errorMessage = computed(() => {
   const e = (props.data as any)?.errorMessage as string | null | undefined;
+  // 如果 errorMessage 实际是一个 URL（或与 videoUrl 相同），则不当作错误展示
+  if (typeof e === 'string' && (e.startsWith('http') || e.startsWith('asset://') || e.startsWith('data:') || e.startsWith('/uploads/') || e.startsWith('uploads/'))) return null;
+  if (typeof e === 'string' && videoUrl.value && e === videoUrl.value) return null;
   return e ?? null;
 });
 

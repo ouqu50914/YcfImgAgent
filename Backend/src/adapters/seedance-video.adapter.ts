@@ -1,4 +1,8 @@
 import axios from "axios";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+import { isCosEnabled, upload as cosUpload, pathToKey } from "../services/cos.service";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -613,8 +617,13 @@ export class SeedanceVideoAdapter {
 
             // 某些成功场景下 Seedance 会把带签名的视频 URL 放在 fail_reason 字段
             const failReason: string | undefined = (top as any)?.fail_reason;
-            if (!videoUrl && status === "succeeded" && typeof failReason === "string" && /^https?:\/\//.test(failReason)) {
+            // 实测：有时 status 仍为 running/processing，但 fail_reason 已经给出了可播放 URL。
+            // 只要 fail_reason 看起来是一个 URL，就将其视为 videoUrl，并把状态视为 succeeded，避免前端误判为“生成中/报错”。
+            if (!videoUrl && typeof failReason === "string" && /^https?:\/\//.test(failReason)) {
                 videoUrl = failReason;
+                if (status === "running" || status === "queued" || status === "unknown") {
+                    status = "succeeded";
+                }
             }
 
             const progress =
@@ -659,11 +668,26 @@ export class SeedanceVideoAdapter {
                     null;
             }
 
+            // 若成功拿到视频 URL，则优先下载并转存到本地/COS，返回稳定的 /uploads 路径
+            let finalVideoUrl: string | null = videoUrl;
+            if (videoUrl && typeof videoUrl === "string" && /^https?:\/\//.test(videoUrl)) {
+                try {
+                    finalVideoUrl = await this.downloadAndSaveVideo(videoUrl);
+                } catch (e) {
+                    // 转存失败不影响主流程：仍返回上游 URL，前端至少可播放
+                    console.warn("[SeedanceVideoAdapter] 下载/转存视频失败，将回退使用上游 URL", {
+                        taskId,
+                        message: (e as any)?.message || String(e),
+                    });
+                    finalVideoUrl = videoUrl;
+                }
+            }
+
             return {
                 raw: res.data,
                 status,
                 progress,
-                videoUrl,
+                videoUrl: finalVideoUrl,
                 duration,
                 ratio,
                 resolution,
@@ -683,10 +707,35 @@ export class SeedanceVideoAdapter {
                     status,
                     data,
                 });
-                throw new Error(`查询 Seedance 视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                const err = new Error(`查询 Seedance 视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                // 让控制器能够根据上游 HTTP 状态码返回 4xx/5xx，而不是一律 500
+                (err as any).status = typeof status === "number" ? status : undefined;
+                throw err;
             }
             throw error;
         }
+    }
+
+    /**
+     * 下载远程视频并保存到 /uploads 目录（或 COS），返回供前端访问的相对路径
+     */
+    async downloadAndSaveVideo(remoteUrl: string): Promise<string> {
+        const fileName = `seedance_video_${uuidv4()}.mp4`;
+        const res = await axiosClient.get(remoteUrl, {
+            responseType: "arraybuffer",
+            // Seedance 链接可能较慢，默认 30 分钟，允许通过环境变量覆盖
+            timeout: Number(process.env.SEEDANCE_VIDEO_DOWNLOAD_TIMEOUT_MS || "1800000"),
+        });
+        const buffer = Buffer.from(res.data);
+
+        if (isCosEnabled()) {
+            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, "video/mp4");
+            return `/uploads/${fileName}`;
+        }
+        const uploadDir = path.join(process.cwd(), "uploads");
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
+        return `/uploads/${fileName}`;
     }
 }
 

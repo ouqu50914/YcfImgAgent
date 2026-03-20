@@ -248,6 +248,7 @@ export class DreamAdapter implements AiProvider {
     ): Promise<AiResponse> {
         const actualCount = Math.min(count, 4);
         console.log(`[DreamAPI] 启动并发任务: ${actualCount} 个线程`);
+        const failureMessages: string[] = [];
         const tasks = Array(actualCount)
             .fill(0)
             .map(async () => {
@@ -257,14 +258,25 @@ export class DreamAdapter implements AiProvider {
                     if (!singleResult.images || singleResult.images.length === 0) throw new Error('生成结果中没有图片');
                     return singleResult.images[0];
                 } catch (e: any) {
-                    console.error(`[DreamAPI] 子任务失败:`, e.message);
+                    const msg = typeof e?.message === 'string' && e.message.trim()
+                        ? e.message.trim()
+                        : '未知错误';
+                    failureMessages.push(msg);
+                    console.error(`[DreamAPI] 子任务失败:`, msg);
                     return null;
                 }
             });
         const results = await Promise.all(tasks);
         const successUrls = results.filter((url): url is string => !!url);
         if (successUrls.length === 0) throw new Error('并发生成全部失败');
-        console.log(`[DreamAPI] 并发汇总: 成功 ${successUrls.length} 张`);
+        const failedCount = actualCount - successUrls.length;
+        // 输出结构化汇总，便于对照前端占位节点状态
+        console.log(`[DreamAPI] 并发汇总`, {
+            requestedCount: actualCount,
+            successCount: successUrls.length,
+            failedCount,
+            failedMessages: failureMessages.slice(0, 5),
+        });
         return { original_id: uuidv4(), images: successUrls };
     }
 

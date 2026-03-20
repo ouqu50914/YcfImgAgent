@@ -156,8 +156,14 @@ type WorkflowPersistenceStore = {
     saveImmediately: () => void;
 };
 
+type CreditTrackerStore = {
+    addSpent: (amount: number) => void;
+    getTotalSpent: () => number;
+};
+
 const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
 const userStore = useUserStore();
+const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 
 // 积分：普通用户需要校验
 const executeCost = computed(() => {
@@ -493,6 +499,7 @@ const handleGenerate = async () => {
                 
                 console.log(`👉 成功生成 ${fullUrls.length} 张图片:`, fullUrls);
                 ElMessage.success(`成功生成 ${fullUrls.length} 张图片！`);
+                creditTracker?.addSpent?.(executeCost.value);
                 userStore.fetchCredits();
                 
                 // 标记节点为已执行（下次显示“再次执行”）
@@ -501,6 +508,11 @@ const handleGenerate = async () => {
                 // 用真实图片填充占位节点；若不存在占位，则按老逻辑创建新节点
                 if (!fillPlaceholderImageNodes(fullUrls, allImages) && fullUrls.length > 0 && currentNode.value) {
                     createImageNodes(fullUrls, allImages);
+                }
+                // 若存在“部分成功”，将未回填占位落为失败态，避免节点一直显示生成中
+                const failedCount = markPendingPlaceholdersAsError();
+                if (failedCount > 0) {
+                    ElMessage.warning(`部分生成失败，仅成功 ${fullUrls.length} 张，失败 ${failedCount} 张`);
                 }
                 saveWorkflowImmediately();
             } else if (res.data.image_url) {
@@ -513,6 +525,7 @@ const handleGenerate = async () => {
                 props.data.imageUrl = res.data.image_url;
                 console.log('👉 完整图片URL:', url);
                 ElMessage.success('图片生成成功！');
+                creditTracker?.addSpent?.(executeCost.value);
                 userStore.fetchCredits();
                 
                 // 标记节点为已执行（下次显示“再次执行”）
@@ -522,37 +535,26 @@ const handleGenerate = async () => {
                 if (!fillPlaceholderImageNodes([url], [res.data.image_url]) && currentNode.value) {
                     createImageNodes([url], [res.data.image_url]);
                 }
+                const failedCount = markPendingPlaceholdersAsError();
+                if (failedCount > 0) {
+                    ElMessage.warning(`部分生成失败，仅成功 1 张，失败 ${failedCount} 张`);
+                }
                 saveWorkflowImmediately();
             } else {
                 console.warn('后端返回数据:', res.data);
+                markPendingPlaceholdersAsError();
                 ElMessage.warning('生成成功，但未获取到图片URL');
             }
         } else {
             console.warn('后端返回格式异常:', res);
+            markPendingPlaceholdersAsError();
             ElMessage.warning('生成成功，但未获取到图片URL');
         }
     } catch (error) {
         console.error('[DreamNode] 图片生成失败', error);
 
         // 如果存在占位图片节点，将其标记为失败状态，以便在 ImageNode 中展示“生成失败”
-        if (pendingImageNodeIds.value.length) {
-            const failedIds = [...pendingImageNodeIds.value];
-            setNodes(nodes =>
-                nodes.map(node =>
-                    failedIds.includes(node.id)
-                        ? {
-                            ...node,
-                            data: {
-                                ...node.data,
-                                isLoading: false,
-                                status: 'error',
-                            },
-                        }
-                        : node
-                )
-            );
-            pendingImageNodeIds.value = [];
-        }
+        markPendingPlaceholdersAsError();
 
         ElMessage.error('图片生成失败，请稍后重试');
         saveWorkflowImmediately();
@@ -671,15 +673,43 @@ const createPlaceholderImageNodes = (count: number) => {
     saveWorkflowImmediately();
 };
 
+// 将仍处于 pending 的占位节点统一落为失败态，避免长期“生成中”
+const markPendingPlaceholdersAsError = (): number => {
+    const failedIds = [...pendingImageNodeIds.value];
+    if (!failedIds.length) return 0;
+
+    setNodes(nodes =>
+        nodes.map(node =>
+            failedIds.includes(node.id)
+                ? {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        isLoading: false,
+                        status: 'error',
+                    },
+                }
+                : node
+        )
+    );
+
+    pendingImageNodeIds.value = [];
+    saveWorkflowImmediately();
+    return failedIds.length;
+};
+
 // 将真实结果填充到占位图片节点；若没有占位返回 false
 const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): boolean => {
     const ids = pendingImageNodeIds.value;
     if (!ids.length) return false;
 
+    const fillCount = Math.min(ids.length, fullUrls.length, originalUrls.length);
+    const filledIdSet = new Set(ids.slice(0, fillCount));
+
     setNodes(nodes =>
         nodes.map(node => {
             const idx = ids.indexOf(node.id);
-            if (idx === -1 || idx >= fullUrls.length) return node;
+            if (idx === -1 || idx >= fillCount) return node;
 
             return {
                 ...node,
@@ -693,9 +723,10 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
         })
     );
 
-    pendingImageNodeIds.value = [];
+    // 仅移除已回填成功的占位；剩余占位交由调用方决定是否落失败态
+    pendingImageNodeIds.value = ids.filter(id => !filledIdSet.has(id));
     saveWorkflowImmediately();
-    return true;
+    return fillCount > 0;
 };
 
 const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);

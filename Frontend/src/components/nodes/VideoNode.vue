@@ -267,6 +267,7 @@ import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from
 import { getUploadUrl } from '@/utils/image-loader';
 import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
 import { probeMediaUrl } from '@/api/media';
+import { useUserStore } from '@/store/user';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -274,6 +275,13 @@ defineEmits<{
 
 const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes } = useVueFlow();
+const userStore = useUserStore();
+
+type CreditTrackerStore = {
+  addSpent: (amount: number) => void;
+  getTotalSpent: () => number;
+};
+const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 
 type WorkflowPersistenceStore = {
   saveImmediately: () => void;
@@ -612,6 +620,36 @@ const showFullscreen = ref(false);
 const fullscreenUrl = ref<string | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+function getSeedanceCreditsPerSecond(): number {
+  // 与后端默认保持一致：20 积分 / 秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
+  const raw = (import.meta as any)?.env?.VITE_SEEDANCE_CREDITS_PER_SECOND;
+  const n = raw != null ? Number(raw) : 20;
+  if (Number.isNaN(n) || n <= 0) return 20;
+  return n;
+}
+
+function getSeedanceDefaultDurationSeconds(): number {
+  // 与后端默认保持一致：5 秒；如前端配置了 VITE_SEEDANCE_DEFAULT_DURATION 则优先使用
+  const raw = (import.meta as any)?.env?.VITE_SEEDANCE_DEFAULT_DURATION;
+  const n = raw != null ? Number(raw) : 5;
+  if (Number.isNaN(n) || n <= 0) return 5;
+  return n;
+}
+
+const executeCost = computed(() => {
+  if (provider.value !== 'seedance') return 0;
+  const seconds = durationAuto.value ? getSeedanceDefaultDurationSeconds() : Number(durationManual.value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return Math.round(seconds) * getSeedanceCreditsPerSecond();
+});
+
+const canAfford = computed(() => {
+  if (userStore.userInfo?.role === 1) return true;
+  const need = executeCost.value;
+  if (need <= 0) return true;
+  return (userStore.userInfo?.credits ?? 0) >= need;
+});
+
 const statusText = computed(() => {
   switch (status.value) {
     case 'pending':
@@ -638,8 +676,8 @@ watch(
   }
 );
 
-// 是否可以执行
-const canExecute = computed(() => {
+// 是否可以执行（输入是否就绪）
+const inputReady = computed(() => {
   // Seedance：根据子类型判断
   if (provider.value === 'seedance') {
     if (seedanceMode.value === 'text') {
@@ -685,10 +723,15 @@ const canExecute = computed(() => {
 });
 
 const executeButtonText = computed(() => {
-  if (status.value === 'succeeded' && videoUrls.value.length > 0) {
-    return '重新生成视频';
-  }
-  return '生成视频';
+  const base = status.value === 'succeeded' && videoUrls.value.length > 0 ? '重新生成视频' : '生成视频';
+  if (userStore.userInfo?.role === 1) return base;
+  const cost = executeCost.value;
+  return cost > 0 ? `${base} (消耗 ${cost} 积分)` : base;
+});
+
+// 是否可以执行（包含积分校验）
+const canExecute = computed(() => {
+  return inputReady.value && canAfford.value;
 });
 
 // 根据连接自动调整模式：有图片则优先图生视频（仅对 kling 生效）
@@ -733,8 +776,12 @@ const startPollingKling = (id: number) => {
 };
 
 const handleGenerate = async () => {
-  if (!canExecute.value) {
+  if (!inputReady.value) {
     ElMessage.warning('请补全提示词与图片输入');
+    return;
+  }
+  if (!canAfford.value) {
+    ElMessage.warning('积分不足，请向超级管理员申请');
     return;
   }
 
@@ -761,6 +808,8 @@ const handleGenerate = async () => {
           enableWebSearch: false,
         };
         const res = await createSeedanceGeneration(payload);
+        // Seedance 在创建任务成功时即完成扣费，这里用于累计展示“本次消耗”
+        creditTracker?.addSpent?.(executeCost.value);
         const raw = (res as any);
         const d = raw?.data?.data ?? raw?.data ?? raw;
         taskId.value = null;
@@ -777,30 +826,66 @@ const handleGenerate = async () => {
           clearInterval(pollTimer);
           pollTimer = null;
         }
+        const SEEDANCE_POLL_INTERVAL_MS = 8000;
+        const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
+        const seedanceStartTs = Date.now();
         pollTimer = setInterval(async () => {
           try {
             const r = await getSeedanceGenerationStatus(taskKeySimple);
             const rawStatus = (r as any);
             const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
             if (!data) return;
-            status.value = (data.status as any) || 'pending';
+            const nextStatus = (data.status as any) || 'pending';
             progress.value = (data as any).progress ?? null;
             errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
-            if ((data as any).videoUrl) {
-              videoUrls.value = [(data as any).videoUrl];
+
+            const nextVideoUrl = (data as any).videoUrl;
+            const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
+            status.value = nextStatus;
+            if (hasVideoUrl) {
+              videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
+              // 拿到视频链接后清理错误，避免 URL/旧错误残留影响展示
+              errorMessage.value = null;
+            } else if (nextStatus === 'succeeded') {
+              // succeeded 但没有 videoUrl：继续等到超时（或后续轮询返回 videoUrl）
+              videoUrls.value = [];
             }
+
             syncResultVideoNode();
-            if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
+
+            const shouldStopByTerminalState =
+              nextStatus === 'failed' || nextStatus === 'canceled';
+            const shouldStopBySuccess =
+              nextStatus === 'succeeded' && hasVideoUrl;
+
+            // succeeds：必须 videoUrl 回来才算真正回显成功
+            if (shouldStopBySuccess || shouldStopByTerminalState) {
               saveWorkflowImmediately();
               if (pollTimer) {
                 clearInterval(pollTimer);
                 pollTimer = null;
               }
+              return;
+            }
+
+            // 防御：最多等待 60 分钟仍未拿到 videoUrl，则强制失败，避免节点卡住
+            const elapsedMs = Date.now() - seedanceStartTs;
+            if (!hasVideoUrl && elapsedMs >= SEEDANCE_POLL_MAX_WAIT_MS) {
+              status.value = 'failed';
+              errorMessage.value = '任务已完成但未返回视频链接，已超时放弃回显';
+              videoUrls.value = [];
+              syncResultVideoNode();
+              saveWorkflowImmediately();
+              if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+              }
+              return;
             }
           } catch (err) {
             console.error('[VideoNode] Seedance 轮询失败', err);
           }
-        }, 8000);
+        }, SEEDANCE_POLL_INTERVAL_MS);
         ElMessage.success('Seedance 任务已创建，开始生成…');
         return;
       }
@@ -967,6 +1052,8 @@ const handleGenerate = async () => {
       }
 
       const res = await createSeedanceAdvanced(payloadAdv);
+      // Seedance 在创建任务成功时即完成扣费，这里用于累计展示“本次消耗”
+      creditTracker?.addSpent?.(executeCost.value);
       const raw = (res as any);
       const d = raw?.data?.data ?? raw?.data ?? raw;
       taskId.value = null;
@@ -984,30 +1071,65 @@ const handleGenerate = async () => {
         clearInterval(pollTimer);
         pollTimer = null;
       }
+      const SEEDANCE_POLL_INTERVAL_MS = 8000;
+      const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
+      const seedanceStartTs = Date.now();
       pollTimer = setInterval(async () => {
         try {
           const r = await getSeedanceGenerationStatus(taskKey);
           const rawStatus = (r as any);
           const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
           if (!data) return;
-          status.value = (data.status as any) || 'pending';
+
+          const nextStatus = (data.status as any) || 'pending';
           progress.value = (data as any).progress ?? null;
           errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
-          if ((data as any).videoUrl) {
-            videoUrls.value = [(data as any).videoUrl];
+
+          const nextVideoUrl = (data as any).videoUrl;
+          const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
+          status.value = nextStatus;
+          if (hasVideoUrl) {
+            videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
+            errorMessage.value = null;
+          } else if (nextStatus === 'succeeded') {
+            // succeeded 但没有 videoUrl：继续等到超时（或后续轮询返回 videoUrl）
+            videoUrls.value = [];
           }
+
           syncResultVideoNode();
-          if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
+
+          const shouldStopByTerminalState =
+            nextStatus === 'failed' || nextStatus === 'canceled';
+          const shouldStopBySuccess =
+            nextStatus === 'succeeded' && hasVideoUrl;
+
+          if (shouldStopBySuccess || shouldStopByTerminalState) {
             saveWorkflowImmediately();
             if (pollTimer) {
               clearInterval(pollTimer);
               pollTimer = null;
             }
+            return;
+          }
+
+          // 防御：最多等待 60 分钟仍未拿到 videoUrl，则强制失败，避免节点卡住
+          const elapsedMs = Date.now() - seedanceStartTs;
+          if (!hasVideoUrl && elapsedMs >= SEEDANCE_POLL_MAX_WAIT_MS) {
+            status.value = 'failed';
+            errorMessage.value = '任务已完成但未返回视频链接，已超时放弃回显';
+            videoUrls.value = [];
+            syncResultVideoNode();
+            saveWorkflowImmediately();
+            if (pollTimer) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+            return;
           }
         } catch (err) {
           console.error('[VideoNode] Seedance 轮询失败', err);
         }
-      }, 8000);
+      }, SEEDANCE_POLL_INTERVAL_MS);
       ElMessage.success('Seedance 任务已创建，开始生成…');
       return;
     }

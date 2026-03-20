@@ -5,6 +5,13 @@ import { CreditService } from "../services/credit.service";
 const adapter = new SeedanceVideoAdapter();
 const creditService = new CreditService();
 
+function getSeedanceCreditsPerSecond(): number {
+    const raw = process.env.SEEDANCE_CREDITS_PER_SECOND;
+    const n = raw ? Number(raw) : 20;
+    if (Number.isNaN(n) || n <= 0) return 20;
+    return n;
+}
+
 function getSeedanceDefaultDuration(): number {
     const raw = process.env.SEEDANCE_DEFAULT_DURATION;
     const n = raw ? Number(raw) : 5;
@@ -19,7 +26,8 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
             return res.status(401).json({ message: "未登录或登录已失效" });
         }
 
-        console.log("[SeedanceController] createSeedanceVideo request body:", req.body);
+        // 避免日志泄露提示词/外链等敏感内容，只打印字段名
+        console.log("[SeedanceController] createSeedanceVideo request keys:", Object.keys(req.body || {}));
 
         const { prompt, ratio, duration, resolution, generateAudio, enableWebSearch } = req.body || {};
 
@@ -58,10 +66,11 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
             payload.duration = durationNum;
         }
 
-        // 50 积分 / 秒；duration = -1 或未指定时按默认时长计算
+        // 20 积分 / 秒（可通过 SEEDANCE_CREDITS_PER_SECOND 覆盖）；duration = -1 或未指定时按默认时长计算
         const defaultDuration = getSeedanceDefaultDuration();
+        const creditsPerSecond = getSeedanceCreditsPerSecond();
         const seconds = durationNum === undefined || durationNum === -1 ? defaultDuration : durationNum;
-        const cost = seconds * 50;
+        const cost = seconds * creditsPerSecond;
 
         await creditService.deductCredits(userId, cost);
 
@@ -101,14 +110,28 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
             return res.status(401).json({ message: "未登录或登录已失效" });
         }
 
-        console.log("[SeedanceController] createSeedanceAdvancedVideo request body:", req.body);
-
         const id = req.params.id;
         if (!id || typeof id !== "string") {
             return res.status(400).json({ message: "任务 ID 非法" });
         }
 
+        console.log("[SeedanceController] getSeedanceVideo polling", { taskId: id });
+
         const result = await adapter.getVideoTask(id);
+
+        console.log("[SeedanceController] getSeedanceVideo result", {
+            taskId: id,
+            status: result.status,
+            progress: result.progress,
+            hasVideoUrl: !!result.videoUrl,
+            videoUrlHost: (() => {
+                try {
+                    return result.videoUrl ? new URL(result.videoUrl).host : null;
+                } catch {
+                    return null;
+                }
+            })(),
+        });
 
         return res.status(200).json({
             message: "获取 Seedance 视频任务成功",
@@ -204,7 +227,8 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
         }
 
         const resultDuration = durationNum === undefined || durationNum === -1 ? getSeedanceDefaultDuration() : durationNum;
-        const advCost = resultDuration * 50;
+        const creditsPerSecond = getSeedanceCreditsPerSecond();
+        const advCost = resultDuration * creditsPerSecond;
 
         await creditService.deductCredits(userId, advCost);
 
