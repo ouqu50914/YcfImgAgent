@@ -21,6 +21,11 @@ export const getCreditApplications = (status?: string) => {
   return request.get('/admin/credit-applications', { params: status ? { status } : {} });
 };
 
+/** 待处理积分申请条数（超级管理员） */
+export const getPendingCreditApplicationCount = () => {
+  return request.get<{ count: number }>('/admin/credit-applications/pending-count');
+};
+
 export const approveCreditApplication = (id: number, data?: { amount?: number; admin_comment?: string }) => {
   return request.post(`/admin/credit-applications/${id}/approve`, data || {});
 };

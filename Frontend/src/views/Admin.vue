@@ -90,8 +90,18 @@
         />
       </el-tab-pane>
 
-      <!-- 积分申请 -->
-      <el-tab-pane label="积分申请" name="creditApplications">
+      <!-- 积分申请（有待处理时 Tab 上显示红点） -->
+      <el-tab-pane name="creditApplications">
+        <template #label>
+          <el-badge
+            :is-dot="adminPendingStore.showPendingCreditDot"
+            :hidden="!adminPendingStore.showPendingCreditDot"
+            class="admin-tab-credit-badge"
+            :offset="[10, 4]"
+          >
+            <span class="admin-tab-credit-text">积分申请</span>
+          </el-badge>
+        </template>
         <div class="toolbar">
           <el-select
             v-model="creditAppStatusFilter"
@@ -447,11 +457,12 @@ import {
   deleteCategory,
   type WorkflowCategory
 } from '@/api/category';
+import { useAdminPendingStore } from '@/store/admin-pending';
 
 const router = useRouter();
+const adminPendingStore = useAdminPendingStore();
 
 const activeTab = ref('users');
-
 // 用户管理
 const userList = ref([]);
 const userSearchForm = reactive({ username: '', status: undefined });
@@ -633,6 +644,7 @@ const loadCreditApplications = async () => {
   try {
     const res: any = await getCreditApplications(creditAppStatusFilter.value || undefined);
     creditApplications.value = res.data || [];
+    await adminPendingStore.refreshPendingCreditApplications();
   } catch (error: any) {
     ElMessage.error(error.message || '加载失败');
   }
@@ -843,11 +855,12 @@ watch(activeTab, (tab) => {
   if (tab === 'system') loadHelpDocUrl();
 });
 
-onMounted(() => {
+onMounted(async () => {
   loadUserList();
   loadLogs();
   loadApiConfigs();
   loadCategories();
+  void adminPendingStore.refreshPendingCreditApplications();
 });
 </script>
 
@@ -894,6 +907,17 @@ onMounted(() => {
   border-color: var(--color-primary);
   color: var(--color-primary);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.admin-tab-credit-text {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.admin-tab-credit-badge :deep(.el-badge__content.is-dot) {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--el-bg-color-overlay, #1d1e1f);
 }
 
 .toolbar {

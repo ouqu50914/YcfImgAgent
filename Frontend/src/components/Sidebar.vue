@@ -60,13 +60,19 @@
       </el-tooltip>
 
       <el-tooltip v-if="isAdmin" content="管理中心" placement="right">
-        <div 
-          class="nav-item"
-          :class="{ active: currentRoute === '/admin' }"
-          @click="handleNavClick('/admin')"
+        <el-badge
+          :is-dot="showPendingCreditDot"
+          :hidden="!showPendingCreditDot"
+          class="sidebar-admin-badge"
         >
-          <el-icon :size="24"><Setting /></el-icon>
-        </div>
+          <div
+            class="nav-item"
+            :class="{ active: currentRoute === '/admin' }"
+            @click="handleNavClick('/admin')"
+          >
+            <el-icon :size="24"><Setting /></el-icon>
+          </div>
+        </el-badge>
       </el-tooltip>
 
       <div class="sidebar-spacer" />
@@ -82,17 +88,21 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 
 defineEmits<{ 'open-teaching': [] }>();
 import { useRouter, useRoute } from 'vue-router';
 import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting, VideoPlay } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
+import { useAdminPendingStore } from '@/store/admin-pending';
 import { getHelpDocUrlForClient } from '@/api/user';
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
+const adminPendingStore = useAdminPendingStore();
+const { showPendingCreditDot } = storeToRefs(adminPendingStore);
 const helpDocUrl = ref<string | null>(null);
 
 const currentRoute = computed(() => route.path);
@@ -188,6 +198,12 @@ onMounted(async () => {
 .nav-item.active {
   background: var(--color-primary-soft);
   color: var(--color-primary);
+}
+
+.sidebar-admin-badge :deep(.el-badge__content.is-dot) {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--app-bg-sub, #1a1a1a);
 }
 
 @media (max-width: 768px) {

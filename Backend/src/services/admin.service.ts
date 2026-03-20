@@ -124,6 +124,11 @@ export class AdminService {
     /**
      * 获取积分申请列表
      */
+    /** 待处理积分申请数量（用于前端红点） */
+    async countPendingCreditApplications(): Promise<number> {
+        return this.appRepo.count({ where: { status: "pending" } });
+    }
+
     async getCreditApplications(status?: string) {
         const list = await this.appRepo.find({
             where: status ? { status } : {},

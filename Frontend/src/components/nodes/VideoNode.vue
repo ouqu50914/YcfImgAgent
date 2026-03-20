@@ -268,6 +268,7 @@ import { getUploadUrl } from '@/utils/image-loader';
 import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
 import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
+import { notifyMediaGeneration } from '@/utils/browser-notification';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -276,6 +277,15 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes } = useVueFlow();
 const userStore = useUserStore();
+
+function notifyVideoGen(success: boolean, message: string) {
+  void notifyMediaGeneration({
+    kind: 'video',
+    success,
+    nodeId: String(props.id),
+    message
+  });
+}
 
 type CreditTrackerStore = {
   addSpent: (amount: number) => void;
@@ -764,6 +774,20 @@ const startPollingKling = (id: number) => {
       if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
         syncResultVideoNode();
         saveWorkflowImmediately();
+
+        if (status.value === 'succeeded' && videoUrls.value.length > 0) {
+          notifyVideoGen(true, 'Kling 视频任务已完成。');
+        } else if (status.value === 'succeeded') {
+          notifyVideoGen(
+            false,
+            errorMessage.value || '任务状态为成功但未返回视频链接'
+          );
+        } else if (status.value === 'canceled') {
+          notifyVideoGen(false, errorMessage.value || '视频任务已取消');
+        } else {
+          notifyVideoGen(false, errorMessage.value || '视频生成失败');
+        }
+
         if (pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
@@ -771,6 +795,10 @@ const startPollingKling = (id: number) => {
       }
     } catch (e: any) {
       console.error('[VideoNode] 轮询失败', e);
+      notifyVideoGen(
+        false,
+        normalizeErrorMessage(e?.message) || '查询视频任务状态失败'
+      );
     }
   }, 5000);
 };
@@ -820,6 +848,7 @@ const handleGenerate = async () => {
         const taskKeySimple = d.task_id || d.id;
         if (!taskKeySimple) {
           ElMessage.error('Seedance 返回结果缺少任务 ID');
+          notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
           return;
         }
         if (pollTimer) {
@@ -861,6 +890,17 @@ const handleGenerate = async () => {
             // succeeds：必须 videoUrl 回来才算真正回显成功
             if (shouldStopBySuccess || shouldStopByTerminalState) {
               saveWorkflowImmediately();
+
+              if (shouldStopBySuccess && status.value === 'succeeded' && videoUrls.value.length > 0) {
+                notifyVideoGen(true, 'Seedance 视频任务已完成。');
+              } else if (shouldStopByTerminalState) {
+                const msg =
+                  nextStatus === 'canceled'
+                    ? errorMessage.value || '视频任务已取消'
+                    : errorMessage.value || '视频生成失败';
+                notifyVideoGen(false, msg);
+              }
+
               if (pollTimer) {
                 clearInterval(pollTimer);
                 pollTimer = null;
@@ -876,14 +916,19 @@ const handleGenerate = async () => {
               videoUrls.value = [];
               syncResultVideoNode();
               saveWorkflowImmediately();
+              notifyVideoGen(false, errorMessage.value);
               if (pollTimer) {
                 clearInterval(pollTimer);
                 pollTimer = null;
               }
               return;
             }
-          } catch (err) {
+          } catch (err: any) {
             console.error('[VideoNode] Seedance 轮询失败', err);
+            notifyVideoGen(
+              false,
+              normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败'
+            );
           }
         }, SEEDANCE_POLL_INTERVAL_MS);
         ElMessage.success('Seedance 任务已创建，开始生成…');
@@ -1065,6 +1110,7 @@ const handleGenerate = async () => {
       const taskKey = d.task_id || d.id;
       if (!taskKey) {
         ElMessage.error('Seedance 返回结果缺少任务 ID');
+        notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
         return;
       }
       if (pollTimer) {
@@ -1105,6 +1151,17 @@ const handleGenerate = async () => {
 
           if (shouldStopBySuccess || shouldStopByTerminalState) {
             saveWorkflowImmediately();
+
+            if (shouldStopBySuccess && status.value === 'succeeded' && videoUrls.value.length > 0) {
+              notifyVideoGen(true, 'Seedance 视频任务已完成。');
+            } else if (shouldStopByTerminalState) {
+              const msg =
+                nextStatus === 'canceled'
+                  ? errorMessage.value || '视频任务已取消'
+                  : errorMessage.value || '视频生成失败';
+              notifyVideoGen(false, msg);
+            }
+
             if (pollTimer) {
               clearInterval(pollTimer);
               pollTimer = null;
@@ -1120,14 +1177,19 @@ const handleGenerate = async () => {
             videoUrls.value = [];
             syncResultVideoNode();
             saveWorkflowImmediately();
+            notifyVideoGen(false, errorMessage.value);
             if (pollTimer) {
               clearInterval(pollTimer);
               pollTimer = null;
             }
             return;
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error('[VideoNode] Seedance 轮询失败', err);
+          notifyVideoGen(
+            false,
+            normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败'
+          );
         }
       }, SEEDANCE_POLL_INTERVAL_MS);
       ElMessage.success('Seedance 任务已创建，开始生成…');
@@ -1196,6 +1258,7 @@ const handleGenerate = async () => {
     status.value = 'failed';
     errorMessage.value = normalizeErrorMessage(e?.message) || '创建视频任务失败';
     syncResultVideoNode();
+    notifyVideoGen(false, errorMessage.value);
     // 统一错误提示交给全局拦截器，这里不再重复 toast
   } finally {
     loading.value = false;

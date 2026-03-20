@@ -171,6 +171,15 @@ export const updateApiConfig = async (req: Request, res: Response) => {
 /**
  * 获取用户统计信息
  */
+export const getPendingCreditApplicationCount = async (_req: Request, res: Response) => {
+    try {
+        const count = await adminService.countPendingCreditApplications();
+        return res.status(200).json({ message: "获取成功", data: { count } });
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
 export const getCreditApplications = async (req: Request, res: Response) => {
     try {
         const status = req.query.status as string | undefined;

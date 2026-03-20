@@ -228,7 +228,13 @@ export class KlingVideoAdapter {
                     status,
                     data,
                 });
-                throw new Error(`创建可灵视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                const err = new Error(`创建可灵视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                // 让控制器能够感知上游 HTTP 状态码（尤其是 401 鉴权失败）
+                (err as any).status = typeof status === "number" ? status : undefined;
+                if (status === 401) {
+                    (err as any).code = "UPSTREAM_UNAUTHORIZED";
+                }
+                throw err;
             }
             throw error;
         }
@@ -312,7 +318,13 @@ export class KlingVideoAdapter {
                     status,
                     data,
                 });
-                throw new Error(`查询可灵视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                const err = new Error(`查询可灵视频任务失败 (${status ?? "未知状态"}): ${msg}`);
+                // 让控制器能够感知上游 HTTP 状态码（尤其是 401 鉴权失败）
+                (err as any).status = typeof status === "number" ? status : undefined;
+                if (status === 401) {
+                    (err as any).code = "UPSTREAM_UNAUTHORIZED";
+                }
+                throw err;
             }
             throw error;
         }

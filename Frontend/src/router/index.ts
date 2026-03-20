@@ -7,6 +7,7 @@ import Profile from '@/views/Profile.vue';
 import Admin from '@/views/Admin.vue';
 import WorkflowPlaza from '@/views/WorkflowPlaza.vue';
 import SeedanceDemo from '@/views/SeedanceDemo.vue';
+import { getUserRoleFromInfo } from '@/utils/user-role';
 
 const routes = [
   {
@@ -64,7 +65,7 @@ router.beforeEach((to, _from, next) => {
   
   if (to.meta.requiresAuth && !token) {
     next('/login');
-  } else if (to.meta.requiresAdmin && userInfo.role !== 1) {
+  } else if (to.meta.requiresAdmin && getUserRoleFromInfo(userInfo) !== 1) {
     // 需要管理员权限但当前用户不是管理员
     ElMessage.error('需要超级管理员权限');
     next('/');

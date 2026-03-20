@@ -19,6 +19,20 @@ function getSeedanceDefaultDuration(): number {
     return n;
 }
 
+function buildSeedanceUpstreamUnauthorizedResponse(err: any) {
+    // Seedance/Kling 等上游鉴权失败时，通常会返回 401。
+    // 这类 401 不应被前端当成“你的登录失效”，因此改成 502 并返回 code。
+    const upstreamMsg =
+        typeof err?.message === "string" && err.message.trim().length > 0 ? err.message.trim() : undefined;
+
+    return {
+        status: 502,
+        code: "UPSTREAM_UNAUTHORIZED",
+        message: "视频服务鉴权失败，请检查 SEEDANCE_API_KEY / SEEDANCE_ACCESS（或网络/账号权限），稍后重试。",
+        details: upstreamMsg,
+    };
+}
+
 export const createSeedanceVideo = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
@@ -93,7 +107,13 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
             typeof error?.status === "number" && error.status >= 400 && error.status < 600
                 ? error.status
                 : 500;
+        if (status === 401) {
+            const r = buildSeedanceUpstreamUnauthorizedResponse(error);
+            return res.status(r.status).json({ code: r.code, message: r.message });
+        }
+
         return res.status(status).json({
+            code: undefined,
             message:
                 error.message ||
                 (status === 400
@@ -143,7 +163,13 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
             typeof error?.status === "number" && error.status >= 400 && error.status < 600
                 ? error.status
                 : 500;
+        if (status === 401) {
+            const r = buildSeedanceUpstreamUnauthorizedResponse(error);
+            return res.status(r.status).json({ code: r.code, message: r.message });
+        }
+
         return res.status(status).json({
+            code: undefined,
             message:
                 error.message ||
                 (status === 400
@@ -263,7 +289,13 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
             typeof error?.status === "number" && error.status >= 400 && error.status < 600
                 ? error.status
                 : 500;
+        if (status === 401) {
+            const r = buildSeedanceUpstreamUnauthorizedResponse(error);
+            return res.status(r.status).json({ code: r.code, message: r.message });
+        }
+
         return res.status(status).json({
+            code: undefined,
             message:
                 error.message ||
                 (status === 400

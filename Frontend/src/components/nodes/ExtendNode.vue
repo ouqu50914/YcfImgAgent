@@ -141,7 +141,6 @@ import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
 import { getUploadUrl } from '@/utils/image-loader';
-
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -264,6 +263,7 @@ const handleExtend = async () => {
             // 更新节点数据，供下游节点使用
             props.data.imageUrl = url;
             ElMessage.success('图片扩展成功！');
+
             userStore.fetchCredits();
             
             // 标记节点为已执行

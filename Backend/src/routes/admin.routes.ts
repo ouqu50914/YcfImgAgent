@@ -12,6 +12,7 @@ import {
     updateApiConfig,
     getUserStats,
     getCreditApplications,
+    getPendingCreditApplicationCount,
     approveCreditApplication,
     rejectCreditApplication,
     updateUserCredits,
@@ -41,6 +42,7 @@ router.post("/users/:id/reset-password", resetPassword);
 router.delete("/users/:id", deleteUser);
 
 // 积分申请管理
+router.get("/credit-applications/pending-count", getPendingCreditApplicationCount);
 router.get("/credit-applications", getCreditApplications);
 router.post("/credit-applications/:id/approve", approveCreditApplication);
 router.post("/credit-applications/:id/reject", rejectCreditApplication);

@@ -16,6 +16,41 @@ let failedQueue: Array<{
   reject: (reason?: any) => void;
 }> = [];
 
+// 避免“登录过期”并发请求时重复 toast + 重复跳转
+let authRedirectInProgress = false;
+let lastAuthExpiredToken: string | null | undefined = undefined;
+
+const redirectToLoginOnce = (userStore: ReturnType<typeof useUserStore>, message?: string) => {
+  const tokenNow = localStorage.getItem('token');
+
+  // 同一轮 token 失效时，只执行一次
+  if (authRedirectInProgress && lastAuthExpiredToken === tokenNow) return;
+
+  // 已经在登录页且也是同一轮 token 失效，也不重复处理
+  try {
+    const path = (router as any)?.currentRoute?.value?.path;
+    if (path === '/login' && lastAuthExpiredToken === tokenNow) return;
+  } catch {
+    // ignore
+  }
+
+  authRedirectInProgress = true;
+  lastAuthExpiredToken = tokenNow;
+
+  ElMessage.error(message || '登录已过期，请重新登录');
+  userStore.logout();
+
+  const p = router.push('/login') as unknown as Promise<void>;
+  // 确保不会卡死到“进行中”
+  if (p && typeof (p as any).finally === 'function') {
+    (p as any).finally(() => {
+      authRedirectInProgress = false;
+    });
+  } else {
+    authRedirectInProgress = false;
+  }
+};
+
 // 处理队列中的请求
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach((prom) => {
@@ -202,25 +237,55 @@ service.interceptors.response.use(
         } catch (refreshError) {
           // 刷新失败，处理队列并跳转登录
           processQueue(refreshError, null);
-          ElMessage.error('登录已过期，请重新登录');
-          userStore.logout();
-          router.push('/login');
+          redirectToLoginOnce(userStore, '登录已过期，请重新登录');
           return Promise.reject(refreshError);
         } finally {
           isRefreshing = false;
         }
       } else {
-        // 其他401错误（如无效token），直接跳转登录
-        ElMessage.error('登录已过期，请重新登录');
-        userStore.logout();
-        router.push('/login');
+        // 其他401错误：
+        // - 可能是上游模型鉴权失败（不应登出）
+        // - 也可能是你自己的登录态失效（才需要登出）
+        const isUpstreamUnauthorized =
+          backendCode === 'UPSTREAM_UNAUTHORIZED' ||
+          backendMsg?.includes('视频服务鉴权失败') ||
+          backendMsg?.includes('SEEDANCE_API_KEY') ||
+          backendMsg?.includes('KLING_ACCESS_KEY') ||
+          backendMsg?.includes('KLING_SECRET_KEY');
+
+        if (isUpstreamUnauthorized) {
+          ElMessage.error(backendMsg || fallbackMsg);
+          return Promise.reject(error);
+        }
+
+        const isAuthFailure =
+          backendMsg?.includes('未登录') ||
+          backendMsg?.includes('登录已失效') ||
+          backendMsg?.includes('未提供认证令牌') ||
+          backendMsg?.includes('无效的认证令牌') ||
+          backendMsg?.includes('Token 已过期');
+
+        if (isAuthFailure) {
+          redirectToLoginOnce(userStore);
+        } else {
+          // 其它 401：只提示，不登出，避免“点视频就被踢下线”
+          const guessed = guessFriendlyMessage({
+            status: error.response?.status,
+            backendCode,
+            backendMsg,
+            retryAfter,
+          });
+          if (guessed) {
+            ElMessage.error(guessed);
+          } else {
+            ElMessage.error(backendMsg || fallbackMsg);
+          }
+        }
       }
     } else if (error.response?.status === 403 &&
                (backendMsg === '无效的认证令牌' || backendMsg === '未提供认证令牌')) {
       // 403 且是认证相关错误，同样视为登录失效
-      ElMessage.error('登录已过期，请重新登录');
-      userStore.logout();
-      router.push('/login');
+      redirectToLoginOnce(userStore);
     } else if (error.response?.status !== 401) {
       // 非401错误，统一中文错误提示（toast）
       const guessed = guessFriendlyMessage({

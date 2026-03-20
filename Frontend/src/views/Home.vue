@@ -10,7 +10,17 @@
         <div class="header-spacer" />
         <div class="header-right">
           <div class="user-info">
-            <el-avatar :size="32" class="user-avatar">
+            <el-badge
+              v-if="isSuperAdmin"
+              :is-dot="showPendingCreditDot"
+              :hidden="!showPendingCreditDot"
+              class="header-user-badge"
+            >
+              <el-avatar :size="32" class="user-avatar">
+                {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
+              </el-avatar>
+            </el-badge>
+            <el-avatar v-else :size="32" class="user-avatar">
               {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
             </el-avatar>
             <div class="user-details">
@@ -107,8 +117,11 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, computed } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../store/user';
+import { useAdminPendingStore } from '@/store/admin-pending';
+import { getUserRoleFromInfo } from '@/utils/user-role';
 import { applyCredits } from '@/api/user';
 import { ElMessage } from 'element-plus';
 import Sidebar from '@/components/Sidebar.vue';
@@ -118,6 +131,9 @@ import InspirationGrid from '@/components/InspirationGrid.vue';
 
 const router = useRouter();
 const userStore = useUserStore();
+const adminPendingStore = useAdminPendingStore();
+const { showPendingCreditDot } = storeToRefs(adminPendingStore);
+const isSuperAdmin = computed(() => getUserRoleFromInfo(userStore.userInfo) === 1);
 
 const showTeachingDialog = ref(false);
 const teachingVideoRef = ref<HTMLVideoElement | null>(null);
@@ -309,6 +325,12 @@ const handleApplyCredits = async () => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: var(--text-strong);
   font-weight: 600;
+}
+
+.header-user-badge :deep(.el-badge__content.is-dot) {
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--app-bg-sub);
 }
 
 .user-details {

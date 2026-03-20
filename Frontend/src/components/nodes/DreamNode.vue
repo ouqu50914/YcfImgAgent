@@ -143,6 +143,7 @@ import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
 import { getUploadUrl } from '@/utils/image-loader';
+import { notifyMediaGeneration } from '@/utils/browser-notification';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -514,6 +515,17 @@ const handleGenerate = async () => {
                 if (failedCount > 0) {
                     ElMessage.warning(`部分生成失败，仅成功 ${fullUrls.length} 张，失败 ${failedCount} 张`);
                 }
+
+                void notifyMediaGeneration({
+                    kind: 'image',
+                    success: true,
+                    nodeId: String(props.id),
+                    message:
+                        failedCount > 0
+                            ? `已生成 ${fullUrls.length} 张图片，另有 ${failedCount} 张失败。`
+                            : `已成功生成 ${fullUrls.length} 张图片。`
+                });
+
                 saveWorkflowImmediately();
             } else if (res.data.image_url) {
                 // 兼容旧格式：只有 image_url
@@ -539,22 +551,56 @@ const handleGenerate = async () => {
                 if (failedCount > 0) {
                     ElMessage.warning(`部分生成失败，仅成功 1 张，失败 ${failedCount} 张`);
                 }
+
+                void notifyMediaGeneration({
+                    kind: 'image',
+                    success: true,
+                    nodeId: String(props.id),
+                    message:
+                        failedCount > 0
+                            ? `已生成 1 张图片，另有 ${failedCount} 张失败。`
+                            : '已成功生成 1 张图片。'
+                });
+
                 saveWorkflowImmediately();
             } else {
                 console.warn('后端返回数据:', res.data);
                 markPendingPlaceholdersAsError();
                 ElMessage.warning('生成成功，但未获取到图片URL');
+                void notifyMediaGeneration({
+                    kind: 'image',
+                    success: false,
+                    nodeId: String(props.id),
+                    message: '生成成功，但未获取到图片 URL'
+                });
             }
         } else {
             console.warn('后端返回格式异常:', res);
             markPendingPlaceholdersAsError();
             ElMessage.warning('生成成功，但未获取到图片URL');
+            void notifyMediaGeneration({
+                kind: 'image',
+                success: false,
+                nodeId: String(props.id),
+                message: '返回数据异常，未获取到图片 URL'
+            });
         }
     } catch (error) {
         console.error('[DreamNode] 图片生成失败', error);
 
         // 如果存在占位图片节点，将其标记为失败状态，以便在 ImageNode 中展示“生成失败”
         markPendingPlaceholdersAsError();
+
+        const errMsg =
+            (error as Error)?.message ||
+            (typeof error === 'string' ? error : '') ||
+            '图片生成失败，请稍后重试';
+        void notifyMediaGeneration({
+            kind: 'image',
+            success: false,
+            nodeId: String(props.id),
+            message: errMsg
+        });
 
         ElMessage.error('图片生成失败，请稍后重试');
         saveWorkflowImmediately();

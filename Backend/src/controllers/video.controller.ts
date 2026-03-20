@@ -65,7 +65,18 @@ export const createVideoTask = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 创建任务失败:", error);
-        return res.status(500).json({
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
+
+        if (status === 401) {
+            return res.status(502).json({
+                code: "UPSTREAM_UNAUTHORIZED",
+                message: "视频服务鉴权失败，请检查 KLING_ACCESS_KEY / KLING_SECRET_KEY（或网络/账号权限），稍后重试。",
+            });
+        }
+
+        return res.status(status).json({
+            code: error?.code,
             message: error.message || "创建视频生成任务失败",
         });
     }
@@ -90,7 +101,18 @@ export const getVideoTask = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 获取任务失败:", error);
-        return res.status(500).json({
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
+
+        if (status === 401) {
+            return res.status(502).json({
+                code: "UPSTREAM_UNAUTHORIZED",
+                message: "视频服务鉴权失败，请稍后重试。",
+            });
+        }
+
+        return res.status(status).json({
+            code: error?.code,
             message: error.message || "获取视频任务失败",
         });
     }
@@ -119,7 +141,18 @@ export const listVideoTasks = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 列表查询失败:", error);
-        return res.status(500).json({
+        const status =
+            typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
+
+        if (status === 401) {
+            return res.status(502).json({
+                code: "UPSTREAM_UNAUTHORIZED",
+                message: "视频服务鉴权失败，请稍后重试。",
+            });
+        }
+
+        return res.status(status).json({
+            code: error?.code,
             message: error.message || "获取视频任务列表失败",
         });
     }

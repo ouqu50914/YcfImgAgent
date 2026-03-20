@@ -11,7 +11,17 @@
         <!-- 右上角用户信息与积分 -->
         <div class="workflow-header-float">
             <div class="workflow-user-info">
-                <el-avatar :size="28" class="workflow-avatar">
+                <el-badge
+                    v-if="isSuperAdminWorkflow"
+                    :is-dot="showPendingCreditDot"
+                    :hidden="!showPendingCreditDot"
+                    class="workflow-header-badge"
+                >
+                    <el-avatar :size="28" class="workflow-avatar">
+                        {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
+                    </el-avatar>
+                </el-badge>
+                <el-avatar v-else :size="28" class="workflow-avatar">
                     {{ userStore.userInfo.username?.charAt(0).toUpperCase() || 'U' }}
                 </el-avatar>
                 <div class="workflow-user-details">
@@ -290,8 +300,11 @@
 
 <script setup lang="ts">
 import { ref, reactive, markRaw, onMounted, onUnmounted, h, provide, nextTick, computed } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useUserStore } from '@/store/user';
+import { useAdminPendingStore } from '@/store/admin-pending';
+import { getUserRoleFromInfo } from '@/utils/user-role';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
@@ -308,6 +321,7 @@ import ConnectionMenu from '@/components/ConnectionMenu.vue';
 import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
 import { getUploadUrl } from '@/utils/image-loader';
 import { getMediaMetadataFromFile } from '@/utils/media-metadata';
+import { requestNotificationPermissionFromUser } from '@/utils/browser-notification';
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
@@ -564,6 +578,9 @@ const redo = () => {
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
+const adminPendingStore = useAdminPendingStore();
+const { showPendingCreditDot } = storeToRefs(adminPendingStore);
+const isSuperAdminWorkflow = computed(() => getUserRoleFromInfo(userStore.userInfo) === 1);
 
 const showApplyCreditsModal = ref(false);
 const applyCreditsForm = reactive({ amount: 10, reason: '' });
@@ -2545,6 +2562,60 @@ const handleKeyUp = (event: KeyboardEvent) => {
     }
 };
 
+/** 同标签页会话内：已提醒过「通知被禁止」则不再重复弹窗 */
+const NOTIFY_DENIED_SESSION_KEY = 'browser_notify_denied_hint_session';
+
+/**
+ * 每次进入工作流：检查通知权限；未开启则提示（default 可申请，denied 仅说明去浏览器设置里改）
+ */
+async function offerWorkflowNotificationGuide() {
+    await nextTick();
+
+    if (typeof Notification === 'undefined') {
+        return;
+    }
+    if (Notification.permission === 'granted') return;
+
+    if (Notification.permission === 'denied') {
+        if (sessionStorage.getItem(NOTIFY_DENIED_SESSION_KEY)) return;
+        sessionStorage.setItem(NOTIFY_DENIED_SESSION_KEY, '1');
+        try {
+            await ElMessageBox.alert(
+                '当前浏览器已禁止本站发送通知，页面内无法再次弹出系统授权。\n\n' +
+                    '如需桌面提醒「图片/视频生成」成功或失败，请在浏览器站点设置中将本站「通知」改为允许。',
+                '通知未开启',
+                { confirmButtonText: '知道了', type: 'warning' }
+            );
+        } catch {
+            /* 关闭弹窗 */
+        }
+        return;
+    }
+
+    try {
+        await ElMessageBox.confirm(
+            '检测到尚未开启浏览器通知。\n\n' +
+                '开启后，在工作流中执行「图片生成」「视频生成」完成（成功或失败）时会尝试弹出桌面提醒（便于切到其他标签页时也能看到结果）。\n\n' +
+                '点击「开启通知」后，浏览器将询问是否允许；也可先选「暂不」，本页仍会显示成功提示。',
+            '开启生成完成提醒',
+            {
+                confirmButtonText: '开启通知',
+                cancelButtonText: '暂不',
+                type: 'info',
+                distinguishCancelAndClose: true
+            }
+        );
+    } catch {
+        return;
+    }
+    const ok = await requestNotificationPermissionFromUser();
+    if (ok) {
+        ElMessage.success('已开启通知：图片/视频生成结束时会尝试提醒您');
+    } else {
+        ElMessage.info('未获得通知权限：完成后仅在本页内提示');
+    }
+}
+
 // 路由离开钩子：无论通过哪种方式离开编辑器页面，都尝试保存一次
 onBeforeRouteLeave(async (_to, _from, next) => {
     try {
@@ -2566,6 +2637,9 @@ onMounted(async () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('paste', handlePaste, true);
+
+    // 不阻塞后续加载：异步弹出说明 + 可选申请通知权限
+    void offerWorkflowNotificationGuide();
 
     // 处理URL参数
     const query = route.query;
@@ -2883,6 +2957,12 @@ onUnmounted(() => {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: #fff;
     font-weight: 600;
+}
+
+.workflow-header-badge :deep(.el-badge__content.is-dot) {
+    width: 8px;
+    height: 8px;
+    border: 2px solid rgba(39, 40, 47, 0.95);
 }
 
 .workflow-user-details {

@@ -133,7 +133,6 @@ import { ElMessage } from 'element-plus';
 import request from '@/utils/request';
 import { getUploadUrl } from '@/utils/image-loader';
 import { useUserStore } from '@/store/user';
-
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -238,6 +237,7 @@ const handleSeparate = async () => {
             }));
             
             ElMessage.success(`成功分离出 ${layers.value.length} 个图层！`);
+
             userStore.fetchCredits();
             
             // 标记节点为已执行
