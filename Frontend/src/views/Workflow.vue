@@ -294,7 +294,10 @@
         </el-dialog>
 
         <!-- Gemini 聊天面板（包含右侧悬浮开关按钮） -->
-        <WorkflowChatPanel :workflow-context="workflowContextForChat" />
+        <WorkflowChatPanel
+            :workflow-context="workflowContextForChat"
+            @gemini-command="executeGeminiCommand"
+        />
     </div>
 </template>
 
@@ -615,7 +618,20 @@ const handleApplyCredits = async () => {
         applyCreditsLoading.value = false;
     }
 };
-const { addNodes, addEdges, getEdges, getNodes, setNodes, setEdges, removeNodes, findNode, screenToFlowCoordinate, viewport, fitView } = useVueFlow();
+const {
+    addNodes,
+    addEdges,
+    getEdges,
+    getNodes,
+    setNodes,
+    setEdges,
+    removeNodes,
+    findNode,
+    screenToFlowCoordinate,
+    viewport,
+    fitView,
+    setViewport,
+} = useVueFlow();
 /** 从「我的项目」进入时的模板 id，保存时覆盖该模板；否则保存为新项目 */
 const currentTemplateId = ref<number | null>(null);
 /** 当前打开的模板所属用户 id，与当前用户一致时保存为覆盖 */
@@ -754,6 +770,86 @@ const workflowPersistenceStore: WorkflowPersistenceStore = {
 
 provide<WorkflowPersistenceStore>('workflowPersistence', workflowPersistenceStore);
 
+/** 判断字符串是否像媒体存储路径或可访问 URL（用于写入 Gemini 上下文，避免把错误文案当链接） */
+function isLikelyMediaUrlString(raw: string): boolean {
+    const s = raw.trim();
+    if (!s || s.length > 4096) return false;
+    if (s.includes('\n')) return false;
+    const lower = s.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return true;
+    if (lower.startsWith('/uploads/') || lower.startsWith('uploads/')) return true;
+    if (lower.startsWith('asset://')) return true;
+    return false;
+}
+
+/** 从节点 data 提取图片 / 视频 / 音频 COS（或 CDN）相关链接，并统一为可访问绝对 URL */
+function collectMediaFromSelectedNode(node: { type?: string; data?: any }): {
+    imageUrls: string[];
+    videoUrls: string[];
+    audioUrls: string[];
+} {
+    const imageUrls = new Set<string>();
+    const videoUrls = new Set<string>();
+    const audioUrls = new Set<string>();
+    const d = node?.data;
+    const type = node?.type;
+
+    const addImg = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) imageUrls.add(abs);
+    };
+    const addVid = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) videoUrls.add(abs);
+    };
+    const addAud = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) audioUrls.add(abs);
+    };
+
+    if (!d || typeof d !== 'object') {
+        return { imageUrls: [], videoUrls: [], audioUrls: [] };
+    }
+
+    addImg(d.imageUrl);
+    addImg(d.originalImageUrl);
+    addImg(d.image_url);
+    if (Array.isArray(d.imageUrls)) {
+        for (const u of d.imageUrls) addImg(u);
+    }
+
+    addVid(d.videoUrl);
+    if (Array.isArray(d.video_urls)) {
+        for (const u of d.video_urls) addVid(u);
+    }
+    if (Array.isArray(d.videoUrls)) {
+        for (const u of d.videoUrls) addVid(u);
+    }
+
+    if (type === 'videoRef') {
+        addVid(d.url);
+    } else if (type === 'audioRef') {
+        addAud(d.url);
+    }
+
+    if (Array.isArray(d.layers)) {
+        for (const layer of d.layers) {
+            if (layer && typeof layer === 'object' && typeof (layer as { url?: string }).url === 'string') {
+                addImg((layer as { url: string }).url);
+            }
+        }
+    }
+
+    return {
+        imageUrls: [...imageUrls],
+        videoUrls: [...videoUrls],
+        audioUrls: [...audioUrls],
+    };
+}
+
 // 提供给 Gemini 聊天的工作流上下文（精简版）
 const workflowContextForChat = computed(() => {
     const nodes = getNodes.value;
@@ -770,9 +866,197 @@ const workflowContextForChat = computed(() => {
             type: node.type,
             label: (node.data as any)?.label,
             text: (node.data as any)?.text,
+            media: collectMediaFromSelectedNode(node),
         })),
     };
 });
+
+/**
+ * 解析 Gemini 输出的“画布执行命令”，自动新建节点并连线（但不触发生成）。
+ * 生成仍由用户手动点击 DreamNode / VideoNode 的执行按钮。
+ */
+const executeGeminiCommand = async (cmd: any) => {
+    try {
+        if (!cmd || typeof cmd !== 'object') return;
+
+        // 你手动添加节点通常不会触发 fitView 的缩放变化；
+        // 这里保存当前缩放，fitView 仅用于移动视图居中，但节点视觉大小保持一致。
+        const prevZoom: number = (viewport.value as any)?.zoom ?? 0.8;
+
+        const intent: string | undefined = cmd.intent;
+        const promptTextRaw: unknown = cmd.promptText;
+        const promptText: string = typeof promptTextRaw === 'string' ? promptTextRaw.trim() : '';
+        if (!intent) return;
+        if (intent === 'create_image_pipeline' || intent === 'create_video_pipeline') {
+            if (!promptText) return;
+        }
+
+        if (intent === 'create_image_pipeline') {
+            const uiMessage = typeof (cmd?.ui as any)?.messageForUser === 'string' ? (cmd?.ui as any).messageForUser : '';
+            const promptId = `prompt_node_gemini_${Date.now()}`;
+            const dreamId = `dream_node_gemini_${Date.now()}`;
+
+            const promptPos = calculateOptimalPosition('prompt');
+            const dreamPreferred = {
+                x: promptPos.x + (NODE_DIMENSIONS.prompt?.width || 360) + HORIZONTAL_PADDING,
+                y: promptPos.y,
+            };
+            const dreamPos = calculateOptimalPosition('dream', dreamPreferred);
+
+            addNodes({
+                id: promptId,
+                type: 'prompt',
+                position: promptPos,
+                data: { text: promptText },
+            });
+
+            addNodes({
+                id: dreamId,
+                type: 'dream',
+                position: dreamPos,
+                data: {},
+            });
+
+            addEdges({
+                id: `edge_${promptId}_to_${dreamId}_${Date.now()}`,
+                source: promptId,
+                target: dreamId,
+                sourceHandle: 'prompt-source',
+                targetHandle: 'target',
+                type: 'default',
+                animated: true,
+            });
+
+            saveState();
+            void persistWorkflow();
+            await nextTick();
+            await fitView({ padding: 0.08 });
+            // 保持默认视觉大小（仅保持居中效果）
+            setViewport({ ...(viewport.value as any), zoom: prevZoom });
+
+            ElMessage.success(
+                uiMessage || '已自动创建并连接生图节点，请到生图节点手动点击执行生成。'
+            );
+            return;
+        }
+
+        if (intent === 'create_video_pipeline') {
+            const uiMessage = typeof (cmd?.ui as any)?.messageForUser === 'string' ? (cmd?.ui as any).messageForUser : '';
+            const promptId = `prompt_node_gemini_${Date.now()}`;
+            const videoId = `video_node_gemini_${Date.now()}`;
+
+            const promptPos = calculateOptimalPosition('prompt');
+            const videoPreferred = {
+                x: promptPos.x + (NODE_DIMENSIONS.prompt?.width || 360) + HORIZONTAL_PADDING,
+                y: promptPos.y,
+            };
+            const videoPos = calculateOptimalPosition('video', videoPreferred);
+
+            addNodes({
+                id: promptId,
+                type: 'prompt',
+                position: promptPos,
+                data: { text: promptText },
+            });
+
+            addNodes({
+                id: videoId,
+                type: 'video',
+                position: videoPos,
+                data: {},
+            });
+
+            addEdges({
+                id: `edge_${promptId}_to_${videoId}_${Date.now()}`,
+                source: promptId,
+                target: videoId,
+                sourceHandle: 'prompt-source',
+                targetHandle: 'target',
+                type: 'default',
+                animated: true,
+            });
+
+            // 如果画布上已有图片节点（通常来自你刚生成的 DreamNode），
+            // 则自动把“最近一次生成出来的那批图片”连到新建的 VideoNode 上。
+            // 连接：image-source -> target
+            const parseDreamTs = (nodeId: string): number => {
+                const m = nodeId.match(/^dream_node_(\d+)/);
+                return m ? Number(m[1]) : 0;
+            };
+            const parseImageTs = (nodeId: string): number => {
+                const m = nodeId.match(/^image_node_(\d+)_/);
+                return m ? Number(m[1]) : 0;
+            };
+
+            const allNodes = getNodes.value;
+            const allEdges = getEdges.value;
+
+            const dreamNodes = allNodes.filter((n) => n.type === 'dream');
+            const latestDream = dreamNodes.sort((a, b) => parseDreamTs(b.id) - parseDreamTs(a.id))[0];
+
+            const imageNodesToConnect = (() => {
+                // 优先用 fromNodeId 精确找到最新一批图片
+                if (latestDream?.id) {
+                    const imgs = allNodes.filter((n) => {
+                        if (n.type !== 'image') return false;
+                        const fromNodeId = (n.data as any)?.fromNodeId;
+                        const imageUrl = (n.data as any)?.imageUrl;
+                        return fromNodeId === latestDream.id && typeof imageUrl === 'string' && !!imageUrl;
+                    });
+                    if (imgs.length > 0) return imgs;
+                }
+
+                // 回退：找最近的 image_node 时间戳那一批
+                const imgs = allNodes.filter((n) => {
+                    if (n.type !== 'image') return false;
+                    const imageUrl = (n.data as any)?.imageUrl;
+                    return typeof imageUrl === 'string' && !!imageUrl;
+                });
+                const maxTs = Math.max(...imgs.map((n) => parseImageTs(n.id)), 0);
+                if (!maxTs) return [];
+                return imgs.filter((n) => parseImageTs(n.id) === maxTs);
+            })();
+
+            if (imageNodesToConnect.length > 0) {
+                const alreadyConnected = new Set(
+                    allEdges
+                        .filter((e) => e.target === videoId)
+                        .map((e) => `${e.source}::${e.target}`)
+                );
+
+                for (const img of imageNodesToConnect) {
+                    const key = `${img.id}::${videoId}`;
+                    if (alreadyConnected.has(key)) continue;
+
+                    addEdges({
+                        id: `edge_${img.id}_to_${videoId}_${Date.now()}`,
+                        source: img.id,
+                        target: videoId,
+                        sourceHandle: 'image-source',
+                        targetHandle: 'target',
+                        type: 'default',
+                        animated: true,
+                    });
+                }
+            }
+
+            saveState();
+            void persistWorkflow();
+            await nextTick();
+            await fitView({ padding: 0.08 });
+            // 保持默认视觉大小（仅保持居中效果）
+            setViewport({ ...(viewport.value as any), zoom: prevZoom });
+
+            ElMessage.success(
+                uiMessage || '已自动创建并连接视频节点，请到视频节点手动点击执行生成。'
+            );
+            return;
+        }
+    } catch (e) {
+        // 不要因为命令执行失败影响聊天本身
+        console.error('[executeGeminiCommand] failed:', e);
+    }
+};
 
 // 截取画布作为封面图，上传后返回 URL；失败返回 null
 const captureCanvasCover = async (): Promise<string | null> => {

@@ -173,6 +173,14 @@ interface ChatSession {
 
 const props = defineProps(['workflowContext']);
 
+const emit = defineEmits<{
+  /**
+   * 由 Gemini 输出的“画布执行命令”（例如：创建 prompt+dream 并连线）。
+   * 前端解析 JSON 后把命令透传给 Workflow 侧执行器。
+   */
+  (e: 'gemini-command', cmd: any): void;
+}>();
+
 const userStore = useUserStore();
 
 const isOpen = ref(false);
@@ -399,6 +407,34 @@ const handleSend = async () => {
     }
 
     // 一轮回复结束后，立即强制持久化，避免刷新丢失最后一条内容
+    // 先尝试从 assistantMsg.content 中提取 JSON 命令并通知 Workflow 执行
+    // 解析失败不执行画布操作，只展示自然语言
+    const tryExtractCmd = (raw: string) => {
+      if (!raw) return null;
+      const fenceMatch = raw.match(/```json\s*([\s\S]*?)```/i);
+      if (!fenceMatch?.[1]) return null;
+      const jsonText = fenceMatch[1].trim();
+      if (!jsonText) return null;
+      try {
+        const parsed = JSON.parse(jsonText) as any;
+        const intent = parsed?.intent;
+        const promptText = parsed?.promptText ?? parsed?.prompt_text;
+        if (intent !== 'create_image_pipeline' && intent !== 'create_video_pipeline') return null;
+        if (typeof promptText !== 'string' || !promptText.trim()) return null;
+        return { ...parsed, promptText };
+      } catch {
+        return null;
+      }
+    };
+
+    const cmd = tryExtractCmd(assistantMsg.content);
+    if (cmd) {
+      try {
+        emit('gemini-command', cmd);
+      } catch {
+        // ignore emit failure
+      }
+    }
     persistSessions();
   } catch (e: any) {
     const msg = e?.response?.data?.message || e?.message || '发送失败，请稍后重试';
