@@ -354,6 +354,10 @@ const syncResultVideoNode = () => {
       status: status.value,
       progress: progress.value,
       errorMessage: errorMessage.value,
+      // 用于“恢复历史后继续轮询”
+      provider: provider.value,
+      taskId: taskId.value ?? undefined, // Kling
+      seedanceTaskKey: seedanceTaskKey.value ?? undefined, // Seedance
     };
     // 视频 URL/状态变化可能导致节点高度变化，刷新内部端口锚点位置
     updateNodeInternals([existing.id]);
@@ -382,6 +386,10 @@ const syncResultVideoNode = () => {
       status: status.value,
       progress: progress.value,
       errorMessage: errorMessage.value,
+      // 用于“恢复历史后继续轮询”
+      provider: provider.value,
+      taskId: taskId.value ?? undefined, // Kling
+      seedanceTaskKey: seedanceTaskKey.value ?? undefined, // Seedance
     },
   });
 
@@ -404,7 +412,6 @@ const syncResultVideoNode = () => {
   saveWorkflowImmediately();
 };
 
-// 表单状态（imageSubType 需在 watch 前声明）
 const mode = ref<VideoMode>('text_to_video');
 const imageSubType = ref<ImageSubType>('first_only');
 
@@ -571,10 +578,8 @@ watch(
   { immediate: true, deep: true }
 );
 
-// 表单状态（其余）
-// 时长：自动(-1) 或手动 4-15 秒
 const durationAuto = ref(false);
-const durationManual = ref<number>(4);
+const durationManual = ref(4);
 const resolution = ref<'720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
 
@@ -604,6 +609,8 @@ const endFramePreview = computed(() => {
 
 // 任务状态
 const taskId = ref<number | null>(null);
+// Seedance 轮询用的任务标识（恢复历史后可继续轮询）
+const seedanceTaskKey = ref<string | null>(null);
 const status = ref<'pending' | 'running' | 'succeeded' | 'failed' | 'canceled'>('pending');
 const progress = ref<number | null>(null);
 const errorMessage = ref<string | null>(null);
@@ -764,8 +771,9 @@ watch(
   { immediate: true }
 );
 
-const startPollingKling = (id: number) => {
+const startPollingKling = (id: number, opts?: { silent?: boolean }) => {
   if (pollTimer) clearInterval(pollTimer);
+  const silent = opts?.silent ?? false;
   pollTimer = setInterval(async () => {
     try {
       const res = await getVideoTask(id) as any;
@@ -783,16 +791,15 @@ const startPollingKling = (id: number) => {
         saveWorkflowImmediately();
 
         if (status.value === 'succeeded' && videoUrls.value.length > 0) {
-          notifyVideoGen(true, 'Kling 视频任务已完成。');
+          if (!silent) notifyVideoGen(true, 'Kling 视频任务已完成。');
         } else if (status.value === 'succeeded') {
-          notifyVideoGen(
-            false,
-            errorMessage.value || '任务状态为成功但未返回视频链接'
-          );
+          if (!silent) {
+            notifyVideoGen(false, errorMessage.value || '任务状态为成功但未返回视频链接');
+          }
         } else if (status.value === 'canceled') {
-          notifyVideoGen(false, errorMessage.value || '视频任务已取消');
+          if (!silent) notifyVideoGen(false, errorMessage.value || '视频任务已取消');
         } else {
-          notifyVideoGen(false, errorMessage.value || '视频生成失败');
+          if (!silent) notifyVideoGen(false, errorMessage.value || '视频生成失败');
         }
 
         if (pollTimer) {
@@ -802,12 +809,100 @@ const startPollingKling = (id: number) => {
       }
     } catch (e: any) {
       console.error('[VideoNode] 轮询失败', e);
-      notifyVideoGen(
-        false,
-        normalizeErrorMessage(e?.message) || '查询视频任务状态失败'
-      );
+      if (!silent) {
+        notifyVideoGen(false, normalizeErrorMessage(e?.message) || '查询视频任务状态失败');
+      }
     }
   }, 5000);
+};
+
+const startPollingSeedance = (taskKey: string, opts?: { silent?: boolean }) => {
+  if (pollTimer) clearInterval(pollTimer);
+  const silent = opts?.silent ?? false;
+  seedanceTaskKey.value = taskKey;
+
+  const SEEDANCE_POLL_INTERVAL_MS = 8000;
+  const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
+  const seedanceStartTs = Date.now();
+
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await getSeedanceGenerationStatus(taskKey);
+      const rawStatus = (r as any);
+      const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
+      if (!data) return;
+
+      const nextStatus = (data.status as any) || 'pending';
+      progress.value = (data as any).progress ?? null;
+      errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
+
+      const nextVideoUrl = (data as any).videoUrl;
+      const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
+      status.value = nextStatus;
+
+      if (hasVideoUrl) {
+        videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
+        // 拿到视频链接后清理错误，避免 URL/旧错误残留影响展示
+        errorMessage.value = null;
+      } else if (nextStatus === 'succeeded') {
+        // succeeded 但没有 videoUrl：继续等到超时（或后续轮询返回 videoUrl）
+        videoUrls.value = [];
+      }
+
+      syncResultVideoNode();
+
+      const shouldStopByTerminalState =
+        nextStatus === 'failed' || nextStatus === 'canceled';
+      const shouldStopBySuccess =
+        nextStatus === 'succeeded' && hasVideoUrl;
+
+      // succeeds：必须 videoUrl 回来才算真正回显成功
+      if (shouldStopBySuccess || shouldStopByTerminalState) {
+        saveWorkflowImmediately();
+
+        if (shouldStopBySuccess && status.value === 'succeeded' && videoUrls.value.length > 0) {
+          if (!silent) notifyVideoGen(true, 'Seedance 视频任务已完成。');
+        } else if (shouldStopByTerminalState) {
+          const msg =
+            nextStatus === 'canceled'
+              ? errorMessage.value || '视频任务已取消'
+              : errorMessage.value || '视频生成失败';
+          if (!silent) notifyVideoGen(false, msg);
+        }
+
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        return;
+      }
+
+      // 防御：最多等待 60 分钟仍未拿到 videoUrl，则强制失败，避免节点卡住
+      const elapsedMs = Date.now() - seedanceStartTs;
+      if (!hasVideoUrl && elapsedMs >= SEEDANCE_POLL_MAX_WAIT_MS) {
+        status.value = 'failed';
+        errorMessage.value = '任务已完成但未返回视频链接，已超时放弃回显';
+        videoUrls.value = [];
+        syncResultVideoNode();
+        saveWorkflowImmediately();
+        if (!silent) notifyVideoGen(false, errorMessage.value);
+
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        return;
+      }
+    } catch (err: any) {
+      console.error('[VideoNode] Seedance 轮询失败', err);
+      if (!silent) {
+        notifyVideoGen(
+          false,
+          normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败'
+        );
+      }
+    }
+  }, SEEDANCE_POLL_INTERVAL_MS);
 };
 
 const handleGenerate = async () => {
@@ -826,6 +921,7 @@ const handleGenerate = async () => {
   // 无论后端是否成功，先创建 / 更新一次结果节点，显示“排队中”
   status.value = 'pending';
   progress.value = null;
+  seedanceTaskKey.value = null;
   syncResultVideoNode();
 
   try {
@@ -858,6 +954,7 @@ const handleGenerate = async () => {
           notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
           return;
         }
+        seedanceTaskKey.value = String(taskKeySimple);
         if (pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
@@ -1120,6 +1217,7 @@ const handleGenerate = async () => {
         notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
         return;
       }
+      seedanceTaskKey.value = String(taskKey);
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
@@ -1249,6 +1347,7 @@ const handleGenerate = async () => {
     }
 
     taskId.value = t.id;
+    seedanceTaskKey.value = null;
     status.value = (t.status as any) || 'pending';
     progress.value = t.progress ?? null;
     videoUrls.value = Array.isArray(t.video_urls)
@@ -1332,7 +1431,58 @@ const downloadVideo = (url: string) => {
 };
 
 onMounted(() => {
-  // 如果节点已携带历史任务数据，可在此恢复（预留扩展）
+  // 历史恢复：从关联的 videoResult 节点读取 status/videoUrl/taskKey，并决定是否继续轮询
+  const resultNode = getNodes.value.find(
+    n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
+  );
+  if (!resultNode) return;
+
+  const d = (resultNode.data || {}) as any;
+
+  const savedProvider = d.provider;
+  if (savedProvider === 'kling' || savedProvider === 'seedance') {
+    provider.value = savedProvider;
+  }
+
+  status.value = (typeof d.status === 'string' ? d.status : 'pending') as any;
+  progress.value = typeof d.progress === 'number' ? d.progress : null;
+  errorMessage.value = typeof d.errorMessage === 'string' ? d.errorMessage : null;
+
+  const savedVideoUrl = typeof d.videoUrl === 'string' ? d.videoUrl : '';
+  videoUrls.value = savedVideoUrl ? [savedVideoUrl] : [];
+
+  // 恢复任务标识，用于重新轮询
+  const toFiniteNumber = (v: unknown): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  };
+
+  const savedTaskId = toFiniteNumber(d.taskId ?? d.klingTaskId);
+  taskId.value = provider.value === 'kling' ? savedTaskId : null;
+
+  const savedSeedanceTaskKey =
+    typeof d.seedanceTaskKey === 'string' ? d.seedanceTaskKey : null;
+  seedanceTaskKey.value = provider.value === 'seedance' ? savedSeedanceTaskKey : null;
+
+  // 把恢复到内存的数据同步回 videoResult（补齐 provider/taskKey 字段）
+  syncResultVideoNode();
+
+  const terminal = ['succeeded', 'failed', 'canceled'];
+  if (terminal.includes(String(status.value))) return;
+
+  // 继续轮询未完成的任务
+  if (provider.value === 'kling' && savedTaskId != null) {
+    startPollingKling(savedTaskId, { silent: true });
+    return;
+  }
+
+  if (provider.value === 'seedance' && savedSeedanceTaskKey) {
+    startPollingSeedance(savedSeedanceTaskKey, { silent: true });
+  }
 });
 
 onUnmounted(() => {

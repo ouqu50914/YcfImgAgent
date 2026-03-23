@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>Ace Data Cloud</title>
+    <meta
+      name="description"
+      content="Platform to offer series of API, Proxy, Dataset related to AI Chat, AI Music, AI Videos, AI Images, Bots."
+    />
+    <meta
+      name="keywords"
+      content="AceData,Cloud,AI,API,Service,Midjourney,Suno,Pika,Flux,hCaptcha,reCaptcha,Proxy,ADSL,WeChat,Bot,GitHub,Luma,Kling,Dataset"
+    />
+    <link rel="canonical" href="https://platform.acedata.cloud" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0ea5e9" />
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Ace Data Cloud" />
+    <meta property="og:title" content="Ace Data Cloud" />
+    <meta
+      property="og:description"
+      content="Platform to offer series of API, Proxy, Dataset related to AI Chat, AI Music, AI Videos, AI Images, Bots."
+    />
+    <meta property="og:url" content="https://platform.acedata.cloud" />
+    <meta property="og:image" content="https://cdn.acedata.cloud/logo.png" />
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Ace Data Cloud" />
+    <meta
+      name="twitter:description"
+      content="Platform to offer series of API, Proxy, Dataset related to AI Chat, AI Music, AI Videos, AI Images, Bots."
+    />
+    <meta name="twitter:image" content="https://cdn.acedata.cloud/logo.png" />
+    <meta name="baidu-site-verification" content="codeva-oJhKm8VgSE" />
+    <!-- Preconnect to critical origins -->
+    <link rel="preconnect" href="https://cdn.acedata.cloud" crossorigin />
+    <link rel="dns-prefetch" href="https://api.acedata.cloud" />
+    <!-- Preload critical fonts (Inter Regular + Medium cover most text) -->
+    <link rel="preload" href="/fonts/inter/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter/Inter-Medium.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Preload LCP hero image -->
+    <link rel="preload" href="https://cdn.acedata.cloud/of9u4k.png" as="image" fetchpriority="high" />
+    <script>
+      (() => {
+        try {
+          const normalizeTheme = (value) => {
+            if (!value) return null;
+            const lower = String(value).trim().toLowerCase();
+            if (lower === 'dark') return 'dark';
+            if (lower === 'light') return 'light';
+            return null;
+          };
+
+          const query = new URLSearchParams(window.location.search);
+          const queryThemeRaw = query.get('theme');
+          const cookieMatch = document.cookie.match(/(?:^|;\s*)THEME=([^;]+)/);
+          const cookieThemeRaw = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+          const localThemeRaw = localStorage.getItem('vueuse-color-scheme');
+
+          const queryTheme = normalizeTheme(queryThemeRaw);
+          const cookieTheme = normalizeTheme(cookieThemeRaw);
+          const localTheme = normalizeTheme(localThemeRaw);
+
+          // 优先级：query > cookie > localStorage > OS
+          let resolvedTheme = queryTheme || cookieTheme || localTheme;
+          let resolvedFrom = queryTheme ? 'query' : cookieTheme ? 'cookie' : localTheme ? 'localStorage' : 'os';
+
+          if (!resolvedTheme) {
+            // Fall back to OS preference
+            resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            resolvedFrom = 'os';
+          }
+
+          console.debug('[boot-theme]', {
+            queryTheme: queryThemeRaw,
+            cookieTheme: cookieThemeRaw,
+            localTheme: localThemeRaw,
+            resolvedTheme,
+            resolvedFrom
+          });
+
+          document.documentElement.classList.toggle('dark', resolvedTheme === 'dark');
+          // sync to localStorage so vue-dark-switch polyfill won't override with OS preference
+          try {
+            localStorage.setItem('vueuse-color-scheme', resolvedTheme);
+          } catch (e) {}
+        } catch (e) {
+          console.debug('[boot-theme] failed', e);
+        }
+      })();
+    </script>
+    <script>
+      var _hmt = _hmt || [];
+      (function () {
+        var hm = document.createElement('script');
+        hm.src = 'https://hm.baidu.com/hm.js?2c1e3afe81ccfb66f3bd180b07f78d2f';
+        var s = document.getElementsByTagName('script')[0];
+        s.parentNode.insertBefore(hm, s);
+      })();
+    </script>
+    <style>
+      :root {
+        --boot-bg: #ffffff;
+        --boot-fg: #0b0b0b;
+        --boot-muted: rgba(0, 0, 0, 0.55);
+        --boot-spinner-1: #07eea6;
+        --boot-spinner-2: #29bee4;
+        --boot-spinner-3: #23abff;
+      }
+
+      html.dark {
+        --boot-bg: #000000;
+        --boot-fg: #ffffff;
+        --boot-muted: rgba(255, 255, 255, 0.65);
+      }
+
+      body {
+        margin: 0;
+        background: var(--boot-bg);
+        color: var(--boot-fg);
+      }
+
+      .boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: var(--boot-bg);
+      }
+
+      .boot__content {
+        position: relative;
+        display: grid;
+        justify-items: center;
+        gap: 14px;
+        padding: 24px 18px;
+        z-index: 1;
+      }
+
+      .boot__loader {
+        width: 72px;
+        height: 72px;
+        position: relative;
+        border-radius: 999px;
+      }
+
+      .boot__loader::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: conic-gradient(
+          from 90deg,
+          var(--boot-spinner-1),
+          var(--boot-spinner-2),
+          var(--boot-spinner-3),
+          var(--boot-spinner-1)
+        );
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 9px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 10px), #000 calc(100% - 9px));
+        animation: boot-spin 0.9s linear infinite;
+      }
+
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .boot__title {
+        font-size: 14px;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        opacity: 0.92;
+        -webkit-user-select: none;
+           -moz-user-select: none;
+                user-select: none;
+      }
+
+      .boot__subtitle {
+        font-size: 12px;
+        color: var(--boot-muted);
+        -webkit-user-select: none;
+           -moz-user-select: none;
+                user-select: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .boot__loader::before,
+        .boot__loader::after {
+          animation: none !important;
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DtzN7wTC.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-vue-YMkaymxV.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-element-plus-DBn4r8O-.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-web3-CnoRoFvb.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-axios-NIGUFBhG.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-fortawesome-DnKi6rwR.js">
+    <link rel="stylesheet" crossorigin href="/assets/vendor-web3-C7Mv1uIa.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-WkhWTgs7.css">
+  </head>
+  <body>
+    <div id="app">
+      <div class="boot" aria-label="Loading" role="status">
+        <div class="boot__content">
+          <div class="boot__loader" aria-hidden="true"></div>
+          <div class="boot__title">Ace Data Cloud</div>
+          <div class="boot__subtitle">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

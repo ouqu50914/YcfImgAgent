@@ -182,7 +182,7 @@
                 </div>
             </div>
 
-            <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
+            <VueFlow ref="vueFlowRef" v-model:nodes="nodes" v-model:edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
                 :connection-line-style="{ stroke: 'var(--color-primary)', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
                 :snap-to-grid="true" :snap-grid="[15, 15]" :nodes-connectable="true" :edges-updatable="true"
                 :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="!isSpacePressed"
@@ -193,6 +193,7 @@
                 :pan-on-scroll="true" :zoom-on-scroll="true" :zoom-on-double-click="true" :min-zoom="0.2" :max-zoom="4"
                 :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="false"
                 @mousemove="handleCanvasMouseMove"
+                @node-click="onWorkflowNodeClick"
                 @connect="onConnect" @connect-start="handleConnectStart" @connect-end="handleConnectEnd"
                 @pane-contextmenu="handlePaneContextMenu">
                 <Background pattern-color="#2d2e36" :gap="8" />
@@ -294,7 +295,10 @@
         </el-dialog>
 
         <!-- Gemini 聊天面板（包含右侧悬浮开关按钮） -->
-        <WorkflowChatPanel :workflow-context="workflowContextForChat" />
+        <WorkflowChatPanel
+            :workflow-context="workflowContextForChat"
+            :on-apply-prompt-update="applyPromptUpdate"
+        />
     </div>
 </template>
 
@@ -624,6 +628,8 @@ const templateOwnerId = ref<number | null>(null);
 const sourceTemplateIdForTemp = ref<number | null>(null);
 const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
 const canvasWrapperRef = ref<HTMLElement | null>(null);
+/** 用户最近一次单击的节点 id，用于 Gemini 上下文（避免仅依赖 selection 未同步时的误解） */
+const lastClickedNodeIdForChat = ref<string | null>(null);
 /** 当前编辑对应的历史记录 id：从历史打开时设为该 id，首次自动保存后回填，后续保存均覆盖此条 */
 const currentHistoryId = ref<number | null>(null);
 
@@ -754,24 +760,243 @@ const workflowPersistenceStore: WorkflowPersistenceStore = {
 
 provide<WorkflowPersistenceStore>('workflowPersistence', workflowPersistenceStore);
 
-// 提供给 Gemini 聊天的工作流上下文（精简版）
+function isLikelyMediaUrlString(raw: string): boolean {
+    const s = raw.trim();
+    if (!s || s.length > 4096) return false;
+    if (s.includes('\n')) return false;
+    const lower = s.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) return true;
+    if (lower.startsWith('/uploads/') || lower.startsWith('uploads/')) return true;
+    if (lower.startsWith('asset://')) return true;
+    return false;
+}
+
+/** 从节点 data 提取图片/视频/音频可访问 URL，供 Gemini 多模态与上下文 */
+function collectMediaFromSelectedNode(node: { type?: string; data?: any }): {
+    imageUrls: string[];
+    videoUrls: string[];
+    audioUrls: string[];
+} {
+    const imageUrls = new Set<string>();
+    const videoUrls = new Set<string>();
+    const audioUrls = new Set<string>();
+    const d = node?.data;
+    const type = node?.type;
+
+    const addImg = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) imageUrls.add(abs);
+    };
+    const addVid = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) videoUrls.add(abs);
+    };
+    const addAud = (u: unknown) => {
+        if (typeof u !== 'string' || !isLikelyMediaUrlString(u)) return;
+        const abs = getUploadUrl(u);
+        if (abs) audioUrls.add(abs);
+    };
+
+    if (!d || typeof d !== 'object') {
+        return { imageUrls: [], videoUrls: [], audioUrls: [] };
+    }
+
+    addImg(d.imageUrl);
+    addImg(d.originalImageUrl);
+    addImg(d.image_url);
+    if (Array.isArray(d.imageUrls)) {
+        for (const u of d.imageUrls) addImg(u);
+    }
+
+    addVid(d.videoUrl);
+    if (Array.isArray(d.video_urls)) {
+        for (const u of d.video_urls) addVid(u);
+    }
+    if (Array.isArray(d.videoUrls)) {
+        for (const u of d.videoUrls) addVid(u);
+    }
+
+    if (type === 'videoRef') {
+        addVid(d.url);
+    } else if (type === 'videoResult') {
+        addVid(d.videoUrl);
+    } else if (type === 'audioRef') {
+        addAud(d.url);
+    }
+
+    if (Array.isArray(d.layers)) {
+        for (const layer of d.layers) {
+            if (layer && typeof layer === 'object' && typeof (layer as { url?: string }).url === 'string') {
+                addImg((layer as { url: string }).url);
+            }
+        }
+    }
+
+    return {
+        imageUrls: [...imageUrls],
+        videoUrls: [...videoUrls],
+        audioUrls: [...audioUrls],
+    };
+}
+
+function onWorkflowNodeClick(evt: { node?: { id?: string } }) {
+    const node = evt?.node;
+    if (node?.id != null) {
+        lastClickedNodeIdForChat.value = String(node.id);
+    }
+}
+
+/**
+ * 收集指向某「视频生成」节点的 prompt 节点文案（与 VideoNode 内连线解析一致：按边顺序取到的第一个为主）。
+ */
+function resolvePromptTextsForVideoNode(
+    videoNodeId: string,
+    nodes: { id: string; type?: string; data?: any }[],
+    edges: { source: string; target: string }[],
+): { primary?: string; primaryNodeId?: string; all: string[] } {
+    const texts: string[] = [];
+    const nodeIds: string[] = [];
+    const targetEdges = edges.filter(e => e.target === videoNodeId);
+    for (const edge of targetEdges) {
+        const sourceNode = nodes.find(n => n.id === edge.source);
+        if (!sourceNode || sourceNode.type !== 'prompt') continue;
+        const raw = (sourceNode.data as any)?.text;
+        if (typeof raw === 'string' && raw.trim()) {
+            texts.push(raw.trim());
+            nodeIds.push(sourceNode.id);
+        }
+    }
+    return { primary: texts[0], primaryNodeId: nodeIds[0], all: texts };
+}
+
+function buildGenerationContextForChat(
+    node: { id: string; type?: string; data?: any },
+    nodes: { id: string; type?: string; data?: any }[],
+    edges: { source: string; target: string }[],
+):
+    | {
+          fromVideoNodeId?: string;
+          connectedPromptText?: string;
+          connectedPromptTexts?: string[];
+          connectedPromptNodeId?: string;
+      }
+    | undefined {
+    const t = node.type;
+    if (t === 'video') {
+        const { primary, primaryNodeId, all } = resolvePromptTextsForVideoNode(node.id, nodes, edges);
+        if (!all.length) return undefined;
+        return {
+            connectedPromptText: primary,
+            connectedPromptTexts: all.length > 1 ? all : undefined,
+            connectedPromptNodeId: primaryNodeId,
+        };
+    }
+    if (t === 'videoResult') {
+        const fromId = (node.data as any)?.fromNodeId as string | undefined;
+        if (!fromId || typeof fromId !== 'string') return undefined;
+        const { primary, primaryNodeId, all } = resolvePromptTextsForVideoNode(fromId, nodes, edges);
+        return {
+            fromVideoNodeId: fromId,
+            connectedPromptText: primary,
+            connectedPromptTexts: all.length ? (all.length > 1 ? all : undefined) : undefined,
+            connectedPromptNodeId: primaryNodeId,
+        };
+    }
+    if (t === 'prompt') {
+        return { connectedPromptNodeId: node.id };
+    }
+    return undefined;
+}
+
+/** 应用 Gemini 建议的提示词修改到指定节点；若节点类型非 prompt 或不存在则返回 false */
+function applyPromptUpdate(nodeId: string, newText: string): boolean {
+    if (!nodeId || typeof newText !== 'string') return false;
+    const current = getNodes.value;
+    const node = current.find(n => n.id === nodeId);
+    if (!node || node.type !== 'prompt') return false;
+    const nextNodes = current.map(n =>
+        n.id === nodeId ? { ...n, data: { ...(n.data || {}), text: newText } } : n,
+    );
+    // 与 v-model:nodes 同步，避免仅 setNodes 时父级 ref 与 Gemini 上下文不一致
+    nodes.value = nextNodes;
+    setNodes(nextNodes);
+    hasPendingChanges.value = true;
+    // 避免 setNodes 后立刻持久化时读取到“旧节点数据”（刷新后看起来未更新）
+    void nextTick().then(() => {
+        persistWorkflow().catch((err: any) => console.error('[applyPromptUpdate] 保存失败:', err));
+    });
+    return true;
+}
+
+/**
+ * 工作流上下文：默认仅携带粗略概要节省 token；
+ * 仅当用户选中节点或最近单击节点时，才携带对应节点的详细信息（media、generationContext、text 等）。
+ */
 const workflowContextForChat = computed(() => {
     const nodes = getNodes.value;
     const edges = getEdges.value;
     const selectedNodes = nodes.filter(node => node.selected);
 
-    return {
+    const nodesByType: Record<string, number> = {};
+    for (const n of nodes) {
+        const t = String(n.type || 'unknown');
+        nodesByType[t] = (nodesByType[t] || 0) + 1;
+    }
+
+    const MAX_BRIEF = 300;
+    const allNodesBrief = nodes.slice(0, MAX_BRIEF).map(n => ({
+        id: n.id,
+        type: n.type || 'unknown',
+    }));
+
+    const lastId = lastClickedNodeIdForChat.value;
+    const lastNode = lastId ? nodes.find(n => n.id === lastId) : undefined;
+    const hasExplicitNode = selectedNodes.length > 0 || !!lastId;
+
+    const base: Record<string, unknown> = {
         historyId: currentHistoryId.value,
         templateId: currentTemplateId.value,
         nodesCount: nodes.length,
         edgesCount: edges.length,
-        selectedNodes: selectedNodes.map(node => ({
-            id: node.id,
-            type: node.type,
-            label: (node.data as any)?.label,
-            text: (node.data as any)?.text,
-        })),
+        nodesByType,
+        allNodesBrief,
+        allNodesTruncated: nodes.length > MAX_BRIEF ? nodes.length - MAX_BRIEF : undefined,
     };
+
+    /** 仅当有选中或最近点击时携带详细信息 */
+    if (hasExplicitNode) {
+        if (selectedNodes.length > 0) {
+            base.selectedNodeIds = selectedNodes.map(n => n.id);
+            base.selectedNodes = selectedNodes.map(node => {
+                const generationContext = buildGenerationContextForChat(node, nodes, edges);
+                return {
+                    id: node.id,
+                    type: node.type,
+                    label: (node.data as any)?.label,
+                    text: (node.data as any)?.text,
+                    media: collectMediaFromSelectedNode(node),
+                    ...(generationContext ? { generationContext } : {}),
+                };
+            });
+        }
+        if (lastId && lastNode) {
+            base.lastClickedNodeId = lastId;
+            base.lastClickedNodeType = lastNode.type || undefined;
+            base.lastClickedGenerationContext = buildGenerationContextForChat(lastNode, nodes, edges);
+            base.lastClickedNode = {
+                id: lastNode.id,
+                type: lastNode.type,
+                label: (lastNode.data as any)?.label,
+                text: (lastNode.data as any)?.text,
+                media: collectMediaFromSelectedNode(lastNode),
+                generationContext: buildGenerationContextForChat(lastNode, nodes, edges),
+            };
+        }
+    }
+
+    return base;
 });
 
 // 截取画布作为封面图，上传后返回 URL；失败返回 null
@@ -2278,9 +2503,13 @@ const handleLoadTemplate = async (template: WorkflowTemplate) => {
         const res: any = await getTemplate(template.id);
         const workflowData = res.data.workflow_data;
 
-        if (workflowData.nodes && workflowData.edges) {
-            setNodes(workflowData.nodes);
-            setEdges(workflowData.edges);
+        const nodeList = Array.isArray(workflowData?.nodes) ? workflowData.nodes : [];
+        const edgeList = Array.isArray(workflowData?.edges) ? workflowData.edges : [];
+        if (nodeList.length > 0 || edgeList.length > 0) {
+            nodes.value = nodeList;
+            edges.value = edgeList;
+            setNodes(nodeList);
+            setEdges(edgeList);
             restoreImageAliasStateFromWorkflow(workflowData);
             ElMessage.success('模板加载成功');
             showLoadDialog.value = false;
@@ -2330,23 +2559,26 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
         const workflowData = res.data.workflow_data;
         const templateIdFromHistory = res.data?.template_id as number | undefined;
 
-        if (workflowData.nodes && workflowData.edges) {
-            setNodes(workflowData.nodes);
-            setEdges(workflowData.edges);
+        const nodeList = Array.isArray(workflowData.nodes) ? workflowData.nodes : [];
+        const edgeList = Array.isArray(workflowData.edges) ? workflowData.edges : [];
+        if (nodeList.length > 0 || edgeList.length > 0) {
+            nodes.value = nodeList;
+            edges.value = edgeList;
+            setNodes(nodeList);
+            setEdges(edgeList);
             restoreImageAliasStateFromWorkflow(workflowData);
             if (templateIdFromHistory != null) {
                 currentTemplateId.value = templateIdFromHistory;
                 const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
                 templateOwnerId.value = myId;
             }
-            // 记住当前编辑的是哪条历史记录，并写入本地存储，便于刷新后自动恢复
             currentHistoryId.value = history.id;
             window.localStorage.setItem('workflow:lastHistoryId', String(history.id));
             ElMessage.success('历史记录恢复成功');
             showHistoryDialog.value = false;
             clearUndoRedoAndPending();
         } else {
-            ElMessage.warning('历史记录数据格式不正确');
+            ElMessage.warning('历史记录数据格式不正确，或节点/边为空');
         }
     } catch (error: any) {
         ElMessage.error(error.message || '恢复历史记录失败');
@@ -2653,9 +2885,13 @@ onMounted(async () => {
                 const res: any = await getHistory(historyId);
                 const workflowData = res.data?.workflow_data;
                 const templateIdFromHistory = res.data?.template_id as number | undefined;
-                if (workflowData?.nodes && workflowData?.edges) {
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                const nodeList = Array.isArray(workflowData?.nodes) ? workflowData.nodes : [];
+                const edgeList = Array.isArray(workflowData?.edges) ? workflowData.edges : [];
+                if (nodeList.length > 0 || edgeList.length > 0) {
+                    nodes.value = nodeList;
+                    edges.value = edgeList;
+                    setNodes(nodeList);
+                    setEdges(edgeList);
                     clearUndoRedoAndPending();
                     window.localStorage.setItem('workflow:lastHistoryId', String(historyId));
                     if (templateIdFromHistory != null) {
@@ -2694,9 +2930,13 @@ onMounted(async () => {
                     sourceTemplateIdForTemp.value = templateId;
                 }
 
-                if (workflowData?.nodes && workflowData?.edges) {
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                const nodeList = Array.isArray(workflowData?.nodes) ? workflowData.nodes : [];
+                const edgeList = Array.isArray(workflowData?.edges) ? workflowData.edges : [];
+                if (nodeList.length > 0 || edgeList.length > 0) {
+                    nodes.value = nodeList;
+                    edges.value = edgeList;
+                    setNodes(nodeList);
+                    setEdges(edgeList);
                     clearUndoRedoAndPending();
                     ElMessage.success('模板加载成功');
                 } else {
@@ -2720,10 +2960,14 @@ onMounted(async () => {
                 const res: any = await getHistory(lastId);
                 const workflowData = res.data?.workflow_data;
                 const templateIdFromHistory = res.data?.template_id as number | undefined;
-                if (workflowData?.nodes && workflowData?.edges) {
+                const nodeList = Array.isArray(workflowData?.nodes) ? workflowData.nodes : [];
+                const edgeList = Array.isArray(workflowData?.edges) ? workflowData.edges : [];
+                if (nodeList.length > 0 || edgeList.length > 0) {
                     currentHistoryId.value = lastId;
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                    nodes.value = nodeList;
+                    edges.value = edgeList;
+                    setNodes(nodeList);
+                    setEdges(edgeList);
                     clearUndoRedoAndPending();
                     if (templateIdFromHistory != null) {
                         currentTemplateId.value = templateIdFromHistory;

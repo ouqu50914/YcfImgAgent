@@ -94,7 +94,7 @@
                 >
                   <div class="message-bubble">
                     <div class="message-content">
-                      {{ msg.content }}
+                      {{ displayMessageContent(msg.content) }}
                     </div>
                     <div class="message-time">
                       {{ formatTime(msg.createdAt) }}
@@ -126,12 +126,12 @@
                 type="textarea"
                 :rows="3"
                 class="chat-input"
-                placeholder="除了输入文案向Gemini提仍和问题，还可以关联工作流基本信息，例如：选中某个节点，询问是做什么的、当前选中了哪些个节点、有什么适合的模板推荐、工作流整体结构说明、优化选中文案提示词等…"
+                placeholder="可向 Gemini 提问；上下文会包含全画布节点类型统计（nodesByType）。请先单击画布上的目标节点再发送，以便识别该节点；也可选中节点后询问含义、连线、模板推荐等…"
                 @keydown.enter.exact.prevent="handleSend"
                 @keydown.enter.shift.prevent="insertNewLine"
               />
               <div class="chat-input-actions">
-                <span class="chat-input-tip">Enter 发送，Shift+Enter 换行 · 可结合当前画布询问节点含义、连线方式、模板推荐等</span>
+                <span class="chat-input-tip">Enter 发送 · 选中视频/提示词节点可分析并获取修改建议，回复「确认」或「应用」可直接更新提示词</span>
                 <el-button
                   type="primary"
                   :loading="loading"
@@ -171,9 +171,81 @@ interface ChatSession {
   messages: ChatMessage[];
 }
 
-const props = defineProps(['workflowContext']);
+/** 用户表达「应用/确认」的多种说法；过窄会导致第二次起用户说「重新应用」等时被误判为普通提问并清空 pending */
+function isApplyConfirmMessage(content: string): boolean {
+    const t = content.trim();
+    if (!t) return false;
+    if (/^(确认|应用|重新应用|再应用|确认应用|应用吧|好|可以|OK|ok|yes|应用此建议|行|中)$/i.test(t)) {
+        return true;
+    }
+    if (t.length > 80) return false;
+    if (/不(要|想|需)|别应用|不要应用|取消/.test(t)) return false;
+    if (/^(帮我)?(应用|确认|更新)|重新应用|再应用|确认应用|应用最新|应用一下|立刻应用|马上应用|立即应用/i.test(t)) {
+        return true;
+    }
+    if (t.length <= 45 && /应用/.test(t) && /(提示词|建议|修改|版本|最新)/.test(t)) {
+        return true;
+    }
+    return false;
+}
+
+function parseApplyPromptTag(content: string): { nodeId: string; newText: string } | null {
+    const all = /\[(WF|MF)_UPDATE_PROMPT\]([\s\S]*?)\[\/\1_UPDATE_PROMPT\]/g;
+    const matches = Array.from(content.matchAll(all));
+    if (!matches.length) return null;
+
+    const parseOne = (rawBlock: string): { nodeId: string; newText: string } | null => {
+        let raw = rawBlock.trim();
+        const fence = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/m);
+        if (fence && fence[1] != null) raw = fence[1].trim();
+
+        // 1) 优先按严格 JSON 解析
+        try {
+            const obj = JSON.parse(raw) as { nodeId?: unknown; newText?: unknown };
+            if (obj && typeof obj.newText === 'string') {
+                let nodeId: string | null = null;
+                if (typeof obj.nodeId === 'string' && obj.nodeId.trim()) nodeId = obj.nodeId.trim();
+                else if (typeof obj.nodeId === 'number' && Number.isFinite(obj.nodeId)) nodeId = String(obj.nodeId);
+                if (nodeId) return { nodeId, newText: obj.newText };
+            }
+        } catch {
+            // ignore, fallback below
+        }
+
+        // 2) 兜底：容忍模型输出非严格 JSON（如引号/逗号细节问题）
+        const nodeIdMatch = raw.match(/["']?nodeId["']?\s*:\s*(?:"([^"]+)"|'([^']+)'|(\d+))/i);
+        const newTextMatch = raw.match(/["']?newText["']?\s*:\s*"([\s\S]*?)"\s*(?:,|}|$)/i)
+            || raw.match(/["']?newText["']?\s*:\s*'([\s\S]*?)'\s*(?:,|}|$)/i);
+        const nodeId = (nodeIdMatch?.[1] || nodeIdMatch?.[2] || nodeIdMatch?.[3] || '').trim();
+        const newText = (newTextMatch?.[1] || '').trim();
+        if (!nodeId || !newText) return null;
+        return { nodeId, newText };
+    };
+
+    // 取最后一个可解析标签，避免模型在正文中回显旧标签时误取第一条
+    for (let i = matches.length - 1; i >= 0; i -= 1) {
+        const block = matches[i]?.[2];
+        if (block == null) continue;
+        const parsed = parseOne(block);
+        if (parsed) return parsed;
+    }
+    return null;
+}
+
+function stripApplyPromptTag(content: string): string {
+    return content
+        .replace(/\[(WF|MF)_UPDATE_PROMPT\]([\s\S]*?)\[\/\1_UPDATE_PROMPT\]/g, '')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+}
+
+const props = defineProps<{
+    workflowContext?: unknown;
+    onApplyPromptUpdate?: (nodeId: string, newText: string) => boolean;
+}>();
 
 const userStore = useUserStore();
+const pendingPromptUpdate = ref<{ nodeId: string; newText: string } | null>(null);
 
 const isOpen = ref(false);
 const sessions = ref<ChatSession[]>([]);
@@ -192,6 +264,8 @@ const storageKey = computed(() => {
   const id = userStore.userInfo?.id ?? 'anonymous';
   return `workflow_gemini_chat_sessions_${id}`;
 });
+
+const displayMessageContent = (content: string) => stripApplyPromptTag(content || '');
 
 const formatTime = (iso: string) => {
   try {
@@ -286,6 +360,7 @@ const createSession = () => {
 
 const setActiveSession = (id: string) => {
   activeSessionId.value = id;
+  pendingPromptUpdate.value = null;
   scrollToBottom();
 };
 
@@ -338,6 +413,39 @@ const handleSend = async () => {
   }
   const session = activeSession.value!;
 
+  if (
+    pendingPromptUpdate.value &&
+    props.onApplyPromptUpdate &&
+    isApplyConfirmMessage(content)
+  ) {
+    const { nodeId, newText } = pendingPromptUpdate.value;
+    const ok = props.onApplyPromptUpdate(nodeId, newText);
+    pendingPromptUpdate.value = null;
+    const now = new Date().toISOString();
+    session.messages.push({
+      id: `m_${Date.now()}_u`,
+      role: 'user',
+      content,
+      createdAt: now,
+    });
+    session.messages.push({
+      id: `m_${Date.now()}_a`,
+      role: 'assistant',
+      content: ok ? '已应用修改，提示词已更新。' : '应用失败，请检查目标节点是否存在且为提示词节点。',
+      createdAt: now,
+    });
+    currentInput.value = '';
+    await scrollToBottom();
+    persistSessions();
+    if (ok) {
+      ElMessage.success('提示词已更新');
+    } else {
+      ElMessage.warning('应用失败');
+    }
+    return;
+  }
+
+  pendingPromptUpdate.value = null;
   const now = new Date().toISOString();
   const userMsg: ChatMessage = {
     id: `m_${Date.now()}_u`,
@@ -398,7 +506,11 @@ const handleSend = async () => {
       await scrollToBottom();
     }
 
-    // 一轮回复结束后，立即强制持久化，避免刷新丢失最后一条内容
+    const parsed = parseApplyPromptTag(assistantMsg.content);
+    if (parsed) {
+      pendingPromptUpdate.value = parsed;
+      assistantMsg.content = stripApplyPromptTag(assistantMsg.content);
+    }
     persistSessions();
   } catch (e: any) {
     const msg = e?.response?.data?.message || e?.message || '发送失败，请稍后重试';

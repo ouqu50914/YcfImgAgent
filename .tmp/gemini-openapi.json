@@ -1,0 +1,1574 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Gemini AI",
+    "version": "1.0.0",
+    "description": "API reference for Gemini AI on Ace Data Cloud."
+  },
+  "servers": [
+    {
+      "url": "https://api.acedata.cloud",
+      "description": "Ace Data Cloud API"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API token from https://platform.acedata.cloud"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/gemini/chat/completions": {
+      "post": {
+        "summary": "Gemini Chat Completions",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "choices",
+                    "created",
+                    "id",
+                    "model",
+                    "object"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "A unique identifier for the chat completion."
+                    },
+                    "model": {
+                      "type": "string",
+                      "description": "The model used for the chat completion."
+                    },
+                    "object": {
+                      "enum": [
+                        "chat.completion"
+                      ],
+                      "type": "string",
+                      "description": "The object type, which is always `chat.completion`."
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "finish_reason",
+                          "index",
+                          "message"
+                        ],
+                        "properties": {
+                          "index": {
+                            "type": "number",
+                            "description": "The index of the choice in the list of choices."
+                          },
+                          "message": {
+                            "type": "object",
+                            "required": [
+                              "role"
+                            ],
+                            "properties": {
+                              "role": {
+                                "enum": [
+                                  "assistant"
+                                ],
+                                "type": "string",
+                                "description": "The role of the author of this message."
+                              },
+                              "content": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "The contents of the message."
+                              },
+                              "tool_calls": {
+                                "type": "array",
+                                "nullable": true,
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "id",
+                                    "type",
+                                    "function"
+                                  ],
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "description": "The ID of the tool call."
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "function"
+                                      ],
+                                      "description": "The type of the tool call. Currently, only `function` is supported."
+                                    },
+                                    "function": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "arguments"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "description": "The name of the function to call."
+                                        },
+                                        "arguments": {
+                                          "type": "string",
+                                          "description": "The arguments to call the function with, as generated by the model in JSON format."
+                                        }
+                                      },
+                                      "description": "The function that the model called."
+                                    }
+                                  }
+                                },
+                                "description": "The tool calls generated by the model, such as function calls."
+                              },
+                              "refusal": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "The refusal message generated by the model."
+                              }
+                            },
+                            "description": "A chat completion message generated by the model."
+                          },
+                          "finish_reason": {
+                            "enum": [
+                              "stop",
+                              "length",
+                              "tool_calls",
+                              "content_filter",
+                              "function_call"
+                            ],
+                            "type": "string",
+                            "description": "The reason the model stopped generating tokens. This will be `stop` if the model hit a natural stop point or a provided stop sequence,\n`length` if the maximum number of tokens specified in the request was reached,\n`content_filter` if content was omitted due to a flag from our content filters,\n`tool_calls` if the model called a tool, or `function_call` (deprecated) if the model called a function.\n"
+                          },
+                          "logprobs": {
+                            "type": "object",
+                            "nullable": true,
+                            "description": "Log probability information for the choice."
+                          }
+                        }
+                      },
+                      "description": "A list of chat completion choices. Can be more than one if `n` is greater than 1."
+                    },
+                    "created": {
+                      "type": "number",
+                      "description": "The Unix timestamp (in seconds) of when the chat completion was created."
+                    },
+                    "system_fingerprint": {
+                      "type": "string",
+                      "description": "This fingerprint represents the backend configuration that the model runs with.\n\nCan be used in conjunction with the `seed` request parameter to understand when backend changes have been made that might impact determinism.\n"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "required": [
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "total_tokens"
+                      ],
+                      "properties": {
+                        "prompt_tokens": {
+                          "type": "integer",
+                          "description": "Number of tokens in the prompt."
+                        },
+                        "completion_tokens": {
+                          "type": "integer",
+                          "description": "Number of tokens in the generated completion."
+                        },
+                        "total_tokens": {
+                          "type": "integer",
+                          "description": "Total number of tokens used in the request (prompt + completion)."
+                        }
+                      },
+                      "description": "Usage statistics for the completion request."
+                    }
+                  },
+                  "description": "Represents a chat completion response returned by model, based on the provided input."
+                }
+              }
+            },
+            "description": "OK, the request was successful."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "example": {
+                        "error": {
+                          "code": "token_mismatched",
+                          "message": "The specified token is not matched with API."
+                        },
+                        "trace_id": "2efa9340-b21b-4e26-9e14-4aac95f343ab"
+                      },
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "example": "token_mismatched",
+                              "description": "Error code of the response."
+                            },
+                            "message": {
+                              "type": "string",
+                              "example": "The specified token is not matched with API.",
+                              "description": "Error message of the response."
+                            }
+                          }
+                        },
+                        "trace_id": {
+                          "type": "string",
+                          "description": "The trace id of this request."
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "example": {
+                        "error": {
+                          "code": "api_not_implemented",
+                          "message": "The API is not implemented."
+                        },
+                        "trace_id": "2efa9340-b21b-4e26-9e14-4aac95f343ab"
+                      },
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "example": "api_not_implemented",
+                              "description": "Error code of the response."
+                            },
+                            "message": {
+                              "type": "string",
+                              "example": "The API is not implemented.",
+                              "description": "Error message of the response."
+                            }
+                          }
+                        },
+                        "trace_id": {
+                          "type": "string",
+                          "description": "The trace id of this request."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad request, possibly due to missing or invalid parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "example": {
+                        "error": {
+                          "code": "invalid_token",
+                          "message": "The specified token is invalid or wrong."
+                        },
+                        "trace_id": "2efa9340-b21b-4e26-9e14-4aac95f343ab"
+                      },
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "example": "invalid_token",
+                              "description": "Error code of the response."
+                            },
+                            "message": {
+                              "type": "string",
+                              "example": "The specified token is invalid or wrong.",
+                              "description": "Error message of the response."
+                            }
+                          }
+                        },
+                        "trace_id": {
+                          "type": "string",
+                          "description": "The trace id of this request."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized, invalid or missing authorization token."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "example": {
+                        "error": {
+                          "code": "too_many_requests",
+                          "message": "You have exceeded the rate limit."
+                        },
+                        "trace_id": "2efa9340-b21b-4e26-9e14-4aac95f343ab"
+                      },
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "example": "too_many_requests",
+                              "description": "Error code of the response."
+                            },
+                            "message": {
+                              "type": "string",
+                              "example": "You have exceeded the rate limit.",
+                              "description": "Error message of the response."
+                            }
+                          }
+                        },
+                        "trace_id": {
+                          "type": "string",
+                          "description": "The trace id of this request."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Too many requests, you have exceeded the rate limit."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "example": {
+                        "error": {
+                          "code": "api_error",
+                          "message": "Internal server error."
+                        },
+                        "trace_id": "2efa9340-b21b-4e26-9e14-4aac95f343ab"
+                      },
+                      "properties": {
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "example": "api_error",
+                              "description": "Error code of the response."
+                            },
+                            "message": {
+                              "type": "string",
+                              "example": "Internal server error.",
+                              "description": "Error message of the response."
+                            }
+                          }
+                        },
+                        "trace_id": {
+                          "type": "string",
+                          "description": "The trace id of this request."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Internal server error, something went wrong on the server."
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "accept",
+            "schema": {
+              "enum": [
+                "application/json"
+              ],
+              "type": "string"
+            },
+            "required": false,
+            "description": "Specifies the format of the response from the server."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model",
+                  "messages"
+                ],
+                "properties": {
+                  "n": {
+                    "type": "number",
+                    "default": 1,
+                    "example": 1,
+                    "maximum": 128,
+                    "minimum": 1,
+                    "nullable": true,
+                    "description": "How many chat completion choices to generate for each input message."
+                  },
+                  "model": {
+                    "enum": [
+                      "gemini-3.1-pro",
+                      "gemini-3.0-pro",
+                      "gemini-3-flash-preview",
+                      "gemini-2.5-pro",
+                      "gemini-2.5-flash",
+                      "gemini-2.0-flash"
+                    ],
+                    "type": "string",
+                    "example": "gemini-3.0-pro",
+                    "description": "ID of the model to use."
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "default": false,
+                    "nullable": true,
+                    "description": "If set, partial message deltas will be sent, like in ChatGPT."
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role"
+                      ],
+                      "properties": {
+                        "role": {
+                          "enum": [
+                            "user",
+                            "assistant",
+                            "system",
+                            "developer"
+                          ],
+                          "type": "string",
+                          "description": "The role of this message."
+                        },
+                        "content": {
+                          "oneOf": [
+                            {
+                              "type": "string",
+                              "description": "The text contents of the message."
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "text"
+                                        ],
+                                        "description": "The type of the content part."
+                                      },
+                                      "text": {
+                                        "type": "string",
+                                        "description": "The text content."
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "type",
+                                      "image_url"
+                                    ],
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": [
+                                          "image_url"
+                                        ],
+                                        "description": "The type of the content part."
+                                      },
+                                      "image_url": {
+                                        "type": "object",
+                                        "required": [
+                                          "url"
+                                        ],
+                                        "properties": {
+                                          "url": {
+                                            "type": "string",
+                                            "description": "Either a URL of the image or the base64 encoded image data."
+                                          },
+                                          "detail": {
+                                            "type": "string",
+                                            "enum": [
+                                              "auto",
+                                              "low",
+                                              "high"
+                                            ],
+                                            "default": "auto",
+                                            "description": "Specifies the detail level of the image."
+                                          }
+                                        },
+                                        "description": "The image URL or base64 encoded image data."
+                                      }
+                                    }
+                                  }
+                                ]
+                              },
+                              "minItems": 1,
+                              "description": "An array of content parts with a defined type. Can contain text and image_url inputs."
+                            }
+                          ],
+                          "description": "The contents of the message. Can be a string for text-only messages, or an array of content parts for multimodal messages (text and image_url)."
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "An optional name for the participant. Provides the model information to differentiate between participants of the same role."
+                        }
+                      }
+                    },
+                    "minItems": 1,
+                    "description": "A list of messages comprising the conversation so far."
+                  },
+                  "max_tokens": {
+                    "type": "number",
+                    "nullable": true,
+                    "description": "The maximum number of tokens that can be generated in the chat completion."
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "default": 1,
+                    "example": 1,
+                    "maximum": 2,
+                    "minimum": 0,
+                    "nullable": true,
+                    "description": "What sampling temperature to use, between 0 and 2. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic."
+                  },
+                  "response_format": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "text",
+                          "json_object"
+                        ],
+                        "type": "string",
+                        "default": "text",
+                        "example": "json_object",
+                        "description": "Must be one of `text` or `json_object`."
+                      }
+                    },
+                    "description": "An object specifying the format that the model must output. If not specified, the model will output text."
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1beta/models/{model}:generateContent": {
+      "post": {
+        "summary": "Gemini Generate Content",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash-lite",
+                "gemini-3-flash-preview",
+                "gemini-3.1-pro",
+                "gemini-2.0-flash"
+              ],
+              "example": "gemini-2.5-flash"
+            },
+            "description": "The model to use for content generation. Format: model name (without `models/` prefix)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "contents": {
+                    "type": "array",
+                    "description": "The content of the current conversation with the model. For single-turn queries, this is a single instance. For multi-turn queries (chat), this is a repeated field that contains conversation history and the latest request.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "parts"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "model"
+                          ],
+                          "description": "The role of the content producer. Must be 'user' or 'model'."
+                        },
+                        "parts": {
+                          "type": "array",
+                          "description": "Ordered parts that constitute a single message.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string",
+                                "description": "Text content."
+                              },
+                              "inlineData": {
+                                "type": "object",
+                                "description": "Inline media bytes.",
+                                "properties": {
+                                  "mimeType": {
+                                    "type": "string",
+                                    "description": "The IANA standard MIME type of the source data."
+                                  },
+                                  "data": {
+                                    "type": "string",
+                                    "description": "Base64-encoded bytes of the media."
+                                  }
+                                }
+                              },
+                              "fileData": {
+                                "type": "object",
+                                "description": "URI-based data.",
+                                "properties": {
+                                  "mimeType": {
+                                    "type": "string"
+                                  },
+                                  "fileUri": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "functionCall": {
+                                "type": "object",
+                                "description": "A predicted FunctionCall returned from the model.",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "args": {
+                                    "type": "object"
+                                  }
+                                }
+                              },
+                              "functionResponse": {
+                                "type": "object",
+                                "description": "The result output of a FunctionCall.",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "response": {
+                                    "type": "object"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "systemInstruction": {
+                    "type": "object",
+                    "description": "Developer set system instruction.",
+                    "properties": {
+                      "parts": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "generationConfig": {
+                    "type": "object",
+                    "description": "Configuration options for model generation and outputs.",
+                    "properties": {
+                      "stopSequences": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Character sequences that will stop output generation (up to 5)."
+                      },
+                      "responseMimeType": {
+                        "type": "string",
+                        "description": "MIME type of the generated candidate text. Supported: text/plain, application/json, text/x.enum.",
+                        "enum": [
+                          "text/plain",
+                          "application/json",
+                          "text/x.enum"
+                        ]
+                      },
+                      "responseSchema": {
+                        "type": "object",
+                        "description": "Output schema for generated candidate text (OpenAPI schema subset). Used with application/json responseMimeType."
+                      },
+                      "responseModalities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "TEXT",
+                            "IMAGE",
+                            "AUDIO"
+                          ]
+                        },
+                        "description": "Set of response modalities the model can return."
+                      },
+                      "candidateCount": {
+                        "type": "integer",
+                        "description": "Number of generated responses to return."
+                      },
+                      "maxOutputTokens": {
+                        "type": "integer",
+                        "description": "Maximum number of tokens in the response."
+                      },
+                      "temperature": {
+                        "type": "number",
+                        "description": "Controls randomness of the output. Range: [0.0, 2.0].",
+                        "minimum": 0,
+                        "maximum": 2
+                      },
+                      "topP": {
+                        "type": "number",
+                        "description": "Maximum cumulative probability of tokens to consider when sampling."
+                      },
+                      "topK": {
+                        "type": "integer",
+                        "description": "Maximum number of tokens to consider when sampling."
+                      },
+                      "seed": {
+                        "type": "integer",
+                        "description": "Seed for deterministic generation."
+                      },
+                      "presencePenalty": {
+                        "type": "number",
+                        "description": "Presence penalty applied to tokens already in the response."
+                      },
+                      "frequencyPenalty": {
+                        "type": "number",
+                        "description": "Frequency penalty applied proportionally to token usage count."
+                      },
+                      "thinkingConfig": {
+                        "type": "object",
+                        "description": "Configuration for thinking features (supported models only).",
+                        "properties": {
+                          "includeThoughts": {
+                            "type": "boolean",
+                            "description": "Whether to include thoughts in the response."
+                          },
+                          "thinkingBudget": {
+                            "type": "integer",
+                            "description": "Number of thought tokens the model should generate."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "tools": {
+                    "type": "array",
+                    "description": "A list of Tools the model may use to generate the next response.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "functionDeclarations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "parameters": {
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          }
+                        },
+                        "codeExecution": {
+                          "type": "object",
+                          "description": "Tool that executes code generated by the model."
+                        },
+                        "googleSearch": {
+                          "type": "object",
+                          "description": "Tool for Google Search grounding."
+                        },
+                        "urlContext": {
+                          "type": "object",
+                          "description": "Tool for URL context retrieval."
+                        }
+                      }
+                    }
+                  },
+                  "toolConfig": {
+                    "type": "object",
+                    "description": "Tool configuration for the request.",
+                    "properties": {
+                      "functionCallingConfig": {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "MODE_UNSPECIFIED",
+                              "AUTO",
+                              "ANY",
+                              "NONE"
+                            ]
+                          },
+                          "allowedFunctionNames": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "safetySettings": {
+                    "type": "array",
+                    "description": "Safety settings to block unsafe content.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "HARM_CATEGORY_HARASSMENT",
+                            "HARM_CATEGORY_HATE_SPEECH",
+                            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            "HARM_CATEGORY_CIVIC_INTEGRITY"
+                          ]
+                        },
+                        "threshold": {
+                          "type": "string",
+                          "enum": [
+                            "BLOCK_NONE",
+                            "BLOCK_ONLY_HIGH",
+                            "BLOCK_MEDIUM_AND_ABOVE",
+                            "BLOCK_LOW_AND_ABOVE",
+                            "OFF"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "cachedContent": {
+                    "type": "string",
+                    "description": "The name of the cached content to use. Format: cachedContents/{cachedContent}"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "content": {
+                            "type": "object",
+                            "properties": {
+                              "parts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "thought": {
+                                      "type": "boolean",
+                                      "description": "Whether this part is a thinking/reasoning step."
+                                    }
+                                  }
+                                }
+                              },
+                              "role": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "finishReason": {
+                            "type": "string",
+                            "enum": [
+                              "STOP",
+                              "MAX_TOKENS",
+                              "SAFETY",
+                              "RECITATION",
+                              "LANGUAGE",
+                              "OTHER",
+                              "BLOCKLIST",
+                              "PROHIBITED_CONTENT",
+                              "SPII",
+                              "MALFORMED_FUNCTION_CALL"
+                            ]
+                          },
+                          "index": {
+                            "type": "integer"
+                          },
+                          "safetyRatings": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "category": {
+                                  "type": "string"
+                                },
+                                "probability": {
+                                  "type": "string"
+                                },
+                                "blocked": {
+                                  "type": "boolean"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "usageMetadata": {
+                      "type": "object",
+                      "properties": {
+                        "promptTokenCount": {
+                          "type": "integer"
+                        },
+                        "candidatesTokenCount": {
+                          "type": "integer"
+                        },
+                        "totalTokenCount": {
+                          "type": "integer"
+                        },
+                        "thoughtsTokenCount": {
+                          "type": "integer"
+                        },
+                        "promptTokensDetails": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "modality": {
+                                "type": "string"
+                              },
+                              "tokenCount": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "candidatesTokensDetails": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "modality": {
+                                "type": "string"
+                              },
+                              "tokenCount": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "modelVersion": {
+                      "type": "string"
+                    },
+                    "responseId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1beta/models/{model}:streamGenerateContent": {
+      "post": {
+        "summary": "Gemini Stream Generate Content",
+        "description": "Generates a streamed response from the model given an input GenerateContentRequest. Use query parameter `alt=sse` for server-sent events streaming.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash-lite",
+                "gemini-3-flash-preview",
+                "gemini-3.1-pro",
+                "gemini-2.0-flash"
+              ],
+              "example": "gemini-2.5-flash"
+            },
+            "description": "The model to use for content generation."
+          },
+          {
+            "name": "alt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sse"
+              ]
+            },
+            "description": "Set to 'sse' for server-sent events streaming format."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "contents": {
+                    "type": "array",
+                    "description": "The content of the current conversation with the model. For single-turn queries, this is a single instance. For multi-turn queries (chat), this is a repeated field that contains conversation history and the latest request.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "parts"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "model"
+                          ],
+                          "description": "The role of the content producer. Must be 'user' or 'model'."
+                        },
+                        "parts": {
+                          "type": "array",
+                          "description": "Ordered parts that constitute a single message.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string",
+                                "description": "Text content."
+                              },
+                              "inlineData": {
+                                "type": "object",
+                                "description": "Inline media bytes.",
+                                "properties": {
+                                  "mimeType": {
+                                    "type": "string",
+                                    "description": "The IANA standard MIME type of the source data."
+                                  },
+                                  "data": {
+                                    "type": "string",
+                                    "description": "Base64-encoded bytes of the media."
+                                  }
+                                }
+                              },
+                              "fileData": {
+                                "type": "object",
+                                "description": "URI-based data.",
+                                "properties": {
+                                  "mimeType": {
+                                    "type": "string"
+                                  },
+                                  "fileUri": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "functionCall": {
+                                "type": "object",
+                                "description": "A predicted FunctionCall returned from the model.",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "args": {
+                                    "type": "object"
+                                  }
+                                }
+                              },
+                              "functionResponse": {
+                                "type": "object",
+                                "description": "The result output of a FunctionCall.",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "response": {
+                                    "type": "object"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "systemInstruction": {
+                    "type": "object",
+                    "description": "Developer set system instruction.",
+                    "properties": {
+                      "parts": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "generationConfig": {
+                    "type": "object",
+                    "description": "Configuration options for model generation and outputs.",
+                    "properties": {
+                      "stopSequences": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Character sequences that will stop output generation (up to 5)."
+                      },
+                      "responseMimeType": {
+                        "type": "string",
+                        "description": "MIME type of the generated candidate text. Supported: text/plain, application/json, text/x.enum.",
+                        "enum": [
+                          "text/plain",
+                          "application/json",
+                          "text/x.enum"
+                        ]
+                      },
+                      "responseSchema": {
+                        "type": "object",
+                        "description": "Output schema for generated candidate text (OpenAPI schema subset). Used with application/json responseMimeType."
+                      },
+                      "responseModalities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "TEXT",
+                            "IMAGE",
+                            "AUDIO"
+                          ]
+                        },
+                        "description": "Set of response modalities the model can return."
+                      },
+                      "candidateCount": {
+                        "type": "integer",
+                        "description": "Number of generated responses to return."
+                      },
+                      "maxOutputTokens": {
+                        "type": "integer",
+                        "description": "Maximum number of tokens in the response."
+                      },
+                      "temperature": {
+                        "type": "number",
+                        "description": "Controls randomness of the output. Range: [0.0, 2.0].",
+                        "minimum": 0,
+                        "maximum": 2
+                      },
+                      "topP": {
+                        "type": "number",
+                        "description": "Maximum cumulative probability of tokens to consider when sampling."
+                      },
+                      "topK": {
+                        "type": "integer",
+                        "description": "Maximum number of tokens to consider when sampling."
+                      },
+                      "seed": {
+                        "type": "integer",
+                        "description": "Seed for deterministic generation."
+                      },
+                      "presencePenalty": {
+                        "type": "number",
+                        "description": "Presence penalty applied to tokens already in the response."
+                      },
+                      "frequencyPenalty": {
+                        "type": "number",
+                        "description": "Frequency penalty applied proportionally to token usage count."
+                      },
+                      "thinkingConfig": {
+                        "type": "object",
+                        "description": "Configuration for thinking features (supported models only).",
+                        "properties": {
+                          "includeThoughts": {
+                            "type": "boolean",
+                            "description": "Whether to include thoughts in the response."
+                          },
+                          "thinkingBudget": {
+                            "type": "integer",
+                            "description": "Number of thought tokens the model should generate."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "tools": {
+                    "type": "array",
+                    "description": "A list of Tools the model may use to generate the next response.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "functionDeclarations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "parameters": {
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          }
+                        },
+                        "codeExecution": {
+                          "type": "object",
+                          "description": "Tool that executes code generated by the model."
+                        },
+                        "googleSearch": {
+                          "type": "object",
+                          "description": "Tool for Google Search grounding."
+                        },
+                        "urlContext": {
+                          "type": "object",
+                          "description": "Tool for URL context retrieval."
+                        }
+                      }
+                    }
+                  },
+                  "toolConfig": {
+                    "type": "object",
+                    "description": "Tool configuration for the request.",
+                    "properties": {
+                      "functionCallingConfig": {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "MODE_UNSPECIFIED",
+                              "AUTO",
+                              "ANY",
+                              "NONE"
+                            ]
+                          },
+                          "allowedFunctionNames": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "safetySettings": {
+                    "type": "array",
+                    "description": "Safety settings to block unsafe content.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "HARM_CATEGORY_HARASSMENT",
+                            "HARM_CATEGORY_HATE_SPEECH",
+                            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            "HARM_CATEGORY_CIVIC_INTEGRITY"
+                          ]
+                        },
+                        "threshold": {
+                          "type": "string",
+                          "enum": [
+                            "BLOCK_NONE",
+                            "BLOCK_ONLY_HIGH",
+                            "BLOCK_MEDIUM_AND_ABOVE",
+                            "BLOCK_LOW_AND_ABOVE",
+                            "OFF"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "cachedContent": {
+                    "type": "string",
+                    "description": "The name of the cached content to use. Format: cachedContents/{cachedContent}"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A stream of GenerateContentResponse objects.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "candidates": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "content": {
+                              "type": "object",
+                              "properties": {
+                                "parts": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "text": {
+                                        "type": "string"
+                                      },
+                                      "thought": {
+                                        "type": "boolean",
+                                        "description": "Whether this part is a thinking/reasoning step."
+                                      }
+                                    }
+                                  }
+                                },
+                                "role": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "finishReason": {
+                              "type": "string",
+                              "enum": [
+                                "STOP",
+                                "MAX_TOKENS",
+                                "SAFETY",
+                                "RECITATION",
+                                "LANGUAGE",
+                                "OTHER",
+                                "BLOCKLIST",
+                                "PROHIBITED_CONTENT",
+                                "SPII",
+                                "MALFORMED_FUNCTION_CALL"
+                              ]
+                            },
+                            "index": {
+                              "type": "integer"
+                            },
+                            "safetyRatings": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "category": {
+                                    "type": "string"
+                                  },
+                                  "probability": {
+                                    "type": "string"
+                                  },
+                                  "blocked": {
+                                    "type": "boolean"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "usageMetadata": {
+                        "type": "object",
+                        "properties": {
+                          "promptTokenCount": {
+                            "type": "integer"
+                          },
+                          "candidatesTokenCount": {
+                            "type": "integer"
+                          },
+                          "totalTokenCount": {
+                            "type": "integer"
+                          },
+                          "thoughtsTokenCount": {
+                            "type": "integer"
+                          },
+                          "promptTokensDetails": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "modality": {
+                                  "type": "string"
+                                },
+                                "tokenCount": {
+                                  "type": "integer"
+                                }
+                              }
+                            }
+                          },
+                          "candidatesTokensDetails": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "modality": {
+                                  "type": "string"
+                                },
+                                "tokenCount": {
+                                  "type": "integer"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "modelVersion": {
+                        "type": "string"
+                      },
+                      "responseId": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Gemini AI"
+    }
+  ]
+}

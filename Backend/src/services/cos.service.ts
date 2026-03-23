@@ -27,6 +27,34 @@ function getClient(): COS | null {
     return cosClient;
 }
 
+function inferCosDomain(): string {
+    // COS_DOMAIN 在 .env 里可能被注释掉；但系统里 ALLOWED_ORIGINS 经常包含自定义域名（如 https://artycf.com）
+    // 这里做一个最保守的推断：若能在 ALLOWED_ORIGINS 中找到 arytcf.com/artycf.com，则优先使用静态域名 static.artycf.com
+    const raw = process.env.ALLOWED_ORIGINS || "";
+    if (!raw.trim()) return "";
+    const hosts = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => {
+            try {
+                return new URL(s).hostname;
+            } catch {
+                return s;
+            }
+        })
+        .filter(Boolean);
+    const matched = hosts.find((h) => h === "artycf.com" || h.endsWith(".artycf.com"));
+    if (!matched) return "";
+    // 你的静态视频 CDN 域名是 static.artycf.com
+    return "static.artycf.com";
+}
+
+function resolveDomainForSignedUrl(): string {
+    if (DOMAIN && DOMAIN.trim()) return DOMAIN.trim();
+    return inferCosDomain();
+}
+
 /**
  * 是否启用 COS（配置完整且 USE_COS=true）
  */
@@ -100,7 +128,8 @@ export function getSignedUrl(key: string, expiresInSeconds: number = 3600): Prom
             Sign: true,
             Expires: expiresInSeconds,
         };
-        if (DOMAIN) options.Domain = DOMAIN;
+        const domain = resolveDomainForSignedUrl();
+        if (domain) options.Domain = domain;
         client.getObjectUrl(options as any, (err: unknown, data: { Url?: string }) => {
             if (err) return reject(err);
             resolve(data?.Url || "");
