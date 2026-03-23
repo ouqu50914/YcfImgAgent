@@ -637,6 +637,14 @@ const showFullscreen = ref(false);
 const fullscreenUrl = ref<string | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+const clearPollTimer = () => {
+  if (!pollTimer) return;
+  // pollTimer 既可能来自 setInterval，也可能来自 setTimeout（浏览器环境下返回值是同类型 id）
+  clearInterval(pollTimer as any);
+  clearTimeout(pollTimer as any);
+  pollTimer = null;
+};
+
 function getSeedanceCreditsPerSecond(): number {
   // 与后端默认保持一致：20 积分 / 秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
   const raw = (import.meta as any)?.env?.VITE_SEEDANCE_CREDITS_PER_SECOND;
@@ -858,19 +866,36 @@ const handleGenerate = async () => {
           notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
           return;
         }
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-        const SEEDANCE_POLL_INTERVAL_MS = 8000;
+        clearPollTimer();
+        const SEEDANCE_POLL_BASE_INTERVAL_MS = 8000;
         const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
         const seedanceStartTs = Date.now();
-        pollTimer = setInterval(async () => {
+        let currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+        let pollingActive = true;
+
+        const stopPolling = () => {
+          pollingActive = false;
+          clearPollTimer();
+        };
+
+        const scheduleNext = (delayMs: number) => {
+          if (!pollingActive) return;
+          clearPollTimer();
+          pollTimer = setTimeout(() => void loop(), delayMs) as any;
+        };
+
+        const loop = async () => {
+          if (!pollingActive) return;
           try {
             const r = await getSeedanceGenerationStatus(taskKeySimple);
             const rawStatus = (r as any);
             const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
-            if (!data) return;
+            if (!data) {
+              currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+              scheduleNext(currentIntervalMs);
+              return;
+            }
+
             const nextStatus = (data.status as any) || 'pending';
             progress.value = (data as any).progress ?? null;
             errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
@@ -878,6 +903,7 @@ const handleGenerate = async () => {
             const nextVideoUrl = (data as any).videoUrl;
             const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
             status.value = nextStatus;
+
             if (hasVideoUrl) {
               videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
               // 拿到视频链接后清理错误，避免 URL/旧错误残留影响展示
@@ -889,10 +915,8 @@ const handleGenerate = async () => {
 
             syncResultVideoNode();
 
-            const shouldStopByTerminalState =
-              nextStatus === 'failed' || nextStatus === 'canceled';
-            const shouldStopBySuccess =
-              nextStatus === 'succeeded' && hasVideoUrl;
+            const shouldStopByTerminalState = nextStatus === 'failed' || nextStatus === 'canceled';
+            const shouldStopBySuccess = nextStatus === 'succeeded' && hasVideoUrl;
 
             // succeeds：必须 videoUrl 回来才算真正回显成功
             if (shouldStopBySuccess || shouldStopByTerminalState) {
@@ -908,10 +932,7 @@ const handleGenerate = async () => {
                 notifyVideoGen(false, msg);
               }
 
-              if (pollTimer) {
-                clearInterval(pollTimer);
-                pollTimer = null;
-              }
+              stopPolling();
               return;
             }
 
@@ -924,20 +945,54 @@ const handleGenerate = async () => {
               syncResultVideoNode();
               saveWorkflowImmediately();
               notifyVideoGen(false, errorMessage.value);
-              if (pollTimer) {
-                clearInterval(pollTimer);
-                pollTimer = null;
-              }
+              stopPolling();
               return;
             }
+
+            currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+            scheduleNext(currentIntervalMs);
           } catch (err: any) {
-            console.error('[VideoNode] Seedance 轮询失败', err);
+            const statusCode: number | undefined = err?.response?.status ?? err?.status;
+            const retryAfterSeconds: number | undefined =
+              typeof err?.response?.data?.retryAfter === 'number' ? err.response.data.retryAfter : undefined;
+
+            // 打出更完整的信息，便于定位“到底是谁限流”（后端 or 上游）
+            console.error('[VideoNode] Seedance 轮询失败', {
+              taskId: taskKeySimple,
+              statusCode,
+              retryAfterSeconds,
+              responseData: err?.response?.data,
+              message: err?.message,
+            });
+
+            if (statusCode === 429) {
+              // 429：退避，避免一直撞限流导致错过成功回显
+              const waitMsFromServer =
+                typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0
+                  ? retryAfterSeconds * 1000
+                  : null;
+              currentIntervalMs =
+                waitMsFromServer != null
+                  ? Math.max(waitMsFromServer, SEEDANCE_POLL_BASE_INTERVAL_MS)
+                  : Math.min(Math.round(currentIntervalMs * 1.8), 120000);
+
+              // 429 时不重复 notify，避免刷屏；请求会在退避后继续
+              scheduleNext(currentIntervalMs);
+              return;
+            }
+
+            // 其它错误：仍继续轮询，但把间隔拉长一点，避免抖动
+            currentIntervalMs = Math.min(Math.round(currentIntervalMs * 1.5), 60000);
             notifyVideoGen(
               false,
               normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败'
             );
+            scheduleNext(currentIntervalMs);
           }
-        }, SEEDANCE_POLL_INTERVAL_MS);
+        };
+
+        // 先立即拉一次（或你也可以改成 base interval 再拉）
+        scheduleNext(SEEDANCE_POLL_BASE_INTERVAL_MS);
         ElMessage.success('Seedance 任务已创建，开始生成…');
         return;
       }
@@ -1120,19 +1175,35 @@ const handleGenerate = async () => {
         notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
         return;
       }
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-      const SEEDANCE_POLL_INTERVAL_MS = 8000;
+      clearPollTimer();
+      const SEEDANCE_POLL_BASE_INTERVAL_MS = 8000;
       const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
       const seedanceStartTs = Date.now();
-      pollTimer = setInterval(async () => {
+      let currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+      let pollingActive = true;
+
+      const stopPolling = () => {
+        pollingActive = false;
+        clearPollTimer();
+      };
+
+      const scheduleNext = (delayMs: number) => {
+        if (!pollingActive) return;
+        clearPollTimer();
+        pollTimer = setTimeout(() => void loop(), delayMs) as any;
+      };
+
+      const loop = async () => {
+        if (!pollingActive) return;
         try {
           const r = await getSeedanceGenerationStatus(taskKey);
           const rawStatus = (r as any);
           const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
-          if (!data) return;
+          if (!data) {
+            currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+            scheduleNext(currentIntervalMs);
+            return;
+          }
 
           const nextStatus = (data.status as any) || 'pending';
           progress.value = (data as any).progress ?? null;
@@ -1141,6 +1212,7 @@ const handleGenerate = async () => {
           const nextVideoUrl = (data as any).videoUrl;
           const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
           status.value = nextStatus;
+
           if (hasVideoUrl) {
             videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
             errorMessage.value = null;
@@ -1151,10 +1223,8 @@ const handleGenerate = async () => {
 
           syncResultVideoNode();
 
-          const shouldStopByTerminalState =
-            nextStatus === 'failed' || nextStatus === 'canceled';
-          const shouldStopBySuccess =
-            nextStatus === 'succeeded' && hasVideoUrl;
+          const shouldStopByTerminalState = nextStatus === 'failed' || nextStatus === 'canceled';
+          const shouldStopBySuccess = nextStatus === 'succeeded' && hasVideoUrl;
 
           if (shouldStopBySuccess || shouldStopByTerminalState) {
             saveWorkflowImmediately();
@@ -1169,10 +1239,7 @@ const handleGenerate = async () => {
               notifyVideoGen(false, msg);
             }
 
-            if (pollTimer) {
-              clearInterval(pollTimer);
-              pollTimer = null;
-            }
+            stopPolling();
             return;
           }
 
@@ -1185,20 +1252,50 @@ const handleGenerate = async () => {
             syncResultVideoNode();
             saveWorkflowImmediately();
             notifyVideoGen(false, errorMessage.value);
-            if (pollTimer) {
-              clearInterval(pollTimer);
-              pollTimer = null;
-            }
+            stopPolling();
             return;
           }
+
+          currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+          scheduleNext(currentIntervalMs);
         } catch (err: any) {
-          console.error('[VideoNode] Seedance 轮询失败', err);
+          const statusCode: number | undefined = err?.response?.status ?? err?.status;
+          const retryAfterSeconds: number | undefined =
+            typeof err?.response?.data?.retryAfter === 'number' ? err.response.data.retryAfter : undefined;
+
+          console.error('[VideoNode] Seedance 轮询失败', {
+            taskId: taskKey,
+            statusCode,
+            retryAfterSeconds,
+            responseData: err?.response?.data,
+            message: err?.message,
+          });
+
+          if (statusCode === 429) {
+            // 429：退避，避免一直撞限流导致错过成功回显
+            const waitMsFromServer =
+              typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0
+                ? retryAfterSeconds * 1000
+                : null;
+            currentIntervalMs =
+              waitMsFromServer != null
+                ? Math.max(waitMsFromServer, SEEDANCE_POLL_BASE_INTERVAL_MS)
+                : Math.min(Math.round(currentIntervalMs * 1.8), 120000);
+            scheduleNext(currentIntervalMs);
+            return;
+          }
+
+          // 其它错误：仍继续轮询，但把间隔拉长一点，避免抖动
+          currentIntervalMs = Math.min(Math.round(currentIntervalMs * 1.5), 60000);
           notifyVideoGen(
             false,
             normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败'
           );
+          scheduleNext(currentIntervalMs);
         }
-      }, SEEDANCE_POLL_INTERVAL_MS);
+      };
+
+      scheduleNext(SEEDANCE_POLL_BASE_INTERVAL_MS);
       ElMessage.success('Seedance 任务已创建，开始生成…');
       return;
     }

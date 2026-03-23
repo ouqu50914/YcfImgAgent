@@ -1,9 +1,12 @@
 import { Request, Response } from "express";
 import { SeedanceVideoAdapter, type SeedanceActionType } from "../adapters/seedance-video.adapter";
 import { CreditService } from "../services/credit.service";
+import { AppDataSource } from "../data-source";
+import { VideoTask } from "../entities/VideoTask";
 
 const adapter = new SeedanceVideoAdapter();
 const creditService = new CreditService();
+const videoTaskRepo = AppDataSource.getRepository(VideoTask);
 
 function getSeedanceCreditsPerSecond(): number {
     const raw = process.env.SEEDANCE_CREDITS_PER_SECOND;
@@ -30,6 +33,34 @@ function buildSeedanceUpstreamUnauthorizedResponse(err: any) {
         code: "UPSTREAM_UNAUTHORIZED",
         message: "视频服务鉴权失败，请检查 SEEDANCE_API_KEY / SEEDANCE_ACCESS（或网络/账号权限），稍后重试。",
         details: upstreamMsg,
+    };
+}
+
+function normalizeSeedanceStatusForUi(status?: string | null): string {
+    const raw = (status || "").toLowerCase();
+    if (!raw) return "pending";
+    if (raw === "queued") return "pending";
+    if (raw === "running" || raw === "processing") return "running";
+    if (raw === "succeeded" || raw === "success") return "succeeded";
+    if (raw === "failed" || raw === "error") return "failed";
+    if (raw === "canceled" || raw === "cancelled") return "canceled";
+    return "pending";
+}
+
+function buildSeedanceResultFromTask(task: VideoTask) {
+    const status = normalizeSeedanceStatusForUi(task.status);
+    const videoUrl =
+        Array.isArray(task.video_urls) && task.video_urls.length > 0 ? task.video_urls[0] : null;
+
+    return {
+        raw: null,
+        status: status as any,
+        progress: typeof task.progress === "number" ? task.progress : null,
+        videoUrl,
+        duration: null,
+        ratio: null,
+        resolution: null,
+        errorMessage: task.error_message ?? null,
     };
 }
 
@@ -97,6 +128,34 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
             throw error;
         }
 
+        // 落库：为后续轮询提供“终态缓存”（避免上游限流导致前端拿不到终态）
+        try {
+            const providerTaskId = result?.task_id || result?.id;
+            if (providerTaskId) {
+                const task = new VideoTask();
+                task.user_id = userId;
+                task.provider = "seedance";
+                task.type = "text";
+                task.request_params = {
+                    ratio,
+                    duration: durationNum,
+                    resolution,
+                    generateAudio,
+                    enableWebSearch,
+                };
+                task.provider_task_id = providerTaskId;
+                task.status = normalizeSeedanceStatusForUi(result?.status);
+                task.progress = typeof result?.progress === "number" ? result.progress : null;
+                task.error_message = null;
+                task.video_urls = null;
+                task.finished_at = null;
+                await videoTaskRepo.save(task);
+            }
+        } catch (e) {
+            // 保存失败不影响任务创建；但如果失败，则无法保障终态回显
+            console.error("[SeedanceController] 落库 seedance 任务失败:", e);
+        }
+
         return res.status(200).json({
             message: "Seedance 视频生成任务创建成功",
             data: result,
@@ -137,7 +196,35 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
 
         console.log("[SeedanceController] getSeedanceVideo polling", { taskId: id });
 
-        const result = await adapter.getVideoTask(id);
+        // 优先读本地缓存：如果已经是终态，就直接返回，避免上游限流导致前端拿不到结果
+        const existingTask = await videoTaskRepo.findOne({
+            where: {
+                user_id: userId,
+                provider: "seedance",
+                provider_task_id: id,
+            },
+        });
+
+        if (existingTask && ["succeeded", "failed", "canceled"].includes(normalizeSeedanceStatusForUi(existingTask.status))) {
+            return res.status(200).json({
+                message: "获取 Seedance 视频任务成功",
+                data: buildSeedanceResultFromTask(existingTask),
+            });
+        }
+
+        let result;
+        try {
+            result = await adapter.getVideoTask(id);
+        } catch (error) {
+            // 上游可能限流/抖动：如果我们已经有任务记录，则返回“最后一次已知状态”
+            if (existingTask) {
+                return res.status(200).json({
+                    message: "获取 Seedance 视频任务成功",
+                    data: buildSeedanceResultFromTask(existingTask),
+                });
+            }
+            throw error;
+        }
 
         console.log("[SeedanceController] getSeedanceVideo result", {
             taskId: id,
@@ -153,9 +240,57 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
             })(),
         });
 
+        // 同步到本地：一旦拿到终态，后续不再依赖上游
+        try {
+            // 我们在上游查询时使用的就是 path 参数 `id`，因此落库/关联直接使用它最稳
+            const providerTaskId = id;
+            const task =
+                existingTask ||
+                (() => {
+                    const t = new VideoTask();
+                    t.user_id = userId;
+                    t.provider = "seedance";
+                    t.type = "text";
+                    t.provider_task_id = providerTaskId;
+                    t.request_params = null;
+                    t.status = "pending";
+                    t.progress = null;
+                    t.error_message = null;
+                    t.video_urls = null;
+                    t.finished_at = null;
+                    return t;
+                })();
+
+            const normalizedStatus = normalizeSeedanceStatusForUi(result?.status);
+            task.status = normalizedStatus;
+            task.progress = typeof result?.progress === "number" ? result.progress : null;
+            task.error_message = result?.errorMessage ?? null;
+
+            if (normalizedStatus === "succeeded") {
+                task.video_urls =
+                    typeof result?.videoUrl === "string" && result.videoUrl.trim().length > 0 ? [result.videoUrl] : [];
+                task.finished_at = new Date();
+            } else if (normalizedStatus === "failed" || normalizedStatus === "canceled") {
+                task.video_urls = null;
+                task.finished_at = new Date();
+            }
+
+            await videoTaskRepo.save(task);
+        } catch (e) {
+            console.error("[SeedanceController] 同步 seedance 任务状态失败:", e);
+            // 状态同步失败时仍返回上游结果给前端，避免卡住
+        }
+
         return res.status(200).json({
             message: "获取 Seedance 视频任务成功",
-            data: result,
+            data: {
+                ...result,
+                // 让前端状态枚举稳定（避免 queued/misc 状态显示异常）
+                status: normalizeSeedanceStatusForUi(result?.status) as any,
+                progress: result?.progress ?? null,
+                videoUrl: result?.videoUrl ?? null,
+                errorMessage: result?.errorMessage ?? null,
+            },
         });
     } catch (error: any) {
         console.error("[SeedanceController] 获取任务失败:", error);
@@ -277,6 +412,34 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
         } catch (error) {
             await creditService.addCredits(userId, advCost);
             throw error;
+        }
+
+        // 落库：为后续轮询提供“终态缓存”（避免上游限流导致前端拿不到终态）
+        try {
+            const providerTaskId = result?.task_id || result?.id;
+            if (providerTaskId) {
+                const task = new VideoTask();
+                task.user_id = userId;
+                task.provider = "seedance";
+                task.type = String(action); // <= 20 字符限制，action 本身就较短
+                task.request_params = {
+                    action,
+                    ratio,
+                    duration: durationNum,
+                    resolution: req.body?.resolution,
+                    generateAudio,
+                    enableWebSearch,
+                };
+                task.provider_task_id = providerTaskId;
+                task.status = normalizeSeedanceStatusForUi(result?.status);
+                task.progress = typeof result?.progress === "number" ? result.progress : null;
+                task.error_message = null;
+                task.video_urls = null;
+                task.finished_at = null;
+                await videoTaskRepo.save(task);
+            }
+        } catch (e) {
+            console.error("[SeedanceController] 落库 seedance 高级任务失败:", e);
         }
 
         return res.status(200).json({
