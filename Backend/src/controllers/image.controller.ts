@@ -9,7 +9,7 @@ export const generateImage = async (req: Request, res: Response) => {
     try {
         // 从 JWT 中解析出的 userId (在 middleware 中赋值，稍后补充)
         const userId = (req as any).user?.userId; 
-        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, aspectRatio } = req.body;
+        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, aspectRatio, generationKey } = req.body;
 
         // 图生图时提示词可以为空，但必须有参考图片
         const hasImage = !!imageUrl || (imageUrls && imageUrls.length > 0);
@@ -28,7 +28,8 @@ export const generateImage = async (req: Request, res: Response) => {
             imageAliases,
             quality,
             model, // 传递 Nano 子模型参数
-            aspectRatio // 传递比例参数（Nano 使用）
+            aspectRatio, // 传递比例参数（Nano 使用）
+            generationKey, // 用于刷新/历史恢复后查询最终态
         });
 
         // 记录生图日志
@@ -71,6 +72,29 @@ export const generateImage = async (req: Request, res: Response) => {
             message: error.message || '图片生成失败',
             error: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
+    }
+};
+
+/**
+ * 按 generationKey 查询图片生成最终结果（用于刷新/历史恢复后拉取成功/失败态）
+ */
+export const getImageGenerateResultByGenerationKey = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) return res.status(401).json({ message: '未登录或登录已失效' });
+
+        const generationKey = req.query.generationKey;
+        if (!generationKey || typeof generationKey !== 'string') {
+            return res.status(400).json({ message: 'generationKey 参数必填' });
+        }
+
+        const data = await imageService.getGenerateResultByGenerationKey(userId, generationKey);
+        if (!data) return res.status(404).json({ message: '生成结果未找到或尚未创建' });
+
+        return res.status(200).json({ message: '获取生成结果成功', data });
+    } catch (error: any) {
+        console.error('[ImageController] 查询生成结果失败:', error);
+        return res.status(500).json({ message: error.message || '查询生成结果失败' });
     }
 };
 

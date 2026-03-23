@@ -1,5 +1,10 @@
 export interface GenerateParams {
     prompt: string;
+    /**
+     * 前端生成的幂等 key。
+     * 用于刷新/历史恢复后通过该 key 查询服务端已完成的生成结果。
+     */
+    generationKey?: string;
     width?: number;
     height?: number;
     style?: string; // 风格：cyberpunk, anime, realistic

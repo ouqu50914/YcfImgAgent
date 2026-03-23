@@ -53,36 +53,109 @@ export class ImageService {
         const adapter = this.adapters[apiType];
         if (!adapter) throw new Error("未知的API类型");
 
-        const result = await this.deductAndExecute(userId, cost, async () => {
-            const apiResult = await adapter.generateImage(params, config.api_key, config.api_url);
+        const generationKey = params.generationKey;
 
-            // 4. 保存结果到数据库
+        const result = await this.deductAndExecute(userId, cost, async () => {
+            // 1) 先创建“占位结果记录”，以便刷新/历史恢复后能用 generation_key 查询到最终态
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
             imageRecord.prompt = params.prompt;
-
-            const firstImageUrl = apiResult.images?.[0];
-            if (firstImageUrl !== undefined) {
-                imageRecord.image_url = firstImageUrl;
-            }
-            imageRecord.status = 1;
-
+            // generation_key 字段在实体里是 string（nullable=true），这里避免把 null 赋给 string 类型。
+            imageRecord.generation_key = generationKey ?? '';
+            // 0 = pending（未完成）
+            imageRecord.status = 0;
             await this.imageRepo.save(imageRecord);
 
-            const allImageUrls = apiResult.images || [];
-            const actualGeneratedCount = allImageUrls.length;
+            try {
+                // 2) 调用适配器生成图片
+                const apiResult = await adapter.generateImage(params, config.api_key, config.api_url);
 
-            config.used_quota += actualGeneratedCount;
-            await this.configRepo.save(config);
+                // 3) 保存结果到数据库
+                const allImageUrls = apiResult.images || [];
+                const actualGeneratedCount = allImageUrls.length;
 
-            return {
-                ...imageRecord,
-                all_images: allImageUrls
-            } as any;
+                const firstImageUrl = allImageUrls[0];
+                if (firstImageUrl !== undefined) {
+                    imageRecord.image_url = firstImageUrl;
+                }
+
+                imageRecord.status = 1;
+                imageRecord.all_images = JSON.stringify(allImageUrls);
+                await this.imageRepo.save(imageRecord);
+
+                config.used_quota += actualGeneratedCount;
+                await this.configRepo.save(config);
+
+                return {
+                    ...imageRecord,
+                    all_images: allImageUrls,
+                } as any;
+            } catch (error) {
+                // 生成失败：标记失败态（status=2），避免前端靠等待时间“猜测”失败。
+                imageRecord.status = 2;
+                imageRecord.all_images = imageRecord.all_images ?? null;
+                await this.imageRepo.save(imageRecord);
+                throw error;
+            }
         }, { operationType: 'generate', apiType });
 
         return result;
+    }
+
+    /**
+     * 按 generation_key 查询生成结果（用于刷新/历史恢复后拉取最终态）
+     */
+    async getGenerateResultByGenerationKey(
+        userId: number,
+        generationKey: string
+    ): Promise<{
+        id: number;
+        status: number;
+        image_url?: string;
+        all_images: string[];
+        created_at?: Date;
+    } | null> {
+        if (!generationKey) return null;
+
+        const rec = await this.imageRepo.findOneBy({
+            user_id: userId,
+            generation_key: generationKey,
+        } as any);
+
+        if (!rec) return null;
+
+        let allImages: string[] = [];
+        if (rec.all_images) {
+            try {
+                const parsed = JSON.parse(rec.all_images);
+                if (Array.isArray(parsed)) {
+                    allImages = parsed.filter((x) => typeof x === 'string' && x.trim().length > 0);
+                }
+            } catch {
+                // ignore parse error
+            }
+        }
+
+        // exactOptionalPropertyTypes=true 下：可选字段不能显式传 undefined
+        const out: {
+            id: number;
+            status: number;
+            image_url?: string;
+            all_images: string[];
+            created_at?: Date;
+        } = {
+            id: Number(rec.id),
+            status: rec.status,
+            all_images: allImages,
+            created_at: rec.created_at,
+        };
+
+        if (typeof rec.image_url === 'string') {
+            out.image_url = rec.image_url;
+        }
+
+        return out;
     }
 
     /**

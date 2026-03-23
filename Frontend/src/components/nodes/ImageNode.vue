@@ -215,6 +215,19 @@ const saveWorkflowImmediately = () => {
     }
 };
 
+// 历史恢复兜底：如果已经有 imageUrl 但仍处于 isLoading=true，
+// 会导致一直显示“生成中/加载中”，因此在发现时直接纠正并持久化。
+const syncLoadingState = () => {
+    const rawUrl = (props.data as any)?.imageUrl;
+    const hasUrl = typeof rawUrl === 'string' && rawUrl.trim().length > 0;
+    const hasError = (props.data as any)?.status === 'error';
+    if ((hasError || hasUrl) && isLoading.value) {
+        isLoading.value = false;
+        (props.data as any).isLoading = false;
+        saveWorkflowImmediately();
+    }
+};
+
 const displayAlias = computed(() => imageAlias.value || '图片');
 
 const isError = computed(() => {
@@ -238,6 +251,7 @@ watch(
             if (!imageAlias.value) {
                 ensureAliasFromStore();
             }
+            syncLoadingState();
         }
     }
 );
@@ -246,6 +260,13 @@ watch(
     () => props.data?.isLoading,
     (val) => {
         isLoading.value = !!val;
+    }
+);
+
+watch(
+    () => (props.data as any)?.status,
+    () => {
+        syncLoadingState();
     }
 );
 
@@ -294,6 +315,7 @@ const ensureEdgeFromSource = () => {
 onMounted(() => {
     ensureAliasFromStore();
     ensureEdgeFromSource();
+    syncLoadingState();
 });
 
 let menuTimeout: ReturnType<typeof setTimeout> | null = null;

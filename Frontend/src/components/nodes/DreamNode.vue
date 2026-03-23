@@ -137,7 +137,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
-import { generateImage } from '../../api/image';
+import { generateImage, getImageGenerateResultByGenerationKey } from '../../api/image';
 import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
@@ -476,8 +476,12 @@ const handleGenerate = async () => {
         console.log('发送生图请求，参数:', requestParams);
 
         // 在发送请求前，根据生成数量预创建占位图片节点（loading 状态）
+        // 并为本次生成生成一个幂等 generationKey，刷新/历史恢复后可用该 key 查询最终结果。
+        const generationKey = `imggen_${String(props.id)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        requestParams.generationKey = generationKey;
+
         const expectedCount = numImages.value || 1;
-        createPlaceholderImageNodes(expectedCount);
+        createPlaceholderImageNodes(expectedCount, generationKey);
 
         const res: any = await generateImage(requestParams);
         
@@ -670,7 +674,7 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
 };
 
 // 预创建占位图片节点（仅有 loading 骨架，无实际图片）
-const createPlaceholderImageNodes = (count: number) => {
+const createPlaceholderImageNodes = (count: number, generationKey: string) => {
     if (!currentNode.value) {
         console.warn('无法获取当前节点信息，跳过创建占位图片节点');
         return;
@@ -702,6 +706,8 @@ const createPlaceholderImageNodes = (count: number) => {
                 imageUrl: '',
                 isLoading: true,
                 fromNodeId: props.id, // 记录来源生图节点
+                generationKey,
+                index: i,
             },
         });
 
@@ -718,6 +724,135 @@ const createPlaceholderImageNodes = (count: number) => {
     console.log(`✅ 已预创建 ${ids.length} 个占位图片节点`, ids);
     saveWorkflowImmediately();
 };
+
+let reconcileInterval: ReturnType<typeof setInterval> | null = null;
+let reconcileInFlight = false;
+
+const reconcilePendingImagePlaceholders = async () => {
+    if (reconcileInFlight) return;
+    reconcileInFlight = true;
+
+    try {
+        // 收集所有“未完成占位节点”
+        const placeholderNodes = getNodes.value.filter((n: any) => {
+            const d = n?.data;
+            return n?.type === 'image' && d?.fromNodeId === props.id && d?.isLoading === true && typeof d?.generationKey === 'string' && d.generationKey.trim().length > 0;
+        });
+
+        if (!placeholderNodes.length) {
+            if (reconcileInterval) {
+                clearInterval(reconcileInterval);
+                reconcileInterval = null;
+            }
+            return;
+        }
+
+        // 按 generationKey 分组（一次生成会创建一组占位节点）
+        const groupMap = new Map<string, Array<{ id: string; index: number; y: number }>>();
+        for (const node of placeholderNodes) {
+            const d = node.data as any;
+            const key = d.generationKey as string;
+            const idx = typeof d.index === 'number' ? d.index : Number(node.position?.y ?? 0);
+            const y = Number(node.position?.y ?? 0);
+            const arr = groupMap.get(key) ?? [];
+            arr.push({ id: node.id, index: idx, y });
+            groupMap.set(key, arr);
+        }
+
+        // 逐个拉取，避免一次并发过多
+        for (const [generationKey, items] of groupMap.entries()) {
+            const ordered = items.slice().sort((a, b) => a.index - b.index);
+            const ids = ordered.map((it) => it.id);
+
+            let res: any;
+            try {
+                res = await getImageGenerateResultByGenerationKey(generationKey);
+            } catch (e: any) {
+                // 404：可能是后端尚未创建记录；继续等下一轮
+                const status = e?.response?.status;
+                if (status === 404) continue;
+                // 其它错误：继续等待，避免误把仍在生成的任务标成失败
+                continue;
+            }
+
+            // request 拦截器已把 axios response.data 直接返回给前端：
+            // 后端响应结构为 { message, data }，所以这里应取 res.data
+            const data = res?.data as any;
+            const status = data?.status;
+            const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
+
+            // 优先以“是否已经拿到图片URL”为准：只要有结果就回填成功，
+            // 不必纠结 status=0/1 的语义（避免“猜测还没完成”的体验问题）。
+            if (allImages.length > 0) {
+                const fullUrls = allImages.map((url: string) => getUploadUrl(url));
+                imageUrls.value = fullUrls;
+                imageUrl.value = fullUrls[0] || '';
+                props.data.imageUrl = allImages[0];
+                props.data.imageUrls = allImages;
+                isExecuted.value = true;
+
+                pendingImageNodeIds.value = ids;
+                const filled = fillPlaceholderImageNodes(fullUrls, allImages);
+                if (!filled && fullUrls.length > 0) {
+                    createImageNodes(fullUrls, allImages);
+                }
+
+                markPendingPlaceholdersAsError();
+                continue;
+            }
+
+            if (status === 1) {
+                if (!allImages.length) {
+                    // 状态成功但没有图片，按失败兜底避免一直 loading
+                    pendingImageNodeIds.value = ids;
+                    markPendingPlaceholdersAsError();
+                    continue;
+                }
+
+                const fullUrls = allImages.map((url: string) => getUploadUrl(url));
+                imageUrls.value = fullUrls;
+                imageUrl.value = fullUrls[0] || '';
+                props.data.imageUrl = allImages[0];
+                props.data.imageUrls = allImages;
+                isExecuted.value = true;
+
+                pendingImageNodeIds.value = ids;
+                const filled = fillPlaceholderImageNodes(fullUrls, allImages);
+                if (!filled && fullUrls.length > 0) {
+                    createImageNodes(fullUrls, allImages);
+                }
+
+                markPendingPlaceholdersAsError();
+                continue;
+            }
+
+            // status === 2：失败态（后端明确写入）
+            if (status === 2) {
+                pendingImageNodeIds.value = ids;
+                markPendingPlaceholdersAsError();
+            }
+            // status === 0：pending（不做任何事，继续等待下一轮轮询）
+        }
+    } finally {
+        reconcileInFlight = false;
+    }
+};
+
+onMounted(() => {
+    // 首次拉取稍微延迟，确保 getNodes() 已完成恢复
+    setTimeout(() => {
+        if (reconcileInterval) return;
+        reconcileInterval = setInterval(() => {
+            void reconcilePendingImagePlaceholders();
+        }, 5000);
+        void reconcilePendingImagePlaceholders();
+    }, 300);
+});
+
+onUnmounted(() => {
+    if (reconcileInterval) clearInterval(reconcileInterval);
+    reconcileInterval = null;
+});
 
 // 将仍处于 pending 的占位节点统一落为失败态，避免长期“生成中”
 const markPendingPlaceholdersAsError = (): number => {

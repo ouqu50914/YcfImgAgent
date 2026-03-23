@@ -259,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
@@ -342,6 +342,22 @@ const syncResultVideoNode = () => {
 
   const url = videoUrls.value[0] || '';
 
+  const taskMeta = {
+    provider: provider.value,
+    taskId: taskId.value,
+    seedanceTaskKey: seedanceTaskKey.value,
+  };
+
+  // 同步任务快照到 VideoNode 节点自身数据，避免历史恢复时依赖 videoResult 节点
+  // （例如首屏节点异步渲染/快照不完整导致找不到 videoResult）的情况。
+  (self.data as any).__videoTask = {
+    taskMeta,
+    status: status.value,
+    progress: progress.value,
+    errorMessage: errorMessage.value,
+    videoUrl: url,
+  };
+
   // 若已存在当前 VideoNode 派生的结果节点，则直接更新其数据
   const existing = getNodes.value.find(
     n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
@@ -354,6 +370,7 @@ const syncResultVideoNode = () => {
       status: status.value,
       progress: progress.value,
       errorMessage: errorMessage.value,
+      taskMeta,
     };
     // 视频 URL/状态变化可能导致节点高度变化，刷新内部端口锚点位置
     updateNodeInternals([existing.id]);
@@ -382,6 +399,7 @@ const syncResultVideoNode = () => {
       status: status.value,
       progress: progress.value,
       errorMessage: errorMessage.value,
+      taskMeta,
     },
   });
 
@@ -604,6 +622,8 @@ const endFramePreview = computed(() => {
 
 // 任务状态
 const taskId = ref<number | null>(null);
+// Seedance 任务 key（用于刷新/恢复后继续轮询）
+const seedanceTaskKey = ref<string | null>(null);
 const status = ref<'pending' | 'running' | 'succeeded' | 'failed' | 'canceled'>('pending');
 const progress = ref<number | null>(null);
 const errorMessage = ref<string | null>(null);
@@ -772,8 +792,9 @@ watch(
   { immediate: true }
 );
 
-const startPollingKling = (id: number) => {
+const startPollingKling = (id: number, opts?: { silent?: boolean }) => {
   if (pollTimer) clearInterval(pollTimer);
+  const silent = !!opts?.silent;
   pollTimer = setInterval(async () => {
     try {
       const res = await getVideoTask(id) as any;
@@ -786,21 +807,33 @@ const startPollingKling = (id: number) => {
         videoUrls.value = t.video_urls.map((u: string) => normalizeImageUrl(u));
       }
 
+      // 上游可能出现“status 仍为进行中，但其实已经返回可播放视频链接”的情况；
+      // 以结果链接是否存在为准，直接判定 succeeded 并停止轮询。
+      if (
+        videoUrls.value.length > 0 &&
+        ['pending', 'running'].includes(status.value)
+      ) {
+        status.value = 'succeeded';
+        errorMessage.value = null;
+      }
+
       if (['succeeded', 'failed', 'canceled'].includes(status.value)) {
         syncResultVideoNode();
         saveWorkflowImmediately();
 
-        if (status.value === 'succeeded' && videoUrls.value.length > 0) {
-          notifyVideoGen(true, 'Kling 视频任务已完成。');
-        } else if (status.value === 'succeeded') {
-          notifyVideoGen(
-            false,
-            errorMessage.value || '任务状态为成功但未返回视频链接'
-          );
-        } else if (status.value === 'canceled') {
-          notifyVideoGen(false, errorMessage.value || '视频任务已取消');
-        } else {
-          notifyVideoGen(false, errorMessage.value || '视频生成失败');
+        if (!silent) {
+          if (status.value === 'succeeded' && videoUrls.value.length > 0) {
+            notifyVideoGen(true, 'Kling 视频任务已完成。');
+          } else if (status.value === 'succeeded') {
+            notifyVideoGen(
+              false,
+              errorMessage.value || '任务状态为成功但未返回视频链接'
+            );
+          } else if (status.value === 'canceled') {
+            notifyVideoGen(false, errorMessage.value || '视频任务已取消');
+          } else {
+            notifyVideoGen(false, errorMessage.value || '视频生成失败');
+          }
         }
 
         if (pollTimer) {
@@ -810,12 +843,146 @@ const startPollingKling = (id: number) => {
       }
     } catch (e: any) {
       console.error('[VideoNode] 轮询失败', e);
-      notifyVideoGen(
-        false,
-        normalizeErrorMessage(e?.message) || '查询视频任务状态失败'
-      );
+      errorMessage.value = normalizeErrorMessage(e?.message) || '查询视频任务状态失败';
+      if (!silent) {
+        notifyVideoGen(
+          false,
+          errorMessage.value
+        );
+      }
     }
   }, 5000);
+};
+
+const startPollingSeedance = (taskKey: string, opts?: { silent?: boolean }) => {
+  clearPollTimer();
+  const silent = !!opts?.silent;
+
+  const SEEDANCE_POLL_BASE_INTERVAL_MS = 8000;
+  const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
+  const seedanceStartTs = Date.now();
+
+  let currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+  let pollingActive = true;
+
+  const stopPolling = () => {
+    pollingActive = false;
+    clearPollTimer();
+  };
+
+  const scheduleNext = (delayMs: number) => {
+    if (!pollingActive) return;
+    clearPollTimer();
+    pollTimer = setTimeout(() => void loop(), delayMs) as any;
+  };
+
+  const loop = async () => {
+    if (!pollingActive) return;
+    try {
+      const r = await getSeedanceGenerationStatus(taskKey);
+      const rawStatus = (r as any);
+      const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
+      if (!data) {
+        currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+        scheduleNext(currentIntervalMs);
+        return;
+      }
+
+      const nextStatus = (data.status as any) || 'pending';
+      progress.value = (data as any).progress ?? null;
+      errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
+
+      const nextVideoUrl = (data as any).videoUrl;
+      const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
+      // 以结果链接是否存在为准，避免状态卡在 running/pending
+      status.value = hasVideoUrl ? 'succeeded' : nextStatus;
+
+      if (hasVideoUrl) {
+        videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
+        errorMessage.value = null;
+      } else if (nextStatus === 'succeeded') {
+        // succeeded 但没有 videoUrl：继续等到后续轮询返回 videoUrl
+        videoUrls.value = [];
+      }
+
+      syncResultVideoNode();
+
+      const shouldStopByTerminalState = nextStatus === 'failed' || nextStatus === 'canceled';
+      const shouldStopBySuccess = hasVideoUrl;
+
+      if (shouldStopBySuccess || shouldStopByTerminalState) {
+        saveWorkflowImmediately();
+
+        if (!silent) {
+          if (shouldStopBySuccess) {
+            notifyVideoGen(true, 'Seedance 视频任务已完成。');
+          } else {
+            const msg =
+              nextStatus === 'canceled'
+                ? errorMessage.value || '视频任务已取消'
+                : errorMessage.value || '视频生成失败';
+            notifyVideoGen(false, msg);
+          }
+        }
+
+        stopPolling();
+        return;
+      }
+
+      // 防御：最多等待 60 分钟仍未拿到 videoUrl，则强制失败，避免节点卡住
+      const elapsedMs = Date.now() - seedanceStartTs;
+      if (!hasVideoUrl && elapsedMs >= SEEDANCE_POLL_MAX_WAIT_MS) {
+        status.value = 'failed';
+        errorMessage.value = '任务已完成但未返回视频链接，已超时放弃回显';
+        videoUrls.value = [];
+        syncResultVideoNode();
+        saveWorkflowImmediately();
+
+        if (!silent) notifyVideoGen(false, errorMessage.value);
+        stopPolling();
+        return;
+      }
+
+      currentIntervalMs = SEEDANCE_POLL_BASE_INTERVAL_MS;
+      scheduleNext(currentIntervalMs);
+    } catch (err: any) {
+      const statusCode: number | undefined = err?.response?.status ?? err?.status;
+      const retryAfterSeconds: number | undefined =
+        typeof err?.response?.data?.retryAfter === 'number' ? err.response.data.retryAfter : undefined;
+
+      console.error('[VideoNode] Seedance 轮询失败（恢复/后台轮询）', {
+        taskKey,
+        statusCode,
+        retryAfterSeconds,
+        responseData: err?.response?.data,
+        message: err?.message,
+      });
+
+      if (statusCode === 429) {
+        // 429：退避，避免一直撞限流导致错过成功回显
+        const waitMsFromServer =
+          typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : null;
+        currentIntervalMs =
+          waitMsFromServer != null
+            ? Math.max(waitMsFromServer, SEEDANCE_POLL_BASE_INTERVAL_MS)
+            : Math.min(Math.round(currentIntervalMs * 1.8), 120000);
+        scheduleNext(currentIntervalMs);
+        return;
+      }
+
+      // 其它错误：仍继续轮询，但把间隔拉长一点，避免抖动
+      currentIntervalMs = Math.min(Math.round(currentIntervalMs * 1.5), 60000);
+      errorMessage.value = normalizeErrorMessage(err?.message) || '查询 Seedance 任务状态失败';
+      if (!silent) {
+        notifyVideoGen(false, errorMessage.value);
+      }
+      scheduleNext(currentIntervalMs);
+    }
+  };
+
+  scheduleNext(SEEDANCE_POLL_BASE_INTERVAL_MS);
 };
 
 const handleGenerate = async () => {
@@ -830,6 +997,9 @@ const handleGenerate = async () => {
 
   loading.value = true;
   errorMessage.value = null;
+
+  // 开始一次新生成前，先清空旧任务 key（避免历史/并发导致的错误恢复）
+  seedanceTaskKey.value = null;
 
   // 无论后端是否成功，先创建 / 更新一次结果节点，显示“排队中”
   status.value = 'pending';
@@ -866,6 +1036,8 @@ const handleGenerate = async () => {
           notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
           return;
         }
+        seedanceTaskKey.value = String(taskKeySimple);
+        syncResultVideoNode(); // 把 seedanceTaskKey 持久化到 videoResult，便于刷新后继续恢复
         clearPollTimer();
         const SEEDANCE_POLL_BASE_INTERVAL_MS = 8000;
         const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
@@ -1175,6 +1347,8 @@ const handleGenerate = async () => {
         notifyVideoGen(false, 'Seedance 返回结果缺少任务 ID');
         return;
       }
+      seedanceTaskKey.value = String(taskKey);
+      syncResultVideoNode(); // 把 seedanceTaskKey 持久化到 videoResult，便于刷新后继续恢复
       clearPollTimer();
       const SEEDANCE_POLL_BASE_INTERVAL_MS = 8000;
       const SEEDANCE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
@@ -1346,6 +1520,7 @@ const handleGenerate = async () => {
     }
 
     taskId.value = t.id;
+    seedanceTaskKey.value = null;
     status.value = (t.status as any) || 'pending';
     progress.value = t.progress ?? null;
     videoUrls.value = Array.isArray(t.video_urls)
@@ -1429,7 +1604,129 @@ const downloadVideo = (url: string) => {
 };
 
 onMounted(() => {
-  // 如果节点已携带历史任务数据，可在此恢复（预留扩展）
+  // 历史恢复场景：刷新后 workflow/节点可能是异步 setNodes，
+  // 因此用有限重试确保拿到 videoResult 节点并启动轮询。
+  let restoreTries = 0;
+  const MAX_TRIES = 12; // 12 * 300ms = 3.6s
+
+  const tryRestore = async () => {
+    try {
+      const resultNode = getNodes.value.find(
+        n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
+      );
+      const selfNode = getNodes.value.find(n => n.id === props.id);
+
+      // 优先使用 videoResult；若尚未渲染/快照不完整，则回退到 VideoNode 自身数据
+      const resultData = resultNode?.data as any;
+      const selfVideoTask = (selfNode?.data as any)?.__videoTask as any;
+
+      // 两份快照都拿不到：继续重试
+      if (!resultData && !selfVideoTask) return false;
+
+      const d = resultData || selfVideoTask || {};
+
+      // 还原核心展示状态
+      if (typeof d.status === 'string') status.value = d.status as any;
+      if (typeof d.progress === 'number') progress.value = d.progress;
+      if (typeof d.errorMessage === 'string') errorMessage.value = d.errorMessage;
+
+      if (typeof d.videoUrl === 'string' && d.videoUrl.trim()) {
+        videoUrls.value = [normalizeMediaUrl(d.videoUrl)];
+      } else {
+        videoUrls.value = [];
+      }
+
+      // 还原任务元信息（用于恢复轮询）
+      // 兼容：历史数据里可能没有 taskMeta（旧版本/中途保存快照）
+      const taskMeta = d.taskMeta as any;
+      const legacyTaskIdNum =
+        typeof d.taskId === 'number'
+          ? d.taskId
+          : typeof d.taskId === 'string'
+            ? Number(d.taskId)
+            : null;
+      const legacySeedanceTaskKey =
+        typeof d.seedanceTaskKey === 'string' ? d.seedanceTaskKey : null;
+      const legacyProvider = d.provider;
+
+      const metaProvider = taskMeta?.provider ?? legacyProvider;
+      if (metaProvider === 'kling' || metaProvider === 'seedance') {
+        provider.value = metaProvider;
+      }
+
+      const metaTaskIdNum =
+        typeof taskMeta?.taskId === 'number'
+          ? taskMeta.taskId
+          : typeof taskMeta?.taskId === 'string'
+            ? Number(taskMeta.taskId)
+            : null;
+
+      taskId.value = metaTaskIdNum != null ? metaTaskIdNum : legacyTaskIdNum;
+      seedanceTaskKey.value =
+        typeof taskMeta?.seedanceTaskKey === 'string'
+          ? taskMeta.seedanceTaskKey
+          : legacySeedanceTaskKey;
+
+      // 兜底：如果有 videoUrl，但状态卡在进行中，则直接修正为 succeeded
+      const activeStates = new Set(['pending', 'running', 'queued']);
+      const terminalStates = new Set(['succeeded', 'failed', 'canceled']);
+      if (activeStates.has(status.value) && videoUrls.value.length > 0) {
+        status.value = 'succeeded';
+        errorMessage.value = null;
+        syncResultVideoNode();
+        saveWorkflowImmediately();
+      }
+
+      // 恢复轮询：只有处于“进行中”且带任务 key 的情况才重新拉取
+      const shouldPoll = !terminalStates.has(status.value) && activeStates.has(status.value);
+      if (!shouldPoll) return true;
+
+      // 进行中但缺少任务标识：继续重试（等待快照补全）
+      if (
+        provider.value === 'kling' &&
+        (typeof taskId.value !== 'number' || Number.isNaN(taskId.value))
+      ) {
+        return false;
+      }
+      if (
+        provider.value === 'seedance' &&
+        (typeof seedanceTaskKey.value !== 'string' || !seedanceTaskKey.value)
+      ) {
+        return false;
+      }
+
+      if (provider.value === 'kling' && typeof taskId.value === 'number' && !Number.isNaN(taskId.value)) {
+        startPollingKling(taskId.value, { silent: true });
+        return true;
+      }
+
+      if (
+        provider.value === 'seedance' &&
+        typeof seedanceTaskKey.value === 'string' &&
+        seedanceTaskKey.value
+      ) {
+        startPollingSeedance(seedanceTaskKey.value, { silent: true });
+        return true;
+      }
+
+      // 没有拿到 taskId/taskKey，也就没法轮询；但 state 已恢复到当前快照
+      return true;
+    } catch (e: any) {
+      console.error('[VideoNode] 历史恢复轮询失败', e);
+      return false;
+    }
+  };
+
+  const loop = async () => {
+    restoreTries += 1;
+    await nextTick();
+    const ok = await tryRestore();
+    if (ok) return;
+    if (restoreTries >= MAX_TRIES) return;
+    setTimeout(() => void loop(), 300);
+  };
+
+  void loop();
 });
 
 onUnmounted(() => {

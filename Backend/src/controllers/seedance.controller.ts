@@ -8,6 +8,92 @@ const adapter = new SeedanceVideoAdapter();
 const creditService = new CreditService();
 const videoTaskRepo = AppDataSource.getRepository(VideoTask);
 
+/**
+ * Seedance Worker：
+ * 创建任务后在后台持续轮询上游，直到拿到终态（succeeded/failed/canceled）。
+ * 前端只要能访问 GET /seedance/generations/:id，就能从本地缓存取到终态结果，
+ * 避免前端轮询过程中遇到 429 时“错过回显窗口”。
+ */
+const seedancePollingWorkers = new Map<string, Promise<void>>();
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const startSeedanceWorkerIfNeeded = (userId: number, providerTaskId: string) => {
+    if (!providerTaskId) return;
+    if (seedancePollingWorkers.has(providerTaskId)) return;
+
+    const workerPromise = (async () => {
+        const startedAt = Date.now();
+        const MAX_WAIT_MS = 2 * 60 * 60 * 1000; // 最多后台等待 2 小时
+
+        let delayMs = 8000;
+        let succeededWithoutUrlCount = 0;
+        while (Date.now() - startedAt < MAX_WAIT_MS) {
+            try {
+                const result = await adapter.getVideoTask(providerTaskId);
+                const normalizedStatus = normalizeSeedanceStatusForUi(result?.status);
+                const hasVideoUrl =
+                    typeof result?.videoUrl === "string" && result.videoUrl.trim().length > 0;
+
+                let task =
+                    await videoTaskRepo.findOne({
+                        where: { user_id: userId, provider: "seedance", provider_task_id: providerTaskId },
+                    });
+
+                if (!task) {
+                    task = new VideoTask();
+                    task.user_id = userId;
+                    task.provider = "seedance";
+                    task.provider_task_id = providerTaskId;
+                    task.type = "text";
+                    task.request_params = null;
+                }
+
+                task.status = normalizedStatus;
+                task.progress = typeof result?.progress === "number" ? result.progress : null;
+                task.error_message = result?.errorMessage ?? null;
+
+                if (normalizedStatus === "succeeded") {
+                    task.video_urls =
+                        hasVideoUrl ? [result.videoUrl as string] : [];
+                    task.finished_at = new Date();
+                    if (!hasVideoUrl) {
+                        succeededWithoutUrlCount += 1;
+                    } else {
+                        succeededWithoutUrlCount = 0;
+                    }
+                } else if (normalizedStatus === "failed" || normalizedStatus === "canceled") {
+                    task.video_urls = null;
+                    task.finished_at = new Date();
+                }
+
+                await videoTaskRepo.save(task);
+
+                if (normalizedStatus === "failed" || normalizedStatus === "canceled") return;
+                if (normalizedStatus === "succeeded" && hasVideoUrl) return;
+
+                // 非终态：恢复到基础轮询间隔
+                delayMs = 8000;
+                await sleep(delayMs);
+            } catch (e: any) {
+                const statusCode: number | undefined = e?.status ?? e?.response?.status;
+                const retryAfterSeconds: number | undefined =
+                    typeof e?.response?.data?.retryAfter === "number" ? e.response.data.retryAfter : undefined;
+
+                if (statusCode === 429 && typeof retryAfterSeconds === "number" && retryAfterSeconds > 0) {
+                    delayMs = Math.min(Math.max(retryAfterSeconds * 1000, delayMs), 120000);
+                } else {
+                    delayMs = Math.min(Math.round(delayMs * 1.5), 60000);
+                }
+
+                await sleep(delayMs);
+            }
+        }
+    })();
+
+    seedancePollingWorkers.set(providerTaskId, workerPromise);
+    workerPromise.finally(() => seedancePollingWorkers.delete(providerTaskId));
+};
+
 function getSeedanceCreditsPerSecond(): number {
     const raw = process.env.SEEDANCE_CREDITS_PER_SECOND;
     const n = raw ? Number(raw) : 20;
@@ -150,6 +236,9 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
                 task.video_urls = null;
                 task.finished_at = null;
                 await videoTaskRepo.save(task);
+
+                // 启动后台 worker：保证终态最终一定会落库
+                startSeedanceWorkerIfNeeded(userId, providerTaskId);
             }
         } catch (e) {
             // 保存失败不影响任务创建；但如果失败，则无法保障终态回显
@@ -437,6 +526,9 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                 task.video_urls = null;
                 task.finished_at = null;
                 await videoTaskRepo.save(task);
+
+                // 启动后台 worker：保证终态最终一定会落库
+                startSeedanceWorkerIfNeeded(userId, providerTaskId);
             }
         } catch (e) {
             console.error("[SeedanceController] 落库 seedance 高级任务失败:", e);

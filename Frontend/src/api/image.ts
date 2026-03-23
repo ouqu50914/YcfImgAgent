@@ -3,6 +3,10 @@ import request from '@/utils/request.ts';
 export interface GenerateParams {
     apiType: 'dream' | 'nano';
     prompt: string;
+    /**
+     * 前端生成的幂等 key，用于刷新/历史恢复后查询最终生成结果
+     */
+    generationKey?: string;
     width?: number;
     height?: number;
     numImages?: number; // 生成图片数量，1-4
@@ -38,6 +42,21 @@ export interface SplitParams {
 // 调用生图接口
 export const generateImage = (data: GenerateParams) => {
     return request.post('/image/generate', data);
+};
+
+export const getImageGenerateResultByGenerationKey = (generationKey: string) => {
+    return request.get<{
+        message: string;
+        data: {
+            id: number;
+            status: number; // 1 成功 / 0 失败/未完成
+            image_url?: string;
+            all_images: string[];
+            created_at?: string;
+        };
+    }>(`/image/generate-result`, {
+        params: { generationKey },
+    });
 };
 
 // 调用放大接口
