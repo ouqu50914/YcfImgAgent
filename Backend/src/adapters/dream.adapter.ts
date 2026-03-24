@@ -13,8 +13,26 @@ import { detectImageFormat } from '../utils/image-format';
 
 const axiosNoProxy = axios.create({ proxy: false });
 const ACE_REQUEST_TIMEOUT_MS = Number(process.env.ACE_SEEDREAM_TIMEOUT_MS || '1800000'); // 30 分钟
+const ACE_REQUEST_BODY_MAX_BYTES = 20 * 1024 * 1024; // 20MB
 
 export class DreamAdapter implements AiProvider {
+    /**
+     * Ace 对请求体大小有限制。调用上游前先本地校验，
+     * 当图片数量过多或单图过大时直接给出明确提示。
+     */
+    private ensureRequestBodySize(body: Record<string, unknown>) {
+        const bytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
+        if (bytes > ACE_REQUEST_BODY_MAX_BYTES) {
+            const err = new Error('请求主体超过 20MB，请减少上传图片数量或压缩图片大小后重试。') as Error & {
+                code?: string;
+                status?: number;
+            };
+            err.code = 'ACE_REQUEST_BODY_TOO_LARGE';
+            err.status = 413;
+            throw err;
+        }
+    }
+
 
     private getBaseUrl(apiUrl?: string): string {
         // Ace 适配器优先使用环境变量，避免数据库中 dream 的 api_url 仍是旧地址（如 api.dream-ai.com）导致请求发错域名
@@ -86,6 +104,8 @@ export class DreamAdapter implements AiProvider {
         if (streamSupported) {
             requestBody.stream = body.stream ?? false;
         }
+
+        this.ensureRequestBodySize(requestBody);
 
         let response: any;
         try {

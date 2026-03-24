@@ -26,6 +26,7 @@ const NANO_REQUEST_TIMEOUT_MS = Number(
 const NANO_DRY_RUN = process.env.ACE_NANO_DRY_RUN === "true";
 // 直链模式：不下载 Ace 返回的图片，直接返回 Ace CDN URL 给前端，由浏览器直连 Ace，节省服务器带宽（适合 1M 等低带宽）
 const ACE_RETURN_REMOTE_URL = process.env.ACE_RETURN_REMOTE_URL === "true";
+const ACE_REQUEST_BODY_MAX_BYTES = 20 * 1024 * 1024; // 20MB
 
 class ProviderError extends Error {
     code: string;
@@ -38,6 +39,21 @@ class ProviderError extends Error {
 }
 
 export class NanoAdapter implements AiProvider {
+    /**
+     * Ace 对请求体大小有限制。这里在调用上游前先做本地校验，
+     * 避免用户在图片过多/过大时等待很久后才收到模糊错误。
+     */
+    private ensureRequestBodySize(body: Record<string, unknown>) {
+        const bytes = Buffer.byteLength(JSON.stringify(body), "utf8");
+        if (bytes > ACE_REQUEST_BODY_MAX_BYTES) {
+            throw new ProviderError({
+                code: "ACE_REQUEST_BODY_TOO_LARGE",
+                status: 413,
+                message: "请求主体超过 20MB，请减少上传图片数量或压缩图片大小后重试。",
+            });
+        }
+    }
+
     private mapAceFailureToProviderError(rawMessage: string): ProviderError {
         const m = (rawMessage || "").trim();
         const lower = m.toLowerCase();
@@ -177,6 +193,7 @@ export class NanoAdapter implements AiProvider {
      * 否则尝试提取 task_id，交由任务轮询处理。
      */
     private async submitTask(body: Record<string, unknown>): Promise<{ imageUrls?: string[]; taskId?: string }> {
+        this.ensureRequestBodySize(body);
         if (NANO_DRY_RUN) {
             console.log("[NanoAdapter] DRY-RUN 模式：不会真正调用 Ace 接口。即将发送的请求：", {
                 endpoint: this.getEndpoint(),
