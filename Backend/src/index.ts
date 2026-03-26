@@ -27,10 +27,17 @@ dotenv.config();
 dotenv.config({ path: ".env.local", override: true });
 
 const app = express();
+const enableHsts = process.env.ENABLE_HSTS === "true";
 
 // 安全中间件
-app.use(helmet());
-
+// app.use(helmet());
+app.use(
+    helmet({
+      hsts: enableHsts
+        ? { maxAge: 31536000, includeSubDomains: true, preload: false }
+        : false,
+    })
+  );
 // CORS 配置
 // ALLOWED_ORIGINS 环境变量格式：用逗号分隔的域名列表，例如：https://ouqu.top,http://localhost:5173
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
