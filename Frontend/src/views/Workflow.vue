@@ -269,7 +269,7 @@
                 <el-table-column prop="name" label="模板名称" />
                 <el-table-column prop="description" label="描述" />
                 <el-table-column prop="usage_count" label="使用次数" width="100" />
-                <el-table-column prop="updated_at" label="更新时间" width="180" />
+                <el-table-column prop="updated_at" label="更新时间" width="180" :formatter="formatTableDateTime" />
                 <el-table-column label="操作" width="150">
                     <template #default="{ row }">
                         <el-button size="small" type="primary" @click="handleLoadTemplate(row)">加载</el-button>
@@ -283,7 +283,7 @@
         <el-dialog v-model="showHistoryDialog" title="工作流历史记录" width="700px">
             <el-table :data="histories" border style="width: 100%">
                 <el-table-column prop="snapshot_name" label="快照名称" />
-                <el-table-column prop="created_at" label="保存时间" width="180" />
+                <el-table-column prop="created_at" label="保存时间" width="180" :formatter="formatTableDateTime" />
                 <el-table-column label="操作" width="150">
                     <template #default="{ row }">
                         <el-button size="small" type="primary" @click="handleLoadHistory(row)">恢复</el-button>
@@ -308,6 +308,7 @@ import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useUserStore } from '@/store/user';
 import { useAdminPendingStore } from '@/store/admin-pending';
 import { getUserRoleFromInfo } from '@/utils/user-role';
+import { formatIsoToYmdHms } from '@/utils/date';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
@@ -357,6 +358,11 @@ const nodeTypes = {
     videoRef: markRaw(VideoRefNode),
     audioRef: markRaw(AudioRefNode),
     videoResult: markRaw(VideoResultNode),
+};
+
+// Element Plus 的 el-table-column formatter 签名适配
+const formatTableDateTime = (_row: any, _column: any, cellValue: unknown) => {
+    return formatIsoToYmdHms(cellValue);
 };
 
 type WorkflowDTO = {

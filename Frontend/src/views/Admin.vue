@@ -59,7 +59,7 @@
               <span v-else>{{ row.credits ?? 0 }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="180" />
+          <el-table-column prop="created_at" label="创建时间" width="180" :formatter="formatTableDateTime" />
           <el-table-column label="操作" width="420" fixed="right">
             <template #default="{ row }">
               <el-button size="small" @click="viewUserStats(row.id)">统计</el-button>
@@ -130,7 +130,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="申请时间" width="180" />
+          <el-table-column prop="created_at" label="申请时间" width="180" :formatter="formatTableDateTime" />
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <template v-if="row.status === 'pending'">
@@ -184,7 +184,7 @@
           <el-table-column prop="operation_type" label="操作类型" width="120" />
           <el-table-column prop="api_type" label="API类型" width="100" />
           <el-table-column prop="ip_address" label="IP地址" width="150" />
-          <el-table-column prop="created_at" label="时间" width="180" />
+          <el-table-column prop="created_at" label="时间" width="180" :formatter="formatTableDateTime" />
           <el-table-column prop="details" label="详情">
             <template #default="{ row }">
               <el-popover placement="top" width="300" trigger="hover">
@@ -433,6 +433,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft } from '@element-plus/icons-vue';
 import type { FormInstance } from 'element-plus';
+import { formatIsoToYmdHms } from '@/utils/date';
 import {
   getUserList,
   createUser,
@@ -463,6 +464,11 @@ const router = useRouter();
 const adminPendingStore = useAdminPendingStore();
 
 const activeTab = ref('users');
+
+// Element Plus 的 el-table-column formatter 签名不同于普通函数，这里做一层适配
+const formatTableDateTime = (_row: any, _column: any, cellValue: unknown) => {
+  return formatIsoToYmdHms(cellValue);
+};
 // 用户管理
 const userList = ref([]);
 const userSearchForm = reactive({ username: '', status: undefined });
