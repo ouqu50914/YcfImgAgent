@@ -269,6 +269,7 @@ import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAd
 import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
+import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -320,6 +321,13 @@ const connectedImageUrl = ref<string | null>(null);
 const connectedEndImageUrl = ref<string | null>(null);
 const connectedImageUrls = ref<string[]>([]);
 const imageSourceCount = ref(0);
+const connectedImageReadiness = ref({
+  total: 0,
+  ready: 0,
+  loading: 0,
+  error: 0,
+  missingUrl: 0,
+});
 
 const connectedVideoRefUrls = ref<string[]>([]);
 const connectedAudioRefUrls = ref<string[]>([]);
@@ -443,6 +451,7 @@ watch(
     connectedAudioRefMeta.value = [];
 
     const imageSources: string[] = [];
+    const imageSourceMeta: Array<ImageNodeLikeData> = [];
     const videoRefSources: string[] = [];
     const audioRefSources: string[] = [];
     const videoRefMetaSources: MediaRefMeta[] = [];
@@ -458,10 +467,23 @@ watch(
       if (sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
         const url = sourceNode.data.imageUrl as string;
         if (typeof url === 'string' && url) imageSources.push(url);
+        imageSourceMeta.push({
+          imageUrl: (sourceNode.data as any)?.imageUrl,
+          isLoading: (sourceNode.data as any)?.isLoading,
+          status: (sourceNode.data as any)?.status,
+        });
       }
       if (sourceNode.data?.imageUrls && Array.isArray(sourceNode.data.imageUrls)) {
         for (const u of sourceNode.data.imageUrls) {
           if (typeof u === 'string' && u) imageSources.push(u);
+        }
+        // imageUrls 多用于结果聚合；这里只用 node 级别状态判断是否可用
+        if (Array.isArray((sourceNode.data as any)?.imageUrls) && (sourceNode.data as any).imageUrls.length > 0) {
+          imageSourceMeta.push({
+            imageUrl: (sourceNode.data as any)?.imageUrls?.[0],
+            isLoading: (sourceNode.data as any)?.isLoading,
+            status: (sourceNode.data as any)?.status,
+          });
         }
       }
 
@@ -502,6 +524,7 @@ watch(
     }
 
     imageSourceCount.value = imageSources.length;
+    connectedImageReadiness.value = summarizeConnectedImages(imageSourceMeta);
 
     connectedVideoRefUrls.value = [...new Set(videoRefSources)];
     connectedAudioRefUrls.value = [...new Set(audioRefSources)];
@@ -776,7 +799,12 @@ const executeButtonText = computed(() => {
 
 // 是否可以执行（包含积分校验）
 const canExecute = computed(() => {
-  return inputReady.value && canAfford.value;
+  // 只有当确实连入了图片（图生视频/多模态等）时，才强制要求图片已就绪
+  const hasAnyImageInput = imageSourceCount.value > 0;
+  const imagesReady = !hasAnyImageInput || connectedImageReadiness.value.total === 0
+    ? true
+    : connectedImageReadiness.value.ready === connectedImageReadiness.value.total;
+  return inputReady.value && canAfford.value && imagesReady;
 });
 
 // 根据连接自动调整模式：有图片则优先图生视频（仅对 kling 生效）
@@ -993,6 +1021,21 @@ const handleGenerate = async () => {
   if (!canAfford.value) {
     ElMessage.warning('积分不足，请向超级管理员申请');
     return;
+  }
+  // 兜底：按钮状态可能因异步刷新滞后，这里再次阻断“上游图片未就绪”
+  if (imageSourceCount.value > 0) {
+    const s = connectedImageReadiness.value;
+    const notReady = Math.max(0, (s.total || 0) - (s.ready || 0));
+    if (notReady > 0) {
+      if ((s.loading || 0) > 0) {
+        ElMessage.warning('参考图片仍在上传/生成中，请等待完成后再生成');
+      } else if ((s.error || 0) > 0) {
+        ElMessage.warning('上游参考图片生成失败，请更换或重新生成后再试');
+      } else {
+        ElMessage.warning('参考图片尚未就绪，请稍后再试');
+      }
+      return;
+    }
   }
 
   loading.value = true;
