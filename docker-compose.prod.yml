@@ -32,6 +32,7 @@ services:
       - ycf_network
 
   # 后端服务（仅宿主机可访问，由宿主机 Nginx 反代）
+  # build.context 必须是 ./Backend；勿改为 ./ 或 ./Frontend，否则 tsc 会编译到前端文件并报错
   backend:
     build:
       context: ./Backend

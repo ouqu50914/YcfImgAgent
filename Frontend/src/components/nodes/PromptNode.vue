@@ -158,8 +158,9 @@ import type { JSONContent } from '@tiptap/core';
 import { Extension, getTextBetween } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import type { Node as PMNode } from 'prosemirror-model';
+import { Plugin, PluginKey, type EditorState, type Transaction } from 'prosemirror-state';
+import { Decoration, DecorationSet } from 'prosemirror-view';
 
 defineEmits<{
     updateNodeInternals: [];
@@ -247,7 +248,7 @@ const PromptPlainTextLimit = Extension.create({
         return [
             new Plugin({
                 key: new PluginKey('promptPlainTextLimit'),
-                filterTransaction(tr, state) {
+                filterTransaction(tr: Transaction, state: EditorState) {
                     if (!tr.docChanged) return true;
                     const newLen = docPlainLength(tr.doc);
                     if (newLen <= MAX_PLAIN_CHARS) return true;
@@ -267,7 +268,7 @@ const RE_BARE_MEDIA_REF =
 
 function promptRefDecorationsForDoc(doc: Parameters<typeof getTextBetween>[0]): DecorationSet {
     const decorations: Decoration[] = [];
-    doc.descendants((node, pos) => {
+    doc.descendants((node: PMNode, pos: number) => {
         if (!node.isText || !node.text) return;
         const t = node.text;
         let m: RegExpExecArray | null;
@@ -303,10 +304,15 @@ const PromptRefHighlight = Extension.create({
             new Plugin({
                 key,
                 state: {
-                    init(_, state) {
+                    init(_config: object, state: EditorState) {
                         return promptRefDecorationsForDoc(state.doc);
                     },
-                    apply(tr, value, _oldState, newState) {
+                    apply(
+                        tr: Transaction,
+                        value: DecorationSet,
+                        _oldState: EditorState,
+                        newState: EditorState
+                    ) {
                         if (tr.docChanged) {
                             return promptRefDecorationsForDoc(newState.doc);
                         }
@@ -314,7 +320,7 @@ const PromptRefHighlight = Extension.create({
                     },
                 },
                 props: {
-                    decorations(state) {
+                    decorations(state: EditorState) {
                         return key.getState(state);
                     },
                 },
