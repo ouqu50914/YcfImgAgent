@@ -21,10 +21,14 @@ import mediaRoutes from "./routes/media.routes";
 import notificationRoutes from "./routes/notification.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 import { errorHandler } from "./middlewares/error.middleware";
+import { convertJsonTimesToBeijingIso } from "./utils/beijing-time";
 
 dotenv.config();
 // 本地环境配置：.env.local 会覆盖 .env 中的同名变量（本地开发时使用）
-dotenv.config({ path: ".env.local", override: true });
+// 生产环境下不要强行覆盖（避免把 DB_HOST/REDIS_HOST 等改成本地值）
+if (process.env.NODE_ENV !== "production") {
+    dotenv.config({ path: ".env.local", override: true });
+}
 
 const app = express();
 const enableHsts = process.env.ENABLE_HSTS === "true";
@@ -58,6 +62,19 @@ const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '10mb';
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
+// 统一将 JSON 响应中的时间转换为北京时间 ISO(+08:00)
+app.use((req, res, next) => {
+    const originalJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+        try {
+            return originalJson(convertJsonTimesToBeijingIso(body));
+        } catch {
+            return originalJson(body);
+        }
+    };
+    next();
+});
+
 // 处理尾部斜杠，使 /api/auth/login/ 能匹配 /api/auth/login
 app.use((req, res, next) => {
     if (req.path.length > 1 && req.path.endsWith('/')) {
@@ -70,7 +87,7 @@ app.use((req, res, next) => {
 app.get(['/health', '/health/'], (req, res) => {
     res.json({ 
         status: 'ok', 
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(),
         uptime: process.uptime()
     });
 });

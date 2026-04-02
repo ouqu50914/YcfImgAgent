@@ -404,7 +404,7 @@
           </el-table>
         </div>
         <div class="stats-meta">
-          <span>最后登录：{{ userStatsData.lastLoginTime ? new Date(userStatsData.lastLoginTime).toLocaleString() : '—' }}</span>
+          <span>最后登录：{{ userStatsData.lastLoginTime ? formatIsoToYmdHms(userStatsData.lastLoginTime) : '—' }}</span>
         </div>
       </div>
       <template #footer>

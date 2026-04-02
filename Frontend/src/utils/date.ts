@@ -5,16 +5,30 @@ export function formatIsoToYmdHms(value: unknown): string {
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return String(value);
 
-  // 由于后端常返回带 `Z` 的 ISO 字符串（UTC），这里用 UTC 输出，避免“同一份数据在不同机器显示不一致”
-  const pad = (n: number) => String(n).padStart(2, '0');
+  // 统一按北京时间（Asia/Shanghai）输出，避免客户端时区不同导致显示不一致
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 
-  const yyyy = date.getUTCFullYear();
-  const mm = pad(date.getUTCMonth() + 1);
-  const dd = pad(date.getUTCDate());
-  const hh = pad(date.getUTCHours());
-  const min = pad(date.getUTCMinutes());
-  const ss = pad(date.getUTCSeconds());
+  const parts = formatter.formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? '';
 
+  const yyyy = pick('year');
+  const mm = pick('month');
+  const dd = pick('day');
+  const hh = pick('hour');
+  const min = pick('minute');
+  const ss = pick('second');
+
+  // zh-CN 的 month/day/hour/minute/second 已是 2 位，不再额外 pad
   return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
 }
 

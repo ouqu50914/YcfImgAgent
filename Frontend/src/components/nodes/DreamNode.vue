@@ -144,6 +144,7 @@ import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
 import { getUploadUrl } from '@/utils/image-loader';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
+import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -171,7 +172,7 @@ const executeCost = computed(() => {
     const q = apiType.value === 'nano' && !quality.value ? '2K' : quality.value;
     return getCreditCost(apiType.value, 'generate', { quality: q || '2K', imageCount: numImages.value });
 });
-const canExecute = computed(() => {
+const canExecuteCredits = computed(() => {
     if (userStore.userInfo?.role === 1) return true;
     return (userStore.userInfo?.credits ?? 0) >= executeCost.value;
 });
@@ -301,6 +302,24 @@ const pendingImageNodeIds = ref<string[]>([]);
 const connectedPrompt = ref('');
 const connectedImages = ref<string[]>([]);
 const connectedImageAliases = ref<number[]>([]);
+const connectedImageReadiness = ref({
+    total: 0,
+    ready: 0,
+    loading: 0,
+    error: 0,
+    missingUrl: 0,
+});
+
+const imagesReady = computed(() => {
+    if (connectedImages.value.length === 0) return true;
+    const s = connectedImageReadiness.value;
+    if (!s || s.total === 0) return false;
+    return s.ready === s.total;
+});
+
+const canExecute = computed(() => {
+    return canExecuteCredits.value && imagesReady.value;
+});
 
 // 计算连接状态
 const connectedPromptCount = computed(() => {
@@ -340,15 +359,21 @@ watch(
     }
         });
 
-        // 收集图片及其别名
+        // 收集图片及其别名 + 就绪状态（isLoading/status）
         connectedImages.value = [];
         connectedImageAliases.value = [];
+        const imageMeta: Array<ImageNodeLikeData> = [];
         targetEdges.forEach(edge => {
             const sourceNode = findNode(edge.source);
             if (sourceNode && sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
                 const url = sourceNode.data.imageUrl;
                 if (url && !connectedImages.value.includes(url)) {
                     connectedImages.value.push(url);
+                    imageMeta.push({
+                        imageUrl: (sourceNode.data as any)?.imageUrl,
+                        isLoading: (sourceNode.data as any)?.isLoading,
+                        status: (sourceNode.data as any)?.status,
+                    });
                     const aliasText: string | undefined = (sourceNode.data as any)?.imageAlias;
                     let aliasNum: number | null = null;
                     if (typeof aliasText === 'string') {
@@ -365,6 +390,8 @@ watch(
                 }
             }
         });
+
+        connectedImageReadiness.value = summarizeConnectedImages(imageMeta);
     },
     { immediate: true, deep: true }
 );
@@ -384,7 +411,32 @@ const currentNode = computed(() => {
 // 生成图片
 const handleGenerate = async () => {
     if (!canExecute.value) {
+        // 优先提示“图片未就绪”，其次才是积分不足
+        if (!imagesReady.value) {
+            const s = connectedImageReadiness.value;
+            if ((s.loading || 0) > 0) {
+                ElMessage.warning('参考图片仍在上传/生成中，请等待完成后再生成');
+            } else if ((s.error || 0) > 0) {
+                ElMessage.warning('上游参考图片生成失败，请更换或重新生成后再试');
+            } else {
+                ElMessage.warning('参考图片尚未就绪，请稍后再试');
+            }
+            return;
+        }
         ElMessage.warning('积分不足，请向超级管理员申请');
+        return;
+    }
+
+    // 兜底：按钮禁用态可能因异步刷新滞后，点击时再次阻断
+    if (!imagesReady.value) {
+        const s = connectedImageReadiness.value;
+        if ((s.loading || 0) > 0) {
+            ElMessage.warning('参考图片仍在上传/生成中，请等待完成后再生成');
+        } else if ((s.error || 0) > 0) {
+            ElMessage.warning('上游参考图片生成失败，请更换或重新生成后再试');
+        } else {
+            ElMessage.warning('参考图片尚未就绪，请稍后再试');
+        }
         return;
     }
     loading.value = true;

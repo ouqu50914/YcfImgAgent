@@ -690,9 +690,10 @@ const clearPollTimer = () => {
 
 function getSeedanceCreditsPerSecond(): number {
   // 与后端默认保持一致：20 积分 / 秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
-  const raw = (import.meta as any)?.env?.VITE_SEEDANCE_CREDITS_PER_SECOND;
-  const n = raw != null ? Number(raw) : 20;
-  if (Number.isNaN(n) || n <= 0) return 20;
+  const raw = import.meta.env.VITE_SEEDANCE_CREDITS_PER_SECOND;
+  console.log('raw', raw);
+  const n = raw != null ? Number(raw) : 28;
+  if (Number.isNaN(n) || n <= 0) return 28;
   return n;
 }
 

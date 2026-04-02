@@ -43,7 +43,7 @@ services:
     # 建议：在服务器上创建单独的 .env.prod（不要提交到 git），由 compose 自动加载
     # 也可以不使用 env_file，改用部署系统注入环境变量
     env_file:
-      - ./.env.prod
+      - ./.env
     environment:
       NODE_ENV: production
       PORT: 3000

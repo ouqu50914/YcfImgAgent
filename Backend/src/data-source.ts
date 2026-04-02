@@ -16,7 +16,10 @@ import { SystemConfig } from "./entities/SystemConfig";
 import { VideoTask } from "./entities/VideoTask";
 
 dotenv.config();
-dotenv.config({ path: ".env.local", override: true });
+// 本地环境配置：只在非生产环境启用 .env.local 覆盖
+if (process.env.NODE_ENV !== "production") {
+    dotenv.config({ path: ".env.local", override: true });
+}
 
 export const AppDataSource = new DataSource({
     type: "mysql",

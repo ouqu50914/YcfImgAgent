@@ -16,8 +16,10 @@ export const useUserStore = defineStore('user', {
         // 调用后端接口
         const res: any = await request.post('/auth/login', loginForm);
         
-        // 假设后端返回结构: { message: "...", data: { token: "...", refreshToken: "...", userInfo: {...} } }
-        const { token, refreshToken, userInfo } = res.data;
+        // 后端实际返回结构：
+        // { message: "登录成功", data: { token, refreshToken, userInfo } }
+        const payload = res?.data?.data ?? res?.data;
+        const { token, refreshToken, userInfo } = payload;
         const info = { ...userInfo, credits: userInfo?.credits ?? 0 };
 
         // 保存状态
@@ -62,7 +64,8 @@ export const useUserStore = defineStore('user', {
           refreshToken: this.refreshTokenValue
         });
 
-        const { token, userInfo } = res.data;
+        const payload = res?.data?.data ?? res?.data;
+        const { token, userInfo } = payload;
         const info = { ...userInfo, credits: userInfo?.credits ?? 0 };
         this.token = token;
         this.userInfo = info;
