@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import { ImageService } from "../services/image.service";
 import { LogService } from "../services/log.service";
+import { ErrorLogService } from "../services/error-log.service";
 
 const imageService = new ImageService();
 const logService = new LogService();
+const errorLogService = new ErrorLogService();
 
 export const generateImage = async (req: Request, res: Response) => {
     try {
@@ -65,11 +67,16 @@ export const generateImage = async (req: Request, res: Response) => {
             imageUrl: req.body.imageUrl,
             imageUrls: req.body.imageUrls
         });
+        errorLogService.recordFromRequest(req, error, {
+            provider: "dream_nano",
+            context: { apiType: req.body?.apiType },
+        });
         const status = typeof error?.status === 'number' ? error.status : 500;
         const code = typeof error?.code === 'string' && error.code.trim() ? error.code : undefined;
         return res.status(status).json({ 
             code,
             message: error.message || '图片生成失败',
+            trace_id: req.traceId,
             error: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
@@ -94,7 +101,11 @@ export const getImageGenerateResultByGenerationKey = async (req: Request, res: R
         return res.status(200).json({ message: '获取生成结果成功', data });
     } catch (error: any) {
         console.error('[ImageController] 查询生成结果失败:', error);
-        return res.status(500).json({ message: error.message || '查询生成结果失败' });
+        errorLogService.recordFromRequest(req, error, { provider: "dream_nano" });
+        return res.status(500).json({
+            message: error.message || '查询生成结果失败',
+            trace_id: req.traceId,
+        });
     }
 };
 

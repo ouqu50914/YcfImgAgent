@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
 import { AdminService } from "../services/admin.service";
+import { ErrorLogService } from "../services/error-log.service";
 
 const adminService = new AdminService();
+const errorLogService = new ErrorLogService();
 
 /**
  * 获取用户列表
@@ -133,6 +135,58 @@ export const getOperationLogs = async (req: Request, res: Response) => {
 
         const result = await adminService.getOperationLogs(filters);
         return res.status(200).json({ message: "获取成功", data: result });
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * 错误事件日志（系统 / 大模型 / 客户端归一化）
+ */
+export const getErrorLogs = async (req: Request, res: Response) => {
+    try {
+        const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+        const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : 20;
+        const userIdRaw = req.query.userId ? parseInt(req.query.userId as string, 10) : undefined;
+        const numericCodeRaw =
+            req.query.numericCode !== undefined && req.query.numericCode !== ""
+                ? parseInt(req.query.numericCode as string, 10)
+                : undefined;
+
+        const userId = userIdRaw !== undefined && !Number.isNaN(userIdRaw) ? userIdRaw : undefined;
+        const numericCode =
+            numericCodeRaw !== undefined && !Number.isNaN(numericCodeRaw) ? numericCodeRaw : undefined;
+
+        const errorKey = typeof req.query.errorKey === "string" && req.query.errorKey.trim() ? req.query.errorKey.trim() : undefined;
+        const provider = typeof req.query.provider === "string" && req.query.provider.trim() ? req.query.provider.trim() : undefined;
+        const traceId = typeof req.query.traceId === "string" && req.query.traceId.trim() ? req.query.traceId.trim() : undefined;
+        const from = req.query.from ? new Date(req.query.from as string) : undefined;
+        const to = req.query.to ? new Date(req.query.to as string) : undefined;
+
+        const fromOk = from && !Number.isNaN(from.getTime()) ? from : undefined;
+        const toOk = to && !Number.isNaN(to.getTime()) ? to : undefined;
+
+        const result = await errorLogService.queryPage({
+            page,
+            pageSize,
+            ...(userId !== undefined ? { userId } : {}),
+            ...(errorKey !== undefined ? { errorKey } : {}),
+            ...(numericCode !== undefined ? { numericCode } : {}),
+            ...(provider !== undefined ? { provider } : {}),
+            ...(traceId !== undefined ? { traceId } : {}),
+            ...(fromOk !== undefined ? { from: fromOk } : {}),
+            ...(toOk !== undefined ? { to: toOk } : {}),
+        });
+
+        return res.status(200).json({
+            message: "获取成功",
+            data: {
+                logs: result.list,
+                total: result.total,
+                page: result.page,
+                pageSize: result.pageSize,
+            },
+        });
     } catch (error: any) {
         return res.status(500).json({ message: error.message });
     }

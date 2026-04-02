@@ -8,6 +8,7 @@ import {
     resetPassword,
     deleteUser,
     getOperationLogs,
+    getErrorLogs,
     getApiConfigs,
     updateApiConfig,
     getUserStats,
@@ -49,6 +50,7 @@ router.post("/credit-applications/:id/reject", rejectCreditApplication);
 
 // 日志查看
 router.get("/logs", getOperationLogs);
+router.get("/error-logs", getErrorLogs);
 
 // API配置管理
 router.get("/api-configs", getApiConfigs);

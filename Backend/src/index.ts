@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import helmet from "helmet";
-import { DataSource } from "typeorm";
 import path from "path";
 
 import { AppDataSource } from "./data-source";
@@ -22,6 +21,8 @@ import notificationRoutes from "./routes/notification.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 import { errorHandler } from "./middlewares/error.middleware";
 import { convertJsonTimesToBeijingIso } from "./utils/beijing-time";
+import { randomUUID } from "crypto";
+import { runWithRequestTrace } from "./utils/request-trace";
 
 dotenv.config();
 // 本地环境配置：.env.local 会覆盖 .env 中的同名变量（本地开发时使用）
@@ -54,13 +55,26 @@ app.use(cors({
             callback(new Error('不允许的CORS源'));
         }
     },
-    credentials: true
+    credentials: true,
+    exposedHeaders: ["X-Trace-Id"],
 }));
 
 // 调大请求体大小上限，避免工作流自动保存被 100KB 默认限制拦截
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '10mb';
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
+
+// 请求链路 trace_id（供错误日志与客户端报障关联）
+app.use((req, res, next) => {
+    const incoming = req.get("x-trace-id");
+    const traceId =
+        typeof incoming === "string" && incoming.trim().length > 0
+            ? incoming.trim().slice(0, 64)
+            : randomUUID();
+    req.traceId = traceId;
+    res.setHeader("X-Trace-Id", traceId);
+    runWithRequestTrace(traceId, () => next());
+});
 
 // 统一将 JSON 响应中的时间转换为北京时间 ISO(+08:00)
 app.use((req, res, next) => {

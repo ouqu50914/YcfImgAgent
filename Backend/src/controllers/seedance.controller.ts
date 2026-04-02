@@ -257,7 +257,7 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
                 : 500;
         if (status === 401) {
             const r = buildSeedanceUpstreamUnauthorizedResponse(error);
-            return res.status(r.status).json({ code: r.code, message: r.message });
+            return res.status(r.status).json({ code: r.code, message: r.message, trace_id: req.traceId });
         }
 
         return res.status(status).json({
@@ -267,6 +267,7 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
                 (status === 400
                     ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
                     : "创建 Seedance 视频生成任务失败"),
+            trace_id: req.traceId,
         });
     }
 };
@@ -389,7 +390,7 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
                 : 500;
         if (status === 401) {
             const r = buildSeedanceUpstreamUnauthorizedResponse(error);
-            return res.status(r.status).json({ code: r.code, message: r.message });
+            return res.status(r.status).json({ code: r.code, message: r.message, trace_id: req.traceId });
         }
 
         return res.status(status).json({
@@ -399,6 +400,7 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
                 (status === 400
                     ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
                     : "获取 Seedance 视频生成任务失败"),
+            trace_id: req.traceId,
         });
     }
 };
@@ -546,7 +548,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                 : 500;
         if (status === 401) {
             const r = buildSeedanceUpstreamUnauthorizedResponse(error);
-            return res.status(r.status).json({ code: r.code, message: r.message });
+            return res.status(r.status).json({ code: r.code, message: r.message, trace_id: req.traceId });
         }
 
         return res.status(status).json({
@@ -556,6 +558,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                 (status === 400
                     ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
                     : "创建 Seedance 高级视频生成任务失败"),
+            trace_id: req.traceId,
         });
     }
 };

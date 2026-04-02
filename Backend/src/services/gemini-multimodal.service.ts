@@ -1,5 +1,10 @@
 import axios from "axios";
 import { extractVideoKeyFramesJpeg, isFfmpegVideoFramesEnabled } from "../utils/video-frames-ffmpeg";
+import { ErrorLogService } from "./error-log.service";
+import { getRequestTraceId } from "../utils/request-trace";
+import { normalizeProviderError } from "../errors/normalize-provider-error";
+
+const geminiErrorLog = new ErrorLogService();
 
 const MAX_INLINE_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_URLS = 8;
@@ -736,6 +741,23 @@ export async function callGeminiGenerateContent(params: GeminiGenerateContentPar
             axiosCode: err?.code,
             axiosMessage: err?.message,
             requestUrl: err?.config?.url,
+        });
+
+        const norm = normalizeProviderError({
+            provider: "gemini",
+            rawMessage: bodyPreview || err?.message || "",
+            ...(typeof status === "number" ? { httpStatus: status } : {}),
+        });
+        geminiErrorLog.record({
+            traceId: getRequestTraceId(),
+            errorKey: norm.errorKey,
+            messageZh: norm.messageZh,
+            messageRaw: (bodyPreview || err?.message || "").slice(0, 2048),
+            httpStatus: typeof status === "number" ? status : 500,
+            source: "adapter",
+            provider: "gemini",
+            numericCode: norm.numericCode,
+            category: norm.category,
         });
 
         if (status === 400) {

@@ -179,16 +179,23 @@ service.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
     const userStore = useUserStore();
-    // 先打印详细错误日志，方便开发排查
+    const data = (error.response?.data || {}) as any;
+    const traceId =
+      (typeof data.trace_id === 'string' && data.trace_id) ||
+      (error.response?.headers?.['x-trace-id'] as string | undefined);
+
+    // 先打印详细错误日志，方便开发排查（含 Trace ID 便于与后台 error_event 关联）
     console.error('[HTTP ERROR]', {
       url: originalRequest?.url,
       method: originalRequest?.method,
       status: error.response?.status,
       data: error.response?.data,
       message: error.message,
+      trace_id: traceId,
     });
-
-    const data = (error.response?.data || {}) as any;
+    if (traceId) {
+      console.info(`[HTTP] 报障时可提供 Trace ID: ${traceId}`);
+    }
     const backendCode: string | undefined = data.code;
     const backendMsg: string | undefined = data.message;
     const isUpload = isUploadRequest(originalRequest);

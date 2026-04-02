@@ -1,12 +1,19 @@
 import type { Request, Response, NextFunction } from "express";
 import multer, { MulterError } from "multer";
+import { ErrorLogService } from "../services/error-log.service";
+import { getRequestTraceId } from "../utils/request-trace";
+import { resolveForErrorLog } from "../errors/resolve-for-error-log";
 
 interface ErrorResponseBody {
     status: number;
     code: string;
     message: string;
     details?: string;
+    trace_id?: string;
+    numeric_code?: number;
 }
+
+const errorLogService = new ErrorLogService();
 
 const isMulterError = (err: any): err is MulterError => {
     return !!err && (err instanceof multer.MulterError || err.name === "MulterError");
@@ -55,18 +62,46 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
         }
     }
 
-    const body: ErrorResponseBody = { status, code, message };
+    const traceId = req.traceId ?? getRequestTraceId();
+    const resolved = resolveForErrorLog({
+        errorKey: code,
+        messageZh: message,
+        httpStatus: status,
+        ...(details !== undefined && details !== "" ? { messageRaw: details } : {}),
+    });
+    const body: ErrorResponseBody = {
+        status,
+        code: resolved.errorKey,
+        message: resolved.messageZh,
+        trace_id: traceId,
+        numeric_code: resolved.numericCode,
+    };
     if (process.env.NODE_ENV !== "production" && details) {
         body.details = details;
     }
+
+    errorLogService.record({
+        traceId,
+        errorKey: resolved.errorKey,
+        messageZh: resolved.messageZh,
+        messageRaw: details ?? message,
+        httpStatus: status,
+        source: "middleware",
+        userId: req.user?.userId ?? null,
+        requestPath: req.path,
+        method: req.method,
+        numericCode: resolved.numericCode,
+        category: resolved.category,
+    });
 
     // 记录到控制台，便于排查
     console.error("[errorHandler]", {
         path: req.path,
         method: req.method,
         status,
-        code,
+        code: resolved.errorKey,
         details,
+        trace_id: traceId,
     });
 
     res.status(status).json(body);

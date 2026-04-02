@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
 import { VideoService, type CreateVideoTaskInput } from "../services/video.service";
+import { ErrorLogService } from "../services/error-log.service";
 
 const videoService = new VideoService();
+const errorLogService = new ErrorLogService();
 
 export const createVideoTask = async (req: Request, res: Response) => {
     try {
@@ -65,6 +67,7 @@ export const createVideoTask = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 创建任务失败:", error);
+        errorLogService.recordFromRequest(req, error, { provider: "kling" });
         const status =
             typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
 
@@ -72,12 +75,14 @@ export const createVideoTask = async (req: Request, res: Response) => {
             return res.status(502).json({
                 code: "UPSTREAM_UNAUTHORIZED",
                 message: "视频服务鉴权失败，请检查 KLING_ACCESS_KEY / KLING_SECRET_KEY（或网络/账号权限），稍后重试。",
+                trace_id: req.traceId,
             });
         }
 
         return res.status(status).json({
             code: error?.code,
             message: error.message || "创建视频生成任务失败",
+            trace_id: req.traceId,
         });
     }
 };
@@ -101,6 +106,7 @@ export const getVideoTask = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 获取任务失败:", error);
+        errorLogService.recordFromRequest(req, error, { provider: "kling" });
         const status =
             typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
 
@@ -108,12 +114,14 @@ export const getVideoTask = async (req: Request, res: Response) => {
             return res.status(502).json({
                 code: "UPSTREAM_UNAUTHORIZED",
                 message: "视频服务鉴权失败，请稍后重试。",
+                trace_id: req.traceId,
             });
         }
 
         return res.status(status).json({
             code: error?.code,
             message: error.message || "获取视频任务失败",
+            trace_id: req.traceId,
         });
     }
 };
@@ -141,6 +149,7 @@ export const listVideoTasks = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error("[VideoController] 列表查询失败:", error);
+        errorLogService.recordFromRequest(req, error, { provider: "kling" });
         const status =
             typeof error?.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 500;
 
@@ -148,12 +157,14 @@ export const listVideoTasks = async (req: Request, res: Response) => {
             return res.status(502).json({
                 code: "UPSTREAM_UNAUTHORIZED",
                 message: "视频服务鉴权失败，请稍后重试。",
+                trace_id: req.traceId,
             });
         }
 
         return res.status(status).json({
             code: error?.code,
             message: error.message || "获取视频任务列表失败",
+            trace_id: req.traceId,
         });
     }
 };

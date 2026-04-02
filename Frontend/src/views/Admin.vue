@@ -209,6 +209,90 @@
         />
       </el-tab-pane>
 
+      <!-- 错误日志（归一化错误码 / 大模型与系统） -->
+      <el-tab-pane label="错误日志" name="errorLogs">
+        <div class="toolbar">
+          <el-date-picker
+            v-model="errorLogDateRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            @change="loadErrorLogs"
+          />
+          <el-input
+            v-model="errorLogFilters.traceId"
+            placeholder="Trace ID"
+            clearable
+            style="width: 220px; margin-left: 10px"
+            @clear="loadErrorLogs"
+            @keyup.enter="loadErrorLogs"
+          />
+          <el-input
+            v-model="errorLogFilters.errorKey"
+            placeholder="error_key"
+            clearable
+            style="width: 160px; margin-left: 10px"
+            @clear="loadErrorLogs"
+            @keyup.enter="loadErrorLogs"
+          />
+          <el-input
+            v-model="errorLogFilters.numericCode"
+            placeholder="数字码"
+            clearable
+            style="width: 100px; margin-left: 10px"
+            @clear="loadErrorLogs"
+            @keyup.enter="loadErrorLogs"
+          />
+          <el-input
+            v-model="errorLogFilters.provider"
+            placeholder="provider"
+            clearable
+            style="width: 120px; margin-left: 10px"
+            @clear="loadErrorLogs"
+            @keyup.enter="loadErrorLogs"
+          />
+          <el-input
+            v-model="errorLogFilters.userId"
+            placeholder="用户ID"
+            clearable
+            style="width: 100px; margin-left: 10px"
+            @clear="loadErrorLogs"
+            @keyup.enter="loadErrorLogs"
+          />
+          <el-button @click="loadErrorLogs" style="margin-left: 10px">刷新</el-button>
+        </div>
+
+        <el-table :data="errorLogList" border style="margin-top: 20px">
+          <el-table-column prop="id" label="ID" width="72" />
+          <el-table-column prop="created_at" label="时间" width="168" :formatter="formatTableDateTime" />
+          <el-table-column prop="trace_id" label="Trace" width="200" show-overflow-tooltip />
+          <el-table-column prop="error_key" label="error_key" width="160" show-overflow-tooltip />
+          <el-table-column prop="numeric_code" label="数字码" width="88" />
+          <el-table-column prop="category" label="分类" width="88" />
+          <el-table-column prop="message_zh" label="中文说明" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="provider" label="provider" width="100" />
+          <el-table-column prop="user_id" label="用户" width="80" />
+          <el-table-column prop="request_path" label="路径" width="140" show-overflow-tooltip />
+          <el-table-column label="详情" width="88" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openErrorLogDetail(row)">查看</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-pagination
+          v-model:current-page="errorLogPagination.page"
+          v-model:page-size="errorLogPagination.pageSize"
+          :total="errorLogPagination.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="loadErrorLogs"
+          @current-change="loadErrorLogs"
+          style="margin-top: 20px"
+        />
+      </el-tab-pane>
+
       <!-- 分类管理 -->
       <el-tab-pane label="分类管理" name="categories">
         <div class="toolbar">
@@ -424,6 +508,17 @@
         <el-button type="primary" @click="handleResetPassword">确定</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="showErrorLogDetailDialog" title="错误详情" width="640px" destroy-on-close>
+      <template v-if="errorLogDetailRow">
+        <p class="error-detail-label">message_raw</p>
+        <pre class="error-detail-pre">{{ errorLogDetailRow.message_raw || '—' }}</pre>
+        <p class="error-detail-label">provider_code</p>
+        <pre class="error-detail-pre">{{ errorLogDetailRow.provider_code || '—' }}</pre>
+        <p class="error-detail-label">context</p>
+        <pre class="error-detail-pre">{{ JSON.stringify(errorLogDetailRow.context, null, 2) }}</pre>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -442,6 +537,7 @@ import {
   deleteUser,
   getUserStats,
   getOperationLogs,
+  getErrorLogs,
   getApiConfigs,
   updateApiConfig,
   getCreditApplications,
@@ -716,6 +812,49 @@ const loadLogs = async () => {
   }
 };
 
+const errorLogList = ref<any[]>([]);
+const errorLogDateRange = ref<[Date, Date] | null>(null);
+const errorLogFilters = reactive({
+  traceId: '',
+  errorKey: '',
+  numericCode: '',
+  provider: '',
+  userId: ''
+});
+const errorLogPagination = reactive({ page: 1, pageSize: 20, total: 0 });
+const errorLogDetailRow = ref<any>(null);
+const showErrorLogDetailDialog = ref(false);
+
+const loadErrorLogs = async () => {
+  try {
+    const params: Record<string, unknown> = {
+      page: errorLogPagination.page,
+      pageSize: errorLogPagination.pageSize
+    };
+    if (errorLogFilters.traceId.trim()) params.traceId = errorLogFilters.traceId.trim();
+    if (errorLogFilters.errorKey.trim()) params.errorKey = errorLogFilters.errorKey.trim();
+    if (errorLogFilters.provider.trim()) params.provider = errorLogFilters.provider.trim();
+    const nc = parseInt(errorLogFilters.numericCode, 10);
+    if (!Number.isNaN(nc)) params.numericCode = nc;
+    const uid = parseInt(errorLogFilters.userId, 10);
+    if (!Number.isNaN(uid)) params.userId = uid;
+    if (errorLogDateRange.value) {
+      params.from = errorLogDateRange.value[0].toISOString();
+      params.to = errorLogDateRange.value[1].toISOString();
+    }
+    const res: any = await getErrorLogs(params);
+    errorLogList.value = res.data.logs;
+    errorLogPagination.total = res.data.total;
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载错误日志失败');
+  }
+};
+
+const openErrorLogDetail = (row: any) => {
+  errorLogDetailRow.value = row;
+  showErrorLogDetailDialog.value = true;
+};
+
 // API配置
 const apiConfigs = ref([]);
 
@@ -859,6 +998,7 @@ const updateApiConfigLimit = async (apiType: string, limit: number) => {
 watch(activeTab, (tab) => {
   if (tab === 'creditApplications') loadCreditApplications();
   if (tab === 'system') loadHelpDocUrl();
+  if (tab === 'errorLogs') loadErrorLogs();
 });
 
 onMounted(async () => {
@@ -893,6 +1033,25 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--text-main);
   margin: 0;
+}
+
+.error-detail-label {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.error-detail-pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0 0 16px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
 }
 
 .back-button {

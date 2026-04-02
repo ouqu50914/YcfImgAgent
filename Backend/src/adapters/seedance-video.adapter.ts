@@ -3,8 +3,43 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { isCosEnabled, upload as cosUpload, pathToKey } from "../services/cos.service";
+import { ErrorLogService } from "../services/error-log.service";
+import { getRequestTraceId } from "../utils/request-trace";
+import { normalizeProviderError } from "../errors/normalize-provider-error";
 
 const axiosClient = axios.create({ proxy: false });
+const seedanceErrorLog = new ErrorLogService();
+
+function logSeedanceCreateFailure(
+    status: number | undefined,
+    data: unknown,
+    parsed: { friendlyMessage: string; innerCode?: string }
+) {
+    const norm = normalizeProviderError({
+        provider: "seedance",
+        rawMessage: parsed.friendlyMessage,
+        ...(typeof status === "number" ? { httpStatus: status } : {}),
+        ...(parsed.innerCode ? { providerCode: parsed.innerCode } : {}),
+    });
+    let raw = "";
+    try {
+        raw = typeof data === "string" ? data : JSON.stringify(data);
+    } catch {
+        raw = String(data);
+    }
+    seedanceErrorLog.record({
+        traceId: getRequestTraceId(),
+        errorKey: norm.errorKey,
+        messageZh: parsed.friendlyMessage || norm.messageZh,
+        messageRaw: raw.slice(0, 2048),
+        httpStatus: typeof status === "number" ? status : 500,
+        source: "adapter",
+        provider: "seedance",
+        providerCode: parsed.innerCode ?? null,
+        numericCode: norm.numericCode,
+        category: norm.category,
+    });
+}
 
 export interface SeedanceCreateVideoPayload {
     model?: string;
@@ -349,6 +384,7 @@ export class SeedanceVideoAdapter {
                     status,
                     data,
                 });
+                logSeedanceCreateFailure(status, data, parsed);
 
                 const err: any = new Error(parsed.friendlyMessage || error.message);
                 if (typeof status === "number") {
@@ -508,6 +544,7 @@ export class SeedanceVideoAdapter {
                     status,
                     data,
                 });
+                logSeedanceCreateFailure(status, data, parsed);
 
                 const err: any = new Error(parsed.friendlyMessage || error.message);
                 if (typeof status === "number") {
@@ -706,6 +743,23 @@ export class SeedanceVideoAdapter {
                     taskId,
                     status,
                     data,
+                });
+                const norm = normalizeProviderError({
+                    provider: "seedance",
+                    rawMessage: String(msg),
+                    ...(typeof status === "number" ? { httpStatus: status } : {}),
+                });
+                seedanceErrorLog.record({
+                    traceId: getRequestTraceId(),
+                    errorKey: norm.errorKey,
+                    messageZh: norm.messageZh,
+                    messageRaw: String(msg).slice(0, 2048),
+                    httpStatus: typeof status === "number" ? status : 500,
+                    source: "adapter",
+                    provider: "seedance",
+                    context: { taskId },
+                    numericCode: norm.numericCode,
+                    category: norm.category,
                 });
                 const err = new Error(`查询 Seedance 视频任务失败 (${status ?? "未知状态"}): ${msg}`);
                 // 让控制器能够根据上游 HTTP 状态码返回 4xx/5xx，而不是一律 500

@@ -62,6 +62,20 @@ export const getOperationLogs = (params?: {
   return request.get('/admin/logs', { params });
 };
 
+export const getErrorLogs = (params?: {
+  page?: number;
+  pageSize?: number;
+  userId?: number;
+  errorKey?: string;
+  numericCode?: number;
+  provider?: string;
+  traceId?: string;
+  from?: string;
+  to?: string;
+}) => {
+  return request.get('/admin/error-logs', { params });
+};
+
 // API配置管理
 export const getApiConfigs = () => {
   return request.get('/admin/api-configs');
