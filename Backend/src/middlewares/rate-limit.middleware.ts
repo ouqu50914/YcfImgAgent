@@ -30,6 +30,11 @@ export const rateLimit = (options: {
 
             if (count >= max) {
                 const ttl = await redis.ttl(key);
+                // ttl = -1 表示 key 没有过期时间；
+                // 在命中上限后如果不补 expire，会导致用户“永远限流”，无法自动恢复。
+                if (ttl < 0) {
+                    await redis.expire(key, Math.ceil(windowMs / 1000));
+                }
                 const waitSeconds = ttl > 0 ? ttl : Math.ceil(windowMs / 1000);
                 return res.status(429).json({
                     message: `请求过于频繁，请${waitSeconds}秒后再试`,
@@ -43,6 +48,11 @@ export const rateLimit = (options: {
                 await redis.setex(key, Math.ceil(windowMs / 1000), '1');
             } else {
                 await redis.incr(key);
+                // 兜底：历史数据或其它写法可能导致 key 没有过期时间，这里补上窗口
+                const ttlAfterIncr = await redis.ttl(key);
+                if (ttlAfterIncr < 0) {
+                    await redis.expire(key, Math.ceil(windowMs / 1000));
+                }
             }
 
             next();
@@ -84,6 +94,11 @@ export const rateLimitByApiType = async (req: Request, res: Response, next: Next
 
         if (count >= limit.max) {
             const ttl = await redis.ttl(key);
+            // ttl = -1 表示 key 没有过期时间；
+            // 命中上限时补 expire，确保 1 个窗口后可以自动恢复。
+            if (ttl < 0) {
+                await redis.expire(key, Math.ceil(limit.windowMs / 1000));
+            }
             const waitSeconds = ttl > 0 ? ttl : Math.ceil(limit.windowMs / 1000);
             return res.status(429).json({
                 message: `${apiType === 'dream' ? '即梦AI' : 'Nano'}请求过于频繁，请${waitSeconds}秒后再试`,
@@ -95,6 +110,11 @@ export const rateLimitByApiType = async (req: Request, res: Response, next: Next
             await redis.setex(key, Math.ceil(limit.windowMs / 1000), '1');
         } else {
             await redis.incr(key);
+            // 兜底：若 key 没过期，补上窗口
+            const ttlAfterIncr = await redis.ttl(key);
+            if (ttlAfterIncr < 0) {
+                await redis.expire(key, Math.ceil(limit.windowMs / 1000));
+            }
         }
 
         next();

@@ -149,7 +149,7 @@
           size="default"
           class="execute-btn"
           :loading="loading"
-          :disabled="!canExecute"
+          :disabled="!canExecute || loading || generationInFlight || generationCooldownLeftSec > 0 || hasActiveGeneration"
           @click="handleGenerate"
         >
           {{ executeButtonText }}
@@ -720,6 +720,46 @@ const normalizeErrorMessage = (raw: unknown): string | null => {
 };
 
 const loading = ref(false);
+// 防止“短时间内连续点击”触发重复创建任务（从而命中后端 429 限流）。
+// 使用互斥锁 + 429 冷却：当创建接口返回 429 并带 retryAfter 时，冷却期内保持禁用。
+const generationInFlight = ref(false);
+const generationCooldownUntil = ref<number>(0);
+const generationCooldownLeftSec = ref<number>(0);
+let generationCooldownTimer: ReturnType<typeof setInterval> | null = null;
+
+const clearGenerationCooldownTimer = () => {
+  if (generationCooldownTimer) {
+    clearInterval(generationCooldownTimer);
+    generationCooldownTimer = null;
+  }
+};
+
+const setGenerationCooldownSeconds = (seconds: number) => {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s <= 0) return;
+  generationCooldownUntil.value = Date.now() + s * 1000;
+  generationCooldownLeftSec.value = s;
+  clearGenerationCooldownTimer();
+  generationCooldownTimer = setInterval(() => {
+    const leftMs = generationCooldownUntil.value - Date.now();
+    const leftSec = Math.max(0, Math.ceil(leftMs / 1000));
+    generationCooldownLeftSec.value = leftSec;
+    if (leftSec <= 0) {
+      clearGenerationCooldownTimer();
+    }
+  }, 250);
+};
+
+// 是否已有“实际生成任务”在进行中：防止用户在未取到结果前反复点击导致并发创建/并发轮询，从而更容易触发 429。
+const hasActiveGeneration = computed(() => {
+  const isActive = status.value === 'pending' || status.value === 'running';
+  if (!isActive) return false;
+  // seedance：seedanceTaskKey 一旦生成就意味着上游任务已创建/至少已进入轮询
+  if (provider.value === 'seedance') return !!seedanceTaskKey.value;
+  // kling：taskId 一旦生成就意味着上游任务已创建/至少已进入轮询
+  return typeof taskId.value === 'number' && !Number.isNaN(taskId.value);
+});
+
 const showFullscreen = ref(false);
 const fullscreenUrl = ref<string | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -1055,6 +1095,17 @@ const startPollingSeedance = (taskKey: string, opts?: { silent?: boolean }) => {
 };
 
 const handleGenerate = async () => {
+  // 互斥：避免同一节点在 UI 尚未刷新时被重复点击触发多次创建
+  if (generationInFlight.value) return;
+  // 冷却：若上一次创建命中 429（带 retryAfter），冷却期内不允许再次创建
+  if (generationCooldownLeftSec.value > 0 || Date.now() < generationCooldownUntil.value) return;
+
+  // 没有结果之前禁止再次点击（尤其是轮询 toast 导致误以为失败时）
+  if (hasActiveGeneration.value) {
+    ElMessage.warning('视频任务正在生成中，请稍后等待');
+    return;
+  }
+
   if (!inputReady.value) {
     ElMessage.warning('请补全提示词与图片输入');
     return;
@@ -1079,6 +1130,7 @@ const handleGenerate = async () => {
     }
   }
 
+  generationInFlight.value = true;
   loading.value = true;
   errorMessage.value = null;
 
@@ -1620,6 +1672,15 @@ const handleGenerate = async () => {
     startPollingKling(t.id);
   } catch (e: any) {
     console.error('[VideoNode] 创建任务失败', e);
+
+    // 若后端 429 并返回 retryAfter，则进入冷却期，避免连续点击再次触发限流
+    const statusCode: number | undefined = e?.response?.status ?? e?.status;
+    const retryAfterSeconds: number | undefined =
+      typeof e?.response?.data?.retryAfter === 'number' ? e.response.data.retryAfter : undefined;
+    if (statusCode === 429 && typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+      setGenerationCooldownSeconds(retryAfterSeconds);
+    }
+
     // 失败时也同步到结果节点，显示错误状态与文案
     status.value = 'failed';
     errorMessage.value = normalizeErrorMessage(e?.message) || '创建视频任务失败';
@@ -1628,6 +1689,7 @@ const handleGenerate = async () => {
     // 统一错误提示交给全局拦截器，这里不再重复 toast
   } finally {
     loading.value = false;
+    generationInFlight.value = false;
   }
 };
 
@@ -1821,6 +1883,7 @@ onUnmounted(() => {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  clearGenerationCooldownTimer();
 });
 </script>
 
