@@ -151,10 +151,7 @@ const userStore = useUserStore();
 
 // 图层分离使用 Dream API，固定 1 积分
 const executeCost = 1;
-const canExecute = computed(() => {
-    if (userStore.userInfo?.role === 1) return true;
-    return (userStore.userInfo?.credits ?? 0) >= executeCost;
-});
+const canExecute = computed(() => userStore.canAffordOperation(executeCost));
 const executeButtonText = computed(() => {
     if (loading.value) return '分离中...';
     if (userStore.userInfo?.role === 1) return '开始分离';

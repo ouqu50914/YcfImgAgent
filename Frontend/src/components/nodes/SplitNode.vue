@@ -156,10 +156,7 @@ const nanoModel = computed<string | undefined>(() => {
 });
 
 const executeCost = computed(() => getCreditCost(apiType.value, 'split'));
-const canExecute = computed(() => {
-    if (userStore.userInfo?.role === 1) return true;
-    return (userStore.userInfo?.credits ?? 0) >= executeCost.value;
-});
+const canExecute = computed(() => userStore.canAffordOperation(executeCost.value));
 const executeButtonText = computed(() => {
     if (loading.value) return '拆分中...';
     if (userStore.userInfo?.role === 1) return '开始拆分';

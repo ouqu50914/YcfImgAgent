@@ -9,8 +9,8 @@
     </div>
 
     <div class="node-content">
-      <!-- 上半部分：参数表单 -->
-      <div class="params-section">
+      <!-- 上半部分：参数表单（nodrag：避免点击控件时触发节点拖拽） -->
+      <div class="params-section nodrag">
         <div class="param-item">
           <div class="param-label">模型</div>
           <el-select v-model="provider" size="small" class="param-select" disabled>
@@ -434,14 +434,62 @@ const syncResultVideoNode = () => {
 const mode = ref<VideoMode>('text_to_video');
 const imageSubType = ref<ImageSubType>('first_only');
 
+/** 连入本节点的上游签名（用 getNodes.find 收集依赖，避免 findNode 与 data.text 追踪不稳定） */
+const videoUpstreamSig = computed(() => {
+  const nodes = getNodes.value;
+  const parts: string[] = [];
+  for (const e of getEdges.value) {
+    if (e.target !== props.id) continue;
+    const n = nodes.find((x) => x.id === e.source);
+    if (!n) {
+      parts.push('');
+      continue;
+    }
+    if (n.type === 'prompt') {
+      parts.push(`p:${String((n.data as { text?: string })?.text ?? '')}`);
+    } else if (n.type === 'image') {
+      const d = n.data as Record<string, unknown>;
+      parts.push(
+        `i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}:${JSON.stringify(d?.imageUrls ?? [])}`
+      );
+    } else if (n.type === 'videoRef') {
+      const d = n.data as Record<string, unknown>;
+      parts.push(`vr:${String(d?.url ?? '')}:${String(d?.durationSeconds)}`);
+    } else if (n.type === 'videoResult') {
+      const d = n.data as Record<string, unknown>;
+      parts.push(`vres:${String(d?.videoUrl ?? '')}`);
+    } else if (n.type === 'audioRef') {
+      const d = n.data as Record<string, unknown>;
+      parts.push(`ar:${String(d?.url ?? '')}:${String(d?.durationSeconds)}`);
+    } else {
+      parts.push(n.type);
+    }
+  }
+  return parts.join('\u0001');
+});
+
+function readConnectedPromptFromEdges(): string {
+  const nodes = getNodes.value;
+  let prompt = '';
+  for (const e of getEdges.value) {
+    if (e.target !== props.id) continue;
+    const n = nodes.find((x) => x.id === e.source);
+    if (n?.type !== 'prompt' || typeof n.data?.text !== 'string') continue;
+    const t = n.data.text;
+    if (t.length > 0 && !prompt) prompt = t;
+  }
+  return prompt;
+}
+
 // 监听连接变化，提取提示词、图片、视频参考、音频参考
 watch(
-  () => [getEdges.value, imageSubType.value],
+  () => [getEdges.value, imageSubType.value, videoUpstreamSig.value],
   () => {
     const edges = getEdges.value;
+    const nodes = getNodes.value;
     const targetEdges = edges.filter(e => e.target === props.id);
 
-    connectedPrompt.value = '';
+    connectedPrompt.value = readConnectedPromptFromEdges();
     connectedImageUrl.value = null;
     connectedEndImageUrl.value = null;
     connectedImageUrls.value = [];
@@ -457,12 +505,8 @@ watch(
     const videoRefMetaSources: MediaRefMeta[] = [];
     const audioRefMetaSources: MediaRefMeta[] = [];
     for (const edge of targetEdges) {
-      const sourceNode = findNode(edge.source);
+      const sourceNode = nodes.find((x) => x.id === edge.source);
       if (!sourceNode) continue;
-
-      if (sourceNode.type === 'prompt' && sourceNode.data?.text && !connectedPrompt.value) {
-        connectedPrompt.value = sourceNode.data.text as string;
-      }
 
       if (sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
         const url = sourceNode.data.imageUrl as string;
@@ -609,7 +653,7 @@ watch(
       }
     }
   },
-  { immediate: true, deep: true }
+  { immediate: true }
 );
 
 // 表单状态（其余）
@@ -691,7 +735,6 @@ const clearPollTimer = () => {
 function getSeedanceCreditsPerSecond(): number {
   // 与后端默认保持一致：20 积分 / 秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
   const raw = import.meta.env.VITE_SEEDANCE_CREDITS_PER_SECOND;
-  console.log('raw', raw);
   const n = raw != null ? Number(raw) : 28;
   if (Number.isNaN(n) || n <= 0) return 28;
   return n;
@@ -713,10 +756,7 @@ const executeCost = computed(() => {
 });
 
 const canAfford = computed(() => {
-  if (userStore.userInfo?.role === 1) return true;
-  const need = executeCost.value;
-  if (need <= 0) return true;
-  return (userStore.userInfo?.credits ?? 0) >= need;
+  return userStore.canAffordOperation(executeCost.value);
 });
 
 const statusText = computed(() => {
@@ -1041,6 +1081,9 @@ const handleGenerate = async () => {
 
   loading.value = true;
   errorMessage.value = null;
+
+  // 富文本提示词就地更新 data.text 时，兜底再读一次连线（与 dreamUpstreamSig / watch 一致）
+  connectedPrompt.value = readConnectedPromptFromEdges();
 
   // 开始一次新生成前，先清空旧任务 key（避免历史/并发导致的错误恢复）
   seedanceTaskKey.value = null;
@@ -1782,6 +1825,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.video-node .nodrag {
+  cursor: auto;
+}
+
 .video-node {
   background: #2d2d2d;
   border: 1px solid #404040;

@@ -1,68 +1,149 @@
 <template>
     <div class="prompt-node" :style="{ width: promptWidth + 'px' }">
-      <div class="node-header">
-        <el-icon><EditPen /></el-icon>
-        <span>提示词输入</span>
-      </div>
-      
-      <div class="node-content">
+        <div class="node-header">
+            <el-icon><EditPen /></el-icon>
+            <span>提示词输入</span>
+        </div>
+
+        <div class="node-content">
+            <div v-if="editor" class="prompt-toolbar nodrag">
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isBold }"
+                    title="加粗"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleBold().run())"
+                >
+                    B
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isItalic }"
+                    title="斜体"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleItalic().run())"
+                >
+                    I
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isH2 }"
+                    title="标题 2"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleHeading({ level: 2 }).run())"
+                >
+                    H2
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isH3 }"
+                    title="标题 3"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleHeading({ level: 3 }).run())"
+                >
+                    H3
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isBullet }"
+                    title="无序列表"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleBulletList().run())"
+                >
+                    •
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isOrdered }"
+                    title="有序列表"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleOrderedList().run())"
+                >
+                    1.
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    :class="{ active: isQuote }"
+                    title="引用"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().toggleBlockquote().run())"
+                >
+                    ”
+                </button>
+                <span class="tb-sep" />
+                <button
+                    type="button"
+                    class="tb-btn"
+                    title="撤销"
+                    :disabled="!canUndo"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().undo().run())"
+                >
+                    ↶
+                </button>
+                <button
+                    type="button"
+                    class="tb-btn"
+                    title="重做"
+                    :disabled="!canRedo"
+                    @mousedown.prevent
+                    @click="run(() => editor!.chain().focus().redo().run())"
+                >
+                    ↷
+                </button>
+            </div>
+
             <div class="prompt-content nodrag">
                 <div class="prompt-input-wrap" @wheel.stop>
-                    <div ref="mirrorRef" class="prompt-mirror">
-                        <div class="prompt-mirror-inner" v-html="highlightedHtml" />
-                    </div>
-                    <textarea
-                        ref="promptInputRef"
-                        v-model="text"
-                        class="prompt-input prompt-input-overlay"
-                        placeholder="请输入提示词..."
-                        maxlength="2000"
-                        rows="4"
-                        @compositionstart="isComposing = true"
-                        @compositionend="handleCompositionEnd"
-                        @input="handlePromptInput"
-                        @keydown="handlePromptKeydown"
-                    />
-                </div>
-                
-                <!-- 提示词列表下拉框 -->
-                <div
-                    v-if="showPromptSuggestions && promptTemplates.length > 0"
-                    class="prompt-suggestions"
-                >
-                    <div
-                        v-for="(template, index) in filteredTemplates"
-                        :key="template.id"
-                        class="suggestion-item"
-                        :class="{ active: selectedSuggestionIndex === index }"
-                        @click="selectPromptTemplate(template)"
-                        @mouseenter="selectedSuggestionIndex = index"
-                    >
-                        <span class="suggestion-dot"></span>
-                        <span class="suggestion-name">{{ template.name || '未命名提示词' }}</span>
-                    </div>
-                </div>
+                    <EditorContent v-if="editor" :editor="editor" class="prompt-editor-host" />
 
-                <!-- 图片别名 @ 图列表 -->
-                <div
-                    v-if="showAliasSuggestions && aliasSuggestions.length > 0"
-                    class="prompt-suggestions alias-suggestions"
-                >
                     <div
-                        v-for="(item, index) in aliasSuggestions"
-                        :key="item.key"
-                        class="suggestion-item"
-                        :class="{ active: selectedAliasIndex === index }"
-                        @click="selectImageAlias(item)"
-                        @mouseenter="selectedAliasIndex = index"
+                        v-if="showPromptSuggestions && promptTemplates.length > 0"
+                        class="prompt-suggestions"
                     >
-                        <span class="suggestion-dot"></span>
-                        <span class="suggestion-name">{{ '@' + item.alias }}</span>
+                        <div
+                            v-for="(template, index) in filteredTemplates"
+                            :key="template.id"
+                            class="suggestion-item"
+                            :class="{ active: selectedSuggestionIndex === index }"
+                            @click="selectPromptTemplate(template)"
+                            @mouseenter="selectedSuggestionIndex = index"
+                        >
+                            <span class="suggestion-dot" />
+                            <span class="suggestion-name">{{ template.name || '未命名提示词' }}</span>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="showAliasSuggestions && aliasSuggestions.length > 0"
+                        class="prompt-suggestions alias-suggestions"
+                    >
+                        <div
+                            v-for="(item, index) in aliasSuggestions"
+                            :key="item.key"
+                            class="suggestion-item"
+                            :class="{ active: selectedAliasIndex === index }"
+                            @click="selectImageAlias(item)"
+                            @mouseenter="selectedAliasIndex = index"
+                        >
+                            <span class="suggestion-dot" />
+                            <span class="suggestion-name">{{ '@' + item.alias }}</span>
+                        </div>
                     </div>
                 </div>
             </div>
-            
-            <!-- 操作按钮 -->
+
+            <div class="prompt-meta nodrag">
+                <span class="char-count">{{ plainCharCount }} / {{ MAX_PLAIN_CHARS }}</span>
+            </div>
+
             <div class="prompt-actions nodrag">
                 <el-button
                     size="small"
@@ -74,25 +155,23 @@
                     保存提示词
                 </el-button>
             </div>
-      </div>
-  
-      <!-- 只有输出端口 (Source)，位于右侧 -->
-      <Handle 
-        id="prompt-source" 
-        type="source" 
-        :position="Position.Right" 
-        :style="{ 
-          background: '#409eff', 
-          width: '12px', 
-          height: '12px', 
-          border: '2px solid white',
-          borderRadius: '50%',
-          cursor: 'crosshair'
-        }"
-      />
+        </div>
+
+        <Handle
+            id="prompt-source"
+            type="source"
+            :position="Position.Right"
+            :style="{
+                background: '#409eff',
+                width: '12px',
+                height: '12px',
+                border: '2px solid white',
+                borderRadius: '50%',
+                cursor: 'crosshair',
+            }"
+        />
     </div>
-    
-    <!-- 保存提示词对话框（居中） -->
+
     <el-dialog
         v-model="showSavePromptDialog"
         title="保存自定义提示词"
@@ -118,14 +197,7 @@
                 />
             </el-form-item>
             <el-form-item label="提示词内容">
-                <el-input
-                    :value="text"
-                    type="textarea"
-                    :rows="8"
-                    readonly
-                    disabled
-                    size="large"
-                />
+                <el-input :value="text" type="textarea" :rows="8" readonly disabled size="large" />
             </el-form-item>
             <el-form-item label="描述（可选）">
                 <el-input
@@ -144,19 +216,28 @@
             <el-button type="primary" size="large" @click="handleSavePrompt">确认</el-button>
         </template>
     </el-dialog>
-  </template>
-  
+</template>
+
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted, inject, nextTick } from 'vue';
+import { ref, watch, computed, onUnmounted, inject, nextTick } from 'vue';
 import { Handle, Position, type NodeProps, useVueFlow } from '@vue-flow/core';
 import { EditPen } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
+import { useEditor, EditorContent } from '@tiptap/vue-3';
+import type { JSONContent } from '@tiptap/core';
+import { Extension, getTextBetween } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
-// 声明 Vue Flow 会注入的事件，避免控制台出现 updateNodeInternals 的警告
 defineEmits<{
-  updateNodeInternals: [];
+    updateNodeInternals: [];
 }>();
+
+const BLOCK_SEP = '\n';
+const MAX_PLAIN_CHARS = 2000;
 
 type ImageAliasStore = {
     getOrCreateAlias: (imageKey: string) => string;
@@ -169,69 +250,205 @@ type MediaAliasStore = {
 };
 
 const props = defineProps<NodeProps>();
-const text = ref(props.data?.text || '');
+const text = ref(typeof props.data?.text === 'string' ? props.data.text : '');
 const promptWidth = ref(360);
-
-const { getEdges, findNode } = useVueFlow();
-
-// 当内部输入变化时，同步到节点数据
-watch(text, (val) => {
-  props.data.text = val;
-  recomputePromptWidth();
-});
-
-// 当从历史记录 / 模板加载时，节点 data.text 可能先于组件创建好，这里反向同步到本地 text
-watch(
-  () => props.data?.text,
-  (val) => {
-    if (typeof val === 'string' && val !== text.value) {
-      text.value = val;
-    }
-  },
-  { immediate: true }
-);
-
-// 是否处于输入法组合输入阶段（中文拼音等）
+const uiTick = ref(0);
 const isComposing = ref(false);
 
-// 提示词模板相关
+const { getEdges, findNode, updateNodeData } = useVueFlow();
+
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
 const selectedSuggestionIndex = ref(0);
-const promptInputRef = ref<HTMLTextAreaElement | null>(null);
 
-// 图片别名 @图1 自动补全
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
-// 视频 / 音频别名自动补全
 const mediaAliasStore = inject<MediaAliasStore | null>('mediaAliasStore', null);
 const showAliasSuggestions = ref(false);
 const aliasSuggestions = ref<{ key: string; alias: string }[]>([]);
 const selectedAliasIndex = ref(0);
 
-// 镜像高亮：@图1、@图2 等显示为蓝色
-const mirrorRef = ref<HTMLElement | null>(null);
-function escapeHtml(s: string): string {
-    return s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\n/g, '<br>');
-}
-const highlightedHtml = computed(() => {
-    const raw = text.value || '';
-    const escaped = escapeHtml(raw);
-    // 先高亮 @图1、@图2（保留 @ 并蓝色显示）
-    let out = escaped.replace(/@(图\d+)/g, '<span class="prompt-ref">@$1</span>');
-    // 再高亮未带 @ 的 图1、图2（仅显示高亮，不改变实际值）
-    out = out.replace(/(^|<br>|[\s\u00A0])(图\d+)(?=[\s\u00A0，。、；：!?]|$|<br>)/g, '$1<span class="prompt-ref">$2</span>');
-    return out;
-});
-
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
 const savePromptDescription = ref('');
 
-// 根据文本长度粗略调整节点宽度，避免极窄极高
+function plainToDoc(plain: string): JSONContent {
+    const lines = plain.split('\n');
+    const content: JSONContent[] = lines.map((line) => ({
+        type: 'paragraph',
+        content: line ? [{ type: 'text', text: line }] : [],
+    }));
+    if (content.length === 0) {
+        return { type: 'doc', content: [{ type: 'paragraph' }] };
+    }
+    return { type: 'doc', content };
+}
+
+function getInitialDoc(): JSONContent {
+    const d = props.data as Record<string, unknown> | undefined;
+    const doc = d?.promptDoc as JSONContent | undefined;
+    if (doc && typeof doc === 'object' && doc.type === 'doc') {
+        return doc;
+    }
+    return plainToDoc(typeof d?.text === 'string' ? d.text : '');
+}
+
+function docPlainLength(doc: Parameters<typeof getTextBetween>[0]): number {
+    return getTextBetween(doc, { from: 0, to: doc.content.size }, { blockSeparator: BLOCK_SEP }).length;
+}
+
+/** ProseMirror position of the plain-text character at index `charIndex` (0-based). */
+function pmPosOfPlainCharIndex(doc: Parameters<typeof getTextBetween>[0], charIndex: number): number {
+    if (charIndex <= 0) return 1;
+    const max = doc.content.size;
+    for (let p = 1; p <= max; p++) {
+        const len = getTextBetween(doc, { from: 0, to: p }, { blockSeparator: BLOCK_SEP }).length;
+        if (len > charIndex) return p - 1;
+    }
+    return max;
+}
+
+const PromptPlainTextLimit = Extension.create({
+    name: 'promptPlainTextLimit',
+    addProseMirrorPlugins() {
+        return [
+            new Plugin({
+                key: new PluginKey('promptPlainTextLimit'),
+                filterTransaction(tr, state) {
+                    if (!tr.docChanged) return true;
+                    const newLen = docPlainLength(tr.doc);
+                    if (newLen <= MAX_PLAIN_CHARS) return true;
+                    const oldLen = docPlainLength(state.doc);
+                    if (newLen > oldLen) return false;
+                    return true;
+                },
+            }),
+        ];
+    },
+});
+
+const RE_AT_MEDIA_REF = /@(?:图|视频|音频)\d+/g;
+/** 与旧版镜像高亮一致：行首/空白后的 图1、视频1 等（后跟标点或空白或结尾），不含 @ 前缀 */
+const RE_BARE_MEDIA_REF =
+    /(^|[\s\u00A0])((?:图|视频|音频)\d+)(?=[\s\u00A0，。、；：!?]|$)/g;
+
+function promptRefDecorationsForDoc(doc: Parameters<typeof getTextBetween>[0]): DecorationSet {
+    const decorations: Decoration[] = [];
+    doc.descendants((node, pos) => {
+        if (!node.isText || !node.text) return;
+        const t = node.text;
+        let m: RegExpExecArray | null;
+        RE_AT_MEDIA_REF.lastIndex = 0;
+        while ((m = RE_AT_MEDIA_REF.exec(t)) !== null) {
+            const chunk = m[0] ?? '';
+            if (!chunk) continue;
+            const from = pos + m.index;
+            decorations.push(
+                Decoration.inline(from, from + chunk.length, { class: 'prompt-ref-inline' })
+            );
+        }
+        RE_BARE_MEDIA_REF.lastIndex = 0;
+        while ((m = RE_BARE_MEDIA_REF.exec(t)) !== null) {
+            const full = m[0] ?? '';
+            const alias = m[2] ?? '';
+            if (!full || !alias) continue;
+            const startInNode = m.index + full.indexOf(alias);
+            const from = pos + startInNode;
+            decorations.push(
+                Decoration.inline(from, from + alias.length, { class: 'prompt-ref-inline' })
+            );
+        }
+    });
+    return DecorationSet.create(doc, decorations);
+}
+
+const PromptRefHighlight = Extension.create({
+    name: 'promptRefHighlight',
+    addProseMirrorPlugins() {
+        const key = new PluginKey('promptRefHighlight');
+        return [
+            new Plugin({
+                key,
+                state: {
+                    init(_, state) {
+                        return promptRefDecorationsForDoc(state.doc);
+                    },
+                    apply(tr, value, _oldState, newState) {
+                        if (tr.docChanged) {
+                            return promptRefDecorationsForDoc(newState.doc);
+                        }
+                        return value;
+                    },
+                },
+                props: {
+                    decorations(state) {
+                        return key.getState(state);
+                    },
+                },
+            }),
+        ];
+    },
+});
+
+const editor = useEditor({
+    extensions: [
+        StarterKit.configure({
+            codeBlock: false,
+            horizontalRule: false,
+            heading: { levels: [2, 3] },
+        }),
+        Placeholder.configure({ placeholder: '请输入提示词...' }),
+        PromptPlainTextLimit,
+        PromptRefHighlight,
+    ],
+    content: getInitialDoc(),
+    editorProps: {
+        attributes: {
+            class: 'prompt-tiptap-editor',
+            spellcheck: 'false',
+        },
+        handleDOMEvents: {
+            compositionstart: () => {
+                isComposing.value = true;
+                return false;
+            },
+            compositionend: () => {
+                isComposing.value = false;
+                nextTick(() => updateSuggestionUI());
+                return false;
+            },
+            keydown: (_view, event) => handleEditorKeydown(event),
+        },
+    },
+    onUpdate: () => {
+        uiTick.value++;
+        syncNodeData();
+        updateSuggestionUI();
+    },
+    onSelectionUpdate: () => {
+        uiTick.value++;
+        updateSuggestionUI();
+    },
+});
+
+const plainCharCount = computed(() => {
+    uiTick.value;
+    if (!editor.value) return text.value.length;
+    return docPlainLength(editor.value.state.doc);
+});
+
+function syncNodeData() {
+    const ed = editor.value;
+    if (!ed || isComposing.value) return;
+    const plain = ed.getText({ blockSeparator: BLOCK_SEP });
+    text.value = plain;
+    // 替换 data 引用，确保 Vue Flow 与下游 dreamUpstreamSig 能订阅到 text 变化（仅改 props.data 字段可能不触发）
+    updateNodeData(props.id, {
+        text: plain,
+        promptDoc: ed.getJSON(),
+    });
+    recomputePromptWidth();
+}
+
 function recomputePromptWidth() {
     const len = (text.value || '').length;
     let w = 400;
@@ -242,42 +459,68 @@ function recomputePromptWidth() {
     promptWidth.value = w;
 }
 
-// 过滤模板（支持 /keyword 搜索）
 const filteredTemplates = computed(() => {
     const value = text.value || '';
     const slashIndex = value.lastIndexOf('/');
     if (slashIndex === -1) return promptTemplates.value;
     const keyword = value.slice(slashIndex + 1).trim().toLowerCase();
     if (!keyword) return promptTemplates.value;
-    return promptTemplates.value.filter(t =>
-        (t.name || '').toLowerCase().includes(keyword) ||
-        (t.content || '').toLowerCase().includes(keyword)
+    return promptTemplates.value.filter(
+        (t) =>
+            (t.name || '').toLowerCase().includes(keyword) ||
+            (t.content || '').toLowerCase().includes(keyword)
     );
 });
 
-// 加载提示词模板列表
-const loadPromptTemplates = async () => {
-    try {
-        const res: any = await getPromptTemplates();
-        promptTemplates.value = res.data || [];
-    } catch (error: any) {
-        console.error('加载提示词模板失败:', error);
-    }
-};
+function run(fn: () => void) {
+    fn();
+    uiTick.value++;
+}
 
-// 计算与当前提示词节点通过同一生图 / 视频生成节点关联的资源别名列表
-// 图片：与提示词节点通过同一「生图节点」或「视频生成节点」相连时，使用图别名（图1、图2）
-// 视频/音频参考：与提示词节点通过同一「视频生成节点」相连时，使用自动生成的“视频1、音频1”等别名
+const isBold = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('bold') ?? false;
+});
+const isItalic = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('italic') ?? false;
+});
+const isH2 = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('heading', { level: 2 }) ?? false;
+});
+const isH3 = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('heading', { level: 3 }) ?? false;
+});
+const isBullet = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('bulletList') ?? false;
+});
+const isOrdered = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('orderedList') ?? false;
+});
+const isQuote = computed(() => {
+    uiTick.value;
+    return editor.value?.isActive('blockquote') ?? false;
+});
+const canUndo = computed(() => {
+    uiTick.value;
+    return editor.value?.can().undo() ?? false;
+});
+const canRedo = computed(() => {
+    uiTick.value;
+    return editor.value?.can().redo() ?? false;
+});
+
 const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
     const result: { key: string; alias: string }[] = [];
-
     const edges = getEdges.value || [];
     if (!Array.isArray(edges) || edges.length === 0) return result;
 
-    // ---------- 图片：通过同一生图节点 / 视频生成节点 关联 ----------
     if (imageAliasStore) {
-        const bridgeNodeIds = new Set<string>(); // 生图节点 + 视频生成节点
-
+        const bridgeNodeIds = new Set<string>();
         for (const edge of edges) {
             if (!edge?.source || !edge?.target) continue;
             if (edge.source !== props.id) continue;
@@ -286,43 +529,32 @@ const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
                 bridgeNodeIds.add(targetNode.id);
             }
         }
-
         if (bridgeNodeIds.size > 0) {
             const aliasMap: Record<string, string> = {};
-
             for (const edge of edges) {
                 if (!edge?.source || !edge?.target) continue;
                 if (!bridgeNodeIds.has(edge.target)) continue;
-
                 const imageNode = findNode(edge.source);
                 if (!imageNode || imageNode.type !== 'image') continue;
-
-                const data: any = imageNode.data || {};
-                const key: string | undefined =
-                    data.imageKey || data.originalImageUrl || data.imageUrl;
+                const data: Record<string, unknown> = (imageNode.data || {}) as Record<string, unknown>;
+                const key =
+                    (data.imageKey || data.originalImageUrl || data.imageUrl) as string | undefined;
                 if (!key) continue;
-
-                let alias: string | undefined = data.imageAlias;
+                let alias = data.imageAlias as string | undefined;
                 if (!alias) {
                     alias = imageAliasStore.getOrCreateAlias(key);
                     data.imageAlias = alias;
                     data.imageKey = key;
                 }
-
-                if (!aliasMap[key]) {
-                    aliasMap[key] = alias;
-                }
+                if (!aliasMap[key]) aliasMap[key] = alias;
             }
-
             for (const [key, alias] of Object.entries(aliasMap)) {
                 result.push({ key, alias });
             }
         }
     }
 
-    // ---------- 视频 / 音频参考节点：通过同一视频生成节点关联 ----------
     const videoNodeIds = new Set<string>();
-
     for (const edge of edges) {
         if (!edge?.source || !edge?.target) continue;
         if (edge.source !== props.id) continue;
@@ -331,24 +563,17 @@ const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
             videoNodeIds.add(targetNode.id);
         }
     }
-
     if (videoNodeIds.size > 0) {
-        const seenKeys = new Set<string>(result.map(r => r.key));
-
+        const seenKeys = new Set<string>(result.map((r) => r.key));
         for (const edge of edges) {
             if (!edge?.source || !edge?.target) continue;
             if (!videoNodeIds.has(edge.target)) continue;
-
             const node = findNode(edge.source);
             if (!node) continue;
-
             if (node.type !== 'videoRef' && node.type !== 'audioRef') continue;
-
-            const data: any = node.data || {};
-            const key: string = node.id;
-
-            // 自动生成或复用别名，优先从节点 data.resourceAlias 读取
-            let alias: string | undefined = (data.resourceAlias as string | undefined)?.trim();
+            const data: Record<string, unknown> = (node.data || {}) as Record<string, unknown>;
+            const key = node.id;
+            let alias = (data.resourceAlias as string | undefined)?.trim();
             if (!alias && mediaAliasStore) {
                 if (node.type === 'videoRef') {
                     alias = mediaAliasStore.getOrCreateVideoAlias(key);
@@ -357,77 +582,52 @@ const getRelatedResourceAliases = (): { key: string; alias: string }[] => {
                 }
                 data.resourceAlias = alias;
             }
-
             if (!alias) continue;
-
             if (!seenKeys.has(key)) {
                 seenKeys.add(key);
                 result.push({ key, alias });
             }
         }
     }
-
     return result;
 };
 
-// 处理提示词输入
-const handlePromptInput = () => {
-    // 输入法组合过程中不做任何模板 / 别名联想与文本重写，避免中文输入导致的重复 / 光标错位
-    if (isComposing.value) {
-        return;
-    }
+function plainCursorOffset(ed: NonNullable<typeof editor.value>): number {
+    return getTextBetween(ed.state.doc, { from: 0, to: ed.state.selection.from }, {
+        blockSeparator: BLOCK_SEP,
+    }).length;
+}
 
-    props.data.text = text.value;
-
-    const currentValue = text.value || '';
+function updateSuggestionUI() {
+    if (isComposing.value || !editor.value) return;
+    const ed = editor.value;
+    const currentValue = ed.getText({ blockSeparator: BLOCK_SEP });
     const slashIndex = currentValue.lastIndexOf('/');
     const atIndex = currentValue.lastIndexOf('@');
+    const cursorOffset = plainCursorOffset(ed);
 
-    // / 模板提示
-    if (slashIndex !== -1 && (slashIndex > atIndex)) {
+    if (slashIndex !== -1 && slashIndex > atIndex) {
         showPromptSuggestions.value = filteredTemplates.value.length > 0;
         selectedSuggestionIndex.value = 0;
     } else {
         showPromptSuggestions.value = false;
     }
 
-    // @ 资源名提示（图片别名 / 视频参考 / 音频参考）
-    if (atIndex !== -1 && atIndex >= 0) {
-        const textareaEl = getTextareaEl();
-        const cursorPos = textareaEl?.selectionStart ?? currentValue.length;
-
-        // 只有当光标在该 @ 之后时，才认为用户正在输入别名
-        if (cursorPos >= atIndex + 1) {
-            const rawKeyword = currentValue.slice(atIndex + 1, cursorPos);
-            const keyword = rawKeyword.trim();
-
-            const all = getRelatedResourceAliases();
-            const list = all.filter(item =>
-                !keyword ||
-                item.alias.includes(keyword)
-            );
-            showAliasSuggestions.value = list.length > 0;
-            aliasSuggestions.value = list;
-            selectedAliasIndex.value = 0;
-        } else {
-            showAliasSuggestions.value = false;
-            aliasSuggestions.value = [];
-        }
+    if (atIndex !== -1 && cursorOffset >= atIndex + 1) {
+        const rawKeyword = currentValue.slice(atIndex + 1, cursorOffset);
+        const keyword = rawKeyword.trim();
+        const all = getRelatedResourceAliases();
+        const list = all.filter((item) => !keyword || item.alias.includes(keyword));
+        showAliasSuggestions.value = list.length > 0;
+        aliasSuggestions.value = list;
+        selectedAliasIndex.value = 0;
     } else {
         showAliasSuggestions.value = false;
         aliasSuggestions.value = [];
     }
-};
+}
 
-// 组合输入结束时再统一执行一次输入处理逻辑
-const handleCompositionEnd = () => {
-    isComposing.value = false;
-    handlePromptInput();
-};
-
-// 处理键盘事件
-const handlePromptKeydown = (event: KeyboardEvent) => {
-    // 图片别名选择优先
+function handleEditorKeydown(event: KeyboardEvent): boolean {
     if (showAliasSuggestions.value && aliasSuggestions.value.length > 0) {
         if (event.key === 'ArrowDown') {
             event.preventDefault();
@@ -435,21 +635,24 @@ const handlePromptKeydown = (event: KeyboardEvent) => {
                 selectedAliasIndex.value + 1,
                 aliasSuggestions.value.length - 1
             );
-            return;
-        } else if (event.key === 'ArrowUp') {
+            return true;
+        }
+        if (event.key === 'ArrowUp') {
             event.preventDefault();
             selectedAliasIndex.value = Math.max(selectedAliasIndex.value - 1, 0);
-            return;
-        } else if (event.key === 'Enter' && !event.shiftKey) {
+            return true;
+        }
+        if (event.key === 'Enter' && !event.shiftKey) {
             const selected = aliasSuggestions.value[selectedAliasIndex.value];
             if (selected) {
                 event.preventDefault();
                 selectImageAlias(selected);
-                return;
+                return true;
             }
-        } else if (event.key === 'Escape') {
+        }
+        if (event.key === 'Escape') {
             showAliasSuggestions.value = false;
-            return;
+            return true;
         }
     }
 
@@ -460,75 +663,85 @@ const handlePromptKeydown = (event: KeyboardEvent) => {
                 selectedSuggestionIndex.value + 1,
                 filteredTemplates.value.length - 1
             );
-        } else if (event.key === 'ArrowUp') {
+            return true;
+        }
+        if (event.key === 'ArrowUp') {
             event.preventDefault();
             selectedSuggestionIndex.value = Math.max(selectedSuggestionIndex.value - 1, 0);
-        } else if (event.key === 'Enter' && !event.shiftKey) {
-            // 选择模板
+            return true;
+        }
+        if (event.key === 'Enter' && !event.shiftKey) {
             const selectedTemplate = filteredTemplates.value[selectedSuggestionIndex.value];
             if (selectedTemplate) {
                 event.preventDefault();
                 selectPromptTemplate(selectedTemplate);
+                return true;
             }
-        } else if (event.key === 'Escape') {
+        }
+        if (event.key === 'Escape') {
             showPromptSuggestions.value = false;
+            return true;
         }
     }
-};
+    return false;
+}
 
-// 选择提示词模板
-const selectPromptTemplate = (template: PromptTemplate) => {
-    // 将最后一个 /xxx 替换为模板内容
-    const currentPrompt = text.value;
-    const slashIndex = currentPrompt.lastIndexOf('/');
-    const prefix = slashIndex !== -1 ? currentPrompt.slice(0, slashIndex) : currentPrompt;
-    text.value = `${prefix}${template.content}`;
+function templateLinesToParagraphs(content: string): JSONContent[] {
+    const lines = content.split('\n');
+    return lines.map((line) => ({
+        type: 'paragraph',
+        content: line ? [{ type: 'text', text: line }] : [],
+    }));
+}
+
+function selectPromptTemplate(template: PromptTemplate) {
+    const ed = editor.value;
+    if (!ed) return;
+    const plain = ed.getText({ blockSeparator: BLOCK_SEP });
+    const slashIndex = plain.lastIndexOf('/');
+    if (slashIndex === -1) return;
+    const doc = ed.state.doc;
+    const from = pmPosOfPlainCharIndex(doc, slashIndex);
+    const to = doc.content.size;
+    const nodes = templateLinesToParagraphs(template.content || '');
+    ed.chain().focus().insertContentAt({ from, to }, nodes).run();
     showPromptSuggestions.value = false;
-    props.data.text = text.value;
-
-    // 聚焦输入框
-    if (promptInputRef.value) {
-        promptInputRef.value.focus();
-    }
-};
-
-// 图片别名选择，将最后一个 @xxx 替换为 @图1 之类
-const selectImageAlias = (item: { key: string; alias: string }) => {
-    const currentPrompt = text.value || '';
-    const atIndex = currentPrompt.lastIndexOf('@');
-    const aliasText = `@${item.alias}`;
-
-    if (atIndex === -1) {
-        text.value = `${currentPrompt}${currentPrompt ? ' ' : ''}${aliasText}`;
-    } else {
-        const before = currentPrompt.slice(0, atIndex);
-        const textareaEl = getTextareaEl();
-        const cursorPos = textareaEl?.selectionStart ?? currentPrompt.length;
-        const after = currentPrompt.slice(cursorPos);
-        // 始终用 @图1 形式替换，保留 @ 符号
-        text.value = `${before}${aliasText}${after}`;
-    }
-
-    props.data.text = text.value;
-    showAliasSuggestions.value = false;
-
     nextTick(() => {
-        const textareaEl = getTextareaEl();
-        if (textareaEl) {
-            const pos = text.value.lastIndexOf(item.alias) + item.alias.length + 1; // 包含 @
-            textareaEl.setSelectionRange(pos, pos);
-            textareaEl.focus();
-        }
+        syncNodeData();
+        ed.commands.focus();
     });
+}
+
+function selectImageAlias(item: { key: string; alias: string }) {
+    const ed = editor.value;
+    if (!ed) return;
+    const plain = ed.getText({ blockSeparator: BLOCK_SEP });
+    const atIndex = plain.lastIndexOf('@');
+    if (atIndex === -1) {
+        const insert = `@${item.alias}`;
+        ed.chain().focus().insertContent(insert).run();
+    } else {
+        const doc = ed.state.doc;
+        const from = pmPosOfPlainCharIndex(doc, atIndex);
+        const to = ed.state.selection.from;
+        ed.chain().focus().insertContentAt({ from, to }, `@${item.alias}`).run();
+    }
+    showAliasSuggestions.value = false;
+    nextTick(() => {
+        syncNodeData();
+        ed.commands.focus();
+    });
+}
+
+const loadPromptTemplates = async () => {
+    try {
+        const res: { data?: PromptTemplate[] } = await getPromptTemplates();
+        promptTemplates.value = res.data || [];
+    } catch (error: unknown) {
+        console.error('加载提示词模板失败:', error);
+    }
 };
 
-const getTextareaEl = (): HTMLTextAreaElement | null => {
-    const el = promptInputRef.value;
-    if (!el) return null;
-    return el instanceof HTMLTextAreaElement ? el : null;
-};
-
-// 保存提示词
 const handleSavePrompt = async () => {
     if (!savePromptName.value.trim()) {
         ElMessage.warning('请输入提示词名称');
@@ -538,115 +751,85 @@ const handleSavePrompt = async () => {
         ElMessage.warning('提示词内容不能为空');
         return;
     }
-
     try {
         await createPromptTemplate({
             name: savePromptName.value.trim(),
             content: text.value.trim(),
-            description: savePromptDescription.value.trim() || undefined
+            description: savePromptDescription.value.trim() || undefined,
         });
         ElMessage.success('提示词保存成功！');
         showSavePromptDialog.value = false;
         savePromptName.value = '';
         savePromptDescription.value = '';
         await loadPromptTemplates();
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('[PromptNode] 保存提示词失败', error);
-        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
-        if (!(error as any)?.response) {
+        if (!(error as { response?: unknown })?.response) {
             ElMessage.error('保存失败，请稍后重试');
         }
     }
 };
 
-// 点击外部关闭提示词列表
 const handleClickOutside = (event: MouseEvent) => {
-    if (!showPromptSuggestions.value) return;
     const target = event.target as HTMLElement;
     if (!target.closest('.prompt-node')) {
         showPromptSuggestions.value = false;
+        showAliasSuggestions.value = false;
     }
 };
 
-const PROMPT_INPUT_MIN_H = 160;
-const PROMPT_INPUT_MAX_H = 700;
+let syncingExternal = false;
 
-function syncMirrorToTextarea() {
-    nextTick(() => {
-        const ta = getTextareaEl();
-        const mirror = mirrorRef.value;
-        if (ta && mirror) {
-            const inner = mirror.querySelector('.prompt-mirror-inner') as HTMLElement;
-            if (inner) inner.style.minHeight = `${ta.scrollHeight}px`;
-            mirror.scrollTop = ta.scrollTop;
-        }
-    });
-}
+watch(
+    () => props.data?.text,
+    (val) => {
+        if (syncingExternal || typeof val !== 'string') return;
+        const ed = editor.value;
+        if (!ed) return;
+        if ((props.data as Record<string, unknown>)?.promptDoc) return;
+        const cur = ed.getText({ blockSeparator: BLOCK_SEP });
+        if (val === cur) return;
+        syncingExternal = true;
+        ed.commands.setContent(plainToDoc(val));
+        text.value = val;
+        syncingExternal = false;
+        uiTick.value++;
+    }
+);
 
-function fitTextareaHeight() {
-    nextTick(() => {
-        const ta = getTextareaEl();
-        const mirror = mirrorRef.value;
-        if (!ta) return;
-
-        // 先让 textarea 自然扩展以获取真实内容高度
-        ta.style.height = 'auto';
-        const natural = ta.scrollHeight;
-        const h = Math.min(PROMPT_INPUT_MAX_H, Math.max(PROMPT_INPUT_MIN_H, natural));
-        ta.style.height = `${h}px`;
-
-        // 只有当内容超过最大高度时才开启内部滚动条
-        const needScroll = natural > PROMPT_INPUT_MAX_H;
-        ta.style.overflowY = needScroll ? 'auto' : 'hidden';
-        if (mirror) {
-            mirror.style.overflowY = needScroll ? 'auto' : 'hidden';
-        }
-
-        syncMirrorToTextarea();
-    });
-}
-
-watch(text, () => {
-    syncMirrorToTextarea();
-    fitTextareaHeight();
+watch(text, (val) => {
+    const d = props.data as Record<string, unknown>;
+    if (d.text !== val) {
+        updateNodeData(props.id, { text: val });
+    }
+    recomputePromptWidth();
 });
 
-onMounted(() => {
-    loadPromptTemplates();
+loadPromptTemplates();
+if (typeof document !== 'undefined') {
     document.addEventListener('click', handleClickOutside);
-    nextTick(() => {
-        const ta = getTextareaEl();
-        const mirror = mirrorRef.value;
-        if (ta && mirror) {
-            ta.addEventListener('scroll', () => { mirror.scrollTop = ta.scrollTop; });
-            fitTextareaHeight();
-            syncMirrorToTextarea();
-        }
-    });
-});
+}
 
 onUnmounted(() => {
     document.removeEventListener('click', handleClickOutside);
 });
-  </script>
-  
-  <style scoped>
-  .prompt-node {
+</script>
+
+<style scoped>
+.prompt-node {
     background: #2d2d2d;
     border: 1px solid #404040;
     border-radius: 30px;
-  width: 360px;
+    width: 360px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
 }
 
-/* VueFlow: allow dragging node except on these elements */
 .nodrag {
     cursor: auto;
 }
 
-/* 默认隐藏所有 handle，hover 时显示 */
 .prompt-node :deep(.vue-flow__handle) {
     opacity: 0;
     pointer-events: none;
@@ -656,9 +839,9 @@ onUnmounted(() => {
 .prompt-node:hover :deep(.vue-flow__handle) {
     opacity: 1;
     pointer-events: auto;
-  }
-  
-  .node-header {
+}
+
+.node-header {
     background: #3a3a3f;
     border-bottom: 1px solid #404040;
     padding: 8px 12px;
@@ -670,18 +853,62 @@ onUnmounted(() => {
     gap: 8px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
-  }
-  
-  .node-content {
-    padding: 14px 16px;
+}
+
+.node-content {
+    padding: 10px 16px 14px;
     color: #e0e0e0;
-  }
+}
+
+.prompt-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.tb-btn {
+    min-width: 28px;
+    height: 26px;
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #c8c8c8;
+    background: #3a3a3f;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.tb-btn:hover:not(:disabled) {
+    background: #4a4a52;
+    color: #fff;
+}
+
+.tb-btn.active {
+    background: rgba(64, 158, 255, 0.25);
+    border-color: #409eff;
+    color: #79bbff;
+}
+
+.tb-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.tb-sep {
+    width: 1px;
+    height: 18px;
+    background: #505050;
+    margin: 0 2px;
+}
 
 .prompt-content {
     position: relative;
     background: transparent;
     border-radius: 6px;
-    padding: 8px;
+    padding: 4px 0 0;
 }
 
 .prompt-input-wrap {
@@ -689,67 +916,81 @@ onUnmounted(() => {
     min-height: 140px;
 }
 
-.prompt-mirror {
-    position: absolute;
-    /* 与 textarea 的 1px 边框一致，保证内容区域对齐 */
-    inset: 1px;
-    z-index: 0;
-    overflow-y: hidden;
-    pointer-events: none;
-    border-radius: 7px; /* textarea 8px - 1px 边框 */
-}
-
-.prompt-mirror-inner {
-    padding: 8px 10px;
-    font-size: 13px;
-    line-height: 1.6;
-    font-family: inherit;
-    letter-spacing: normal;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: #e0e0e0;
-    box-sizing: border-box;
-}
-
-/* 不加 font-weight，保证与 textarea 同字宽，光标才能对齐 */
-.prompt-mirror-inner :deep(.prompt-ref) {
-    color: var(--color-primary, #409eff);
-}
-
-.prompt-input {
-    width: 100%;
-}
-
-.prompt-input-overlay {
+.prompt-editor-host {
     position: relative;
     z-index: 1;
-    display: block;
-    width: 100%;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor) {
     min-height: 140px;
-    overflow-y: hidden;
-    line-height: 1.6;
+    max-height: 700px;
+    overflow-y: auto;
     padding: 8px 10px;
     font-size: 13px;
-    font-family: inherit;
-    letter-spacing: normal;
-    box-sizing: border-box;
-    background: transparent !important;
+    line-height: 1.6;
+    color: #e0e0e0;
+    background: transparent;
     border: 1px solid #404040;
     border-radius: 8px;
-    resize: none;
-    color: transparent !important;
-    -webkit-text-fill-color: transparent !important;
-    caret-color: #e0e0e0;
     outline: none;
 }
 
-.prompt-input-overlay::placeholder {
-    color: var(--text-subtle);
-}
-
-.prompt-input-overlay:focus {
+.prompt-editor-host :deep(.prompt-tiptap-editor:focus) {
     border-color: #409eff;
     box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor p) {
+    margin: 0.25em 0;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor p.is-editor-empty:first-child::before) {
+    color: #888;
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor h2) {
+    font-size: 1.15em;
+    margin: 0.35em 0 0.2em;
+    color: #f0f0f0;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor h3) {
+    font-size: 1.05em;
+    margin: 0.35em 0 0.2em;
+    color: #eaeaea;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor ul),
+.prompt-editor-host :deep(.prompt-tiptap-editor ol) {
+    margin: 0.25em 0;
+    padding-left: 1.4em;
+}
+
+.prompt-editor-host :deep(.prompt-tiptap-editor blockquote) {
+    margin: 0.35em 0;
+    padding-left: 0.75em;
+    border-left: 3px solid #409eff;
+    color: #c8c8c8;
+}
+
+/* @图1、视频/音频别名等引用：与旧版 .prompt-ref 一致 */
+.prompt-editor-host :deep(.prompt-tiptap-editor .prompt-ref-inline) {
+    color: var(--color-primary, #409eff);
+}
+
+.prompt-meta {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+}
+
+.char-count {
+    font-size: 11px;
+    color: #888;
 }
 
 .prompt-suggestions {
@@ -810,7 +1051,6 @@ onUnmounted(() => {
     height: auto;
 }
 
-/* 居中保存提示词对话框样式 */
 .centered-save-prompt-dialog :deep(.el-dialog) {
     margin: 0 !important;
     position: fixed !important;
@@ -821,4 +1061,4 @@ onUnmounted(() => {
     display: flex !important;
     flex-direction: column !important;
 }
-  </style>
+</style>

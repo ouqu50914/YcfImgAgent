@@ -6,8 +6,8 @@
         </div>
         <!-- 内容区域 -->
         <div class="node-content">
-            <!-- 右侧：参数设置 -->
-            <div class="params-section">
+            <!-- nodrag：避免在控件上按下鼠标时触发节点拖拽，导致按钮点不到 -->
+            <div class="params-section nodrag">
                 
                 <!-- 模型选择 -->
                 <div class="param-item">
@@ -67,17 +67,21 @@
                     </el-select>
                 </div>
 
-                <!-- 执行按钮 -->
-                <el-button
-                    type="primary"
-                    size="default"
-                    class="execute-btn"
-                    :loading="loading"
-                    :disabled="!canExecute"
-                    @click="handleGenerate"
-                >
-                    {{ executeButtonText }}
-                </el-button>
+                <!-- 执行按钮（禁用原因多为积分/参考图；提示词在点击后校验，见 executeBlockedHint） -->
+                <el-tooltip :content="executeBlockedHint" placement="top" :disabled="canExecute">
+                    <span class="execute-btn-tooltip-anchor">
+                        <el-button
+                            type="primary"
+                            size="default"
+                            class="execute-btn"
+                            :loading="loading"
+                            :disabled="!canExecute"
+                            @click="handleGenerate"
+                        >
+                            {{ executeButtonText }}
+                        </el-button>
+                    </span>
+                </el-tooltip>
             </div>
         </div>
 
@@ -173,8 +177,7 @@ const executeCost = computed(() => {
     return getCreditCost(apiType.value, 'generate', { quality: q || '2K', imageCount: numImages.value });
 });
 const canExecuteCredits = computed(() => {
-    if (userStore.userInfo?.role === 1) return true;
-    return (userStore.userInfo?.credits ?? 0) >= executeCost.value;
+    return userStore.canAffordOperation(executeCost.value);
 });
 const executeButtonText = computed(() => {
     const base = isExecuted.value ? '再次执行' : '执行';
@@ -310,15 +313,75 @@ const connectedImageReadiness = ref({
     missingUrl: 0,
 });
 
+/**
+ * 连入本节点的上游数据签名。
+ * 使用 getNodes.value.find 而非 findNode：与 nodeLookup 相比，对 node.data 的写入能稳定触发 Vue 依赖收集，
+ * 否则富文本仅 updateNodeData(text) 时 watch 可能不跑，connectedPrompt 一直为空（用户误以为「没提示词」）。
+ */
+const upstreamIntoDreamSig = computed(() => {
+    const nodes = getNodes.value;
+    const parts: string[] = [];
+    for (const e of getEdges.value) {
+        if (e.target !== props.id) continue;
+        const n = nodes.find((x) => x.id === e.source);
+        if (!n) {
+            parts.push('');
+            continue;
+        }
+        if (n.type === 'prompt') {
+            parts.push(`p:${String((n.data as { text?: string })?.text ?? '')}`);
+        } else if (n.type === 'image') {
+            const d = n.data as { imageUrl?: string; isLoading?: boolean; status?: string };
+            parts.push(`i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}`);
+        } else {
+            parts.push(n.type);
+        }
+    }
+    return parts.join('\u0001');
+});
+
+function readConnectedPromptFromEdges(): string {
+    const nodes = getNodes.value;
+    let prompt = '';
+    for (const e of getEdges.value) {
+        if (e.target !== props.id) continue;
+        const n = nodes.find((x) => x.id === e.source);
+        if (n?.type !== 'prompt' || typeof n.data?.text !== 'string') continue;
+        const t = n.data.text;
+        if (t.length > 0 && !prompt) prompt = t;
+    }
+    return prompt;
+}
+
 const imagesReady = computed(() => {
-    if (connectedImages.value.length === 0) return true;
     const s = connectedImageReadiness.value;
-    if (!s || s.total === 0) return false;
+    // 仅当有已统计的参考图时才校验就绪；避免 connectedImages 与 readiness 短暂不一致导致误禁用
+    if (!s || s.total === 0) return true;
     return s.ready === s.total;
 });
 
 const canExecute = computed(() => {
     return canExecuteCredits.value && imagesReady.value;
+});
+
+/** 按钮禁用时悬停说明（与「有无提示词」无关；提示词在点击后再校验） */
+const executeBlockedHint = computed(() => {
+    if (canExecute.value) return '';
+    if (!imagesReady.value) {
+        const s = connectedImageReadiness.value;
+        if ((s.loading || 0) > 0) return '参考图片仍在上传/生成中，请等待完成后再执行';
+        if ((s.error || 0) > 0) return '上游参考图片生成失败，请更换后再执行';
+        return '参考图片尚未就绪';
+    }
+    if (!userStore.token) return '请先登录后再执行';
+    if (!canExecuteCredits.value) {
+        const c = userStore.userInfo?.credits;
+        if (typeof c === 'number' && Number.isFinite(c)) {
+            return `积分不足：当前 ${c}，本次需 ${executeCost.value} 积分`;
+        }
+        return '积分未同步，请刷新页面或重新登录';
+    }
+    return '暂时无法执行';
 });
 
 // 计算连接状态
@@ -342,29 +405,22 @@ const connectedImageCount = computed(() => {
     return imageEdges.length;
 });
 
-// 监听连接变化，更新连接的数据
+// 监听连接变化，更新连接的数据（upstreamIntoDreamSig：就地改 text / 图片 url 时也要刷新）
 watch(
-    () => [getEdges.value, getNodes.value],
+    () => [getEdges.value, upstreamIntoDreamSig.value],
     () => {
         const edges = getEdges.value;
+        const nodes = getNodes.value;
         const targetEdges = edges.filter(e => e.target === props.id);
-        
-        // 收集提示词
-        connectedPrompt.value = '';
-        targetEdges.forEach(edge => {
-            const sourceNode = findNode(edge.source);
-            if (sourceNode && sourceNode.type === 'prompt' && sourceNode.data?.text) {
-                // 取第一个提示词节点
-                if (!connectedPrompt.value) connectedPrompt.value = sourceNode.data.text;
-    }
-        });
+
+        connectedPrompt.value = readConnectedPromptFromEdges();
 
         // 收集图片及其别名 + 就绪状态（isLoading/status）
         connectedImages.value = [];
         connectedImageAliases.value = [];
         const imageMeta: Array<ImageNodeLikeData> = [];
         targetEdges.forEach(edge => {
-            const sourceNode = findNode(edge.source);
+            const sourceNode = nodes.find((x) => x.id === edge.source);
             if (sourceNode && sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
                 const url = sourceNode.data.imageUrl;
                 if (url && !connectedImages.value.includes(url)) {
@@ -393,7 +449,7 @@ watch(
 
         connectedImageReadiness.value = summarizeConnectedImages(imageMeta);
     },
-    { immediate: true, deep: true }
+    { immediate: true }
 );
 
 // 如果节点已有执行结果，标记为已执行（用于按钮文案“再次执行”）
@@ -441,8 +497,9 @@ const handleGenerate = async () => {
     }
     loading.value = true;
     try {
-        // 1. 从连接读取数据
-        const finalPrompt = connectedPrompt.value;
+        // 1. 从连接读取数据（执行前再读一次，防止 watch 未触发的边界情况）
+        const finalPrompt = readConnectedPromptFromEdges();
+        connectedPrompt.value = finalPrompt;
         const referenceImageUrls = [...connectedImages.value];
         const referenceImageAliases = [...connectedImageAliases.value];
 
@@ -694,7 +751,7 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
         // 为多图节点添加标记，用于缩小尺寸
         const nodeData: any = {
             imageUrl: fullUrl,
-            prompt: connectedPrompt.value || '',
+            prompt: readConnectedPromptFromEdges() || '',
             originalImageUrl: originalUrls[index],
             fromNodeId: props.id, // 记录来源生图节点，方便在 ImageNode 中自动补连线
         };
@@ -975,6 +1032,10 @@ const saveWorkflowImmediately = () => {
 </script>
 
 <style scoped>
+.dream-node .nodrag {
+    cursor: auto;
+}
+
 .dream-node {
     background: #2d2d2d;
     border: 1px solid #404040;
@@ -1122,9 +1183,14 @@ const saveWorkflowImmediately = () => {
     color: #409eff;
 }
 
-.execute-btn {
+.execute-btn-tooltip-anchor {
+    display: block;
     width: 100%;
     margin-top: 8px;
+}
+
+.execute-btn {
+    width: 100%;
 }
 
 .executed-status {

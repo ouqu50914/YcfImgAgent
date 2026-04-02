@@ -86,15 +86,34 @@ export const useUserStore = defineStore('user', {
       try {
         const res: any = await getMe();
         const data = res?.data;
-        if (data && typeof this.userInfo === 'object') {
-          this.userInfo = { ...this.userInfo, credits: data.credits ?? 0 };
+        if (data && typeof data === 'object') {
+          // 合并完整字段（含 role），避免只写 credits 导致角色等丢失
+          this.userInfo = {
+            ...this.userInfo,
+            ...data,
+            credits: data.credits ?? 0,
+          };
           localStorage.setItem('userInfo', JSON.stringify(this.userInfo));
-          return data.credits ?? 0;
+          return this.userInfo.credits ?? 0;
         }
         return this.userInfo?.credits ?? 0;
       } catch {
         return this.userInfo?.credits ?? 0;
       }
+    },
+    /**
+     * 是否允许发起消耗积分的操作（用于按钮可用态）。
+     * 已登录但 credits 尚未同步为有效数字时返回 true，避免误禁用；后端仍会校验。
+     */
+    canAffordOperation(cost: number): boolean {
+      if (!this.token) return false;
+      if (this.userInfo?.role === 1) return true;
+      if (cost <= 0) return true;
+      const c = this.userInfo?.credits;
+      if (typeof c !== 'number' || !Number.isFinite(c)) {
+        return true;
+      }
+      return c >= cost;
     },
     // 登出动作
     async logout() {

@@ -2919,7 +2919,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 });
 
 onMounted(async () => {
-    userStore.fetchCredits();
+    await userStore.fetchCredits();
     // 启动自动保存
     startAutoSave();
 

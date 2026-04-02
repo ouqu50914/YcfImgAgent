@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { MagicStick } from '@element-plus/icons-vue';
 import { optimizePrompt } from '../../api/prompt';
@@ -88,19 +88,21 @@ const style = ref('');
 const loading = ref(false);
 const optimizedPrompt = ref('');
 
-// 监听上游节点连接
+// 上游提示词：edges 不变时 data.text 就地更新也要同步（富文本节点）
+const upstreamPromptText = computed(() => {
+    const targetEdge = getEdges.value.find((e) => e.target === props.id);
+    if (!targetEdge) return '';
+    const sourceNode = findNode(targetEdge.source);
+    const t = sourceNode?.data?.text;
+    return typeof t === 'string' ? t : '';
+});
+
 watch(
-    () => getEdges.value,
-    (edges) => {
-        const targetEdge = edges.find((e) => e.target === props.id);
-        if (targetEdge) {
-            const sourceNode = findNode(targetEdge.source);
-            if (sourceNode && sourceNode.data?.text) {
-                originalPrompt.value = sourceNode.data.text;
-            }
-        }
+    upstreamPromptText,
+    (text) => {
+        originalPrompt.value = text;
     },
-    { immediate: true, deep: true }
+    { immediate: true }
 );
 
 const handleOptimize = async () => {
