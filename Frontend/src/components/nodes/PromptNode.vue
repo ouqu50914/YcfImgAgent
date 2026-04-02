@@ -10,77 +10,6 @@
                 <button
                     type="button"
                     class="tb-btn"
-                    :class="{ active: isBold }"
-                    title="加粗"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleBold().run())"
-                >
-                    B
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isItalic }"
-                    title="斜体"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleItalic().run())"
-                >
-                    I
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isH2 }"
-                    title="标题 2"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleHeading({ level: 2 }).run())"
-                >
-                    H2
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isH3 }"
-                    title="标题 3"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleHeading({ level: 3 }).run())"
-                >
-                    H3
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isBullet }"
-                    title="无序列表"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleBulletList().run())"
-                >
-                    •
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isOrdered }"
-                    title="有序列表"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleOrderedList().run())"
-                >
-                    1.
-                </button>
-                <button
-                    type="button"
-                    class="tb-btn"
-                    :class="{ active: isQuote }"
-                    title="引用"
-                    @mousedown.prevent
-                    @click="run(() => editor!.chain().focus().toggleBlockquote().run())"
-                >
-                    ”
-                </button>
-                <span class="tb-sep" />
-                <button
-                    type="button"
-                    class="tb-btn"
                     title="撤销"
                     :disabled="!canUndo"
                     @mousedown.prevent
@@ -477,34 +406,6 @@ function run(fn: () => void) {
     uiTick.value++;
 }
 
-const isBold = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('bold') ?? false;
-});
-const isItalic = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('italic') ?? false;
-});
-const isH2 = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('heading', { level: 2 }) ?? false;
-});
-const isH3 = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('heading', { level: 3 }) ?? false;
-});
-const isBullet = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('bulletList') ?? false;
-});
-const isOrdered = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('orderedList') ?? false;
-});
-const isQuote = computed(() => {
-    uiTick.value;
-    return editor.value?.isActive('blockquote') ?? false;
-});
 const canUndo = computed(() => {
     uiTick.value;
     return editor.value?.can().undo() ?? false;
@@ -895,13 +796,6 @@ onUnmounted(() => {
 .tb-btn:disabled {
     opacity: 0.35;
     cursor: not-allowed;
-}
-
-.tb-sep {
-    width: 1px;
-    height: 18px;
-    background: #505050;
-    margin: 0 2px;
 }
 
 .prompt-content {
