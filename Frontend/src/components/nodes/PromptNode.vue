@@ -212,13 +212,18 @@ function plainToDoc(plain: string): JSONContent {
     return { type: 'doc', content };
 }
 
-function getInitialDoc(): JSONContent {
-    const d = props.data as Record<string, unknown> | undefined;
-    const doc = d?.promptDoc as JSONContent | undefined;
+/** 与 getInitialDoc 一致：优先持久化的 TipTap JSON，否则用纯文本重建（用于外部恢复/撤销等） */
+function getDocFromNodeData(d: Record<string, unknown> | undefined): JSONContent {
+    if (!d) return plainToDoc('');
+    const doc = d.promptDoc as JSONContent | undefined;
     if (doc && typeof doc === 'object' && doc.type === 'doc') {
         return doc;
     }
-    return plainToDoc(typeof d?.text === 'string' ? d.text : '');
+    return plainToDoc(typeof d.text === 'string' ? d.text : '');
+}
+
+function getInitialDoc(): JSONContent {
+    return getDocFromNodeData(props.data as Record<string, unknown> | undefined);
 }
 
 function docPlainLength(doc: Parameters<typeof getTextBetween>[0]): number {
@@ -318,6 +323,9 @@ const PromptRefHighlight = Extension.create({
     },
 });
 
+/** 先于 useEditor：避免首帧 onUpdate 调用 syncNodeData 时尚未初始化 */
+let syncingExternal = false;
+
 const editor = useEditor({
     extensions: [
         StarterKit.configure({
@@ -366,6 +374,7 @@ const plainCharCount = computed(() => {
 });
 
 function syncNodeData() {
+    if (syncingExternal) return;
     const ed = editor.value;
     if (!ed || isComposing.value) return;
     const plain = ed.getText({ blockSeparator: BLOCK_SEP });
@@ -679,23 +688,29 @@ const handleClickOutside = (event: MouseEvent) => {
     }
 };
 
-let syncingExternal = false;
-
 watch(
-    () => props.data?.text,
-    (val) => {
-        if (syncingExternal || typeof val !== 'string') return;
-        const ed = editor.value;
-        if (!ed) return;
-        if ((props.data as Record<string, unknown>)?.promptDoc) return;
-        const cur = ed.getText({ blockSeparator: BLOCK_SEP });
-        if (val === cur) return;
+    () => ({
+        ed: editor.value,
+        fp: JSON.stringify(getDocFromNodeData(props.data as Record<string, unknown> | undefined)),
+    }),
+    ({ ed }) => {
+        if (!ed || syncingExternal) return;
+        const nextDoc = getDocFromNodeData(props.data as Record<string, unknown> | undefined);
+        const curJson = JSON.stringify(ed.getJSON());
+        const nextJson = JSON.stringify(nextDoc);
+        if (curJson === nextJson) return;
         syncingExternal = true;
-        ed.commands.setContent(plainToDoc(val));
-        text.value = val;
-        syncingExternal = false;
+        try {
+            ed.commands.setContent(nextDoc);
+            text.value = ed.getText({ blockSeparator: BLOCK_SEP });
+        } finally {
+            syncingExternal = false;
+        }
+        // setContent 触发的 onUpdate 若仍处在 syncingExternal 内会被跳过，这里补写 text / promptDoc
+        syncNodeData();
         uiTick.value++;
-    }
+    },
+    { flush: 'post' }
 );
 
 watch(text, (val) => {

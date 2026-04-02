@@ -422,6 +422,27 @@ const getAllImageAliases = () => {
     return Object.entries(imageAliasMap.value).map(([key, alias]) => ({ key, alias }));
 };
 
+/** 与 ImageNode.ensureAliasFromStore 使用同一套 key，避免恢复后 map 与节点 key 不一致导致别名重算 */
+const imageNodeAliasKey = (data: Record<string, unknown>): string | undefined => {
+    const key =
+        (data.imageKey as string | undefined) ||
+        (data.originalImageUrl as string | undefined) ||
+        (data.imageUrl as string | undefined);
+    return key && String(key).trim() ? String(key) : undefined;
+};
+
+const maxImageAliasIndexFromMap = (map: Record<string, string>): number => {
+    let maxIndex = 0;
+    for (const alias of Object.values(map)) {
+        const m = String(alias).match(/^图(\d+)$/);
+        if (m) {
+            const n = Number(m[1]);
+            if (!Number.isNaN(n)) maxIndex = Math.max(maxIndex, n);
+        }
+    }
+    return maxIndex;
+};
+
 const restoreImageAliasStateFromWorkflow = (workflowData: any) => {
     if (workflowData && typeof workflowData === 'object') {
         if (typeof workflowData.imageAliasCounter === 'number') {
@@ -429,6 +450,9 @@ const restoreImageAliasStateFromWorkflow = (workflowData: any) => {
         }
         if (workflowData.imageAliasMap && typeof workflowData.imageAliasMap === 'object') {
             imageAliasMap.value = { ...workflowData.imageAliasMap };
+            // 避免仅有 map、无 counter 或 counter 偏小时的旧数据导致后续 getOrCreate 分配重复编号
+            const fromMap = maxImageAliasIndexFromMap(imageAliasMap.value);
+            imageAliasCounter.value = Math.max(imageAliasCounter.value, fromMap);
             return;
         }
     }
@@ -439,9 +463,9 @@ const restoreImageAliasStateFromWorkflow = (workflowData: any) => {
     let maxIndex = 0;
     for (const node of currentNodes || []) {
         if (node.type !== 'image') continue;
-        const data = node.data || {};
-        const alias: string | undefined = data.imageAlias;
-        const key: string | undefined = data.originalImageUrl || data.imageUrl;
+        const data = (node.data || {}) as Record<string, unknown>;
+        const alias: string | undefined = data.imageAlias as string | undefined;
+        const key = imageNodeAliasKey(data);
         if (!alias || !key) continue;
         if (!map[key]) {
             map[key] = alias;
@@ -2946,6 +2970,7 @@ onMounted(async () => {
                 if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
+                    restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     window.localStorage.setItem('workflow:lastHistoryId', String(historyId));
                     if (templateIdFromHistory != null) {
@@ -2987,6 +3012,7 @@ onMounted(async () => {
                 if (workflowData?.nodes && workflowData?.edges) {
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
+                    restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     ElMessage.success('模板加载成功');
                 } else {
@@ -3014,6 +3040,7 @@ onMounted(async () => {
                     currentHistoryId.value = lastId;
                     setNodes(workflowData.nodes);
                     setEdges(workflowData.edges);
+                    restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     if (templateIdFromHistory != null) {
                         currentTemplateId.value = templateIdFromHistory;
