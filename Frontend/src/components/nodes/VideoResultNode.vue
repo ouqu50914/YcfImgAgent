@@ -58,6 +58,12 @@
       <div v-if="errorMessage" class="error-row">
         {{ errorMessage }}
       </div>
+      <div
+        v-else-if="isFailedLikeWithoutVideo"
+        class="error-row"
+      >
+        生成失败，请重试或稍后刷新任务状态。
+      </div>
       <div v-else-if="!videoUrl" class="placeholder">
         视频生成中或排队中…
       </div>
@@ -168,6 +174,14 @@ const errorMessage = computed(() => {
   if (typeof e === 'string' && (e.startsWith('http') || e.startsWith('asset://') || e.startsWith('data:') || e.startsWith('/uploads/') || e.startsWith('uploads/'))) return null;
   if (typeof e === 'string' && videoUrl.value && e === videoUrl.value) return null;
   return e ?? null;
+});
+
+/** 失败/取消且无播放地址，且没有可展示的具体错误文案时，避免误显示「排队中」占位 */
+const isFailedLikeWithoutVideo = computed(() => {
+  const s = status.value;
+  if (s !== 'failed' && s !== 'canceled') return false;
+  if (videoUrl.value) return false;
+  return true;
 });
 
 const downloadVideo = (url: string) => {

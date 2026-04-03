@@ -140,7 +140,24 @@
               inactive-text="自定义"
               size="small"
             />
+            <!-- PixVerse 多主体 fusion：v5.5/5.6 仅 5/8/10；1080p 不可用 10 -->
+            <el-select
+              v-if="provider === 'pixverse' && pixverseMode === 'fusion_multi_subject'"
+              v-model="durationManual"
+              size="small"
+              class="param-select"
+              style="width: 112px"
+            >
+              <el-option label="5" :value="5" />
+              <el-option label="8" :value="8" />
+              <el-option v-if="resolution !== '1080p'" label="10" :value="10" />
+            </el-select>
+            <!-- 勿用 v-else：否则 Seedance/Kling 时 switch 占满 v-if 分支，输入框永远不渲染 -->
             <el-input-number
+              v-if="
+                provider !== 'pixverse' ||
+                (provider === 'pixverse' && pixverseMode !== 'fusion_multi_subject')
+              "
               v-model="durationManual"
               :max="15"
               :min="provider === 'pixverse' ? 1 : 4"
@@ -284,6 +301,7 @@ import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
+import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -348,6 +366,10 @@ const connectedPrompt = ref('');
 const connectedImageUrl = ref<string | null>(null);
 const connectedEndImageUrl = ref<string | null>(null);
 const connectedImageUrls = ref<string[]>([]);
+/** PixVerse 多主体 fusion：与 connectedImageUrls 同序，对应 image_references.ref_name */
+const connectedImageRefNames = ref<string[]>([]);
+/** 与 connectedImageUrls 同序：画布「图N」里的 N，用于 @图4 → 第 4 张图对应 ref */
+const connectedImageFigureNumbers = ref<number[]>([]);
 const imageSourceCount = ref(0);
 const connectedImageReadiness = ref({
   total: 0,
@@ -560,7 +582,7 @@ const videoUpstreamSig = computed(() => {
     } else if (n.type === 'image') {
       const d = n.data as Record<string, unknown>;
       parts.push(
-        `i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}:${JSON.stringify(d?.imageUrls ?? [])}`
+        `i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}:${String(d?.imageAlias ?? '')}:${JSON.stringify(d?.imageUrls ?? [])}`
       );
     } else if (n.type === 'videoRef') {
       const d = n.data as Record<string, unknown>;
@@ -603,12 +625,17 @@ watch(
     connectedImageUrl.value = null;
     connectedEndImageUrl.value = null;
     connectedImageUrls.value = [];
+    connectedImageRefNames.value = [];
+    connectedImageFigureNumbers.value = [];
     connectedVideoRefUrls.value = [];
     connectedAudioRefUrls.value = [];
     connectedVideoRefMeta.value = [];
     connectedAudioRefMeta.value = [];
 
     const imageSources: string[] = [];
+    const isPixverseFusion = provider.value === 'pixverse' && pixverseMode.value === 'fusion_multi_subject';
+    const fusionPairs: { url: string; ref: string; figureNum?: number }[] = [];
+    const fusionRefUsed = new Set<string>();
     const imageSourceMeta: Array<ImageNodeLikeData> = [];
     const videoRefSources: string[] = [];
     const audioRefSources: string[] = [];
@@ -620,7 +647,15 @@ watch(
 
       if (sourceNode.type === 'image' && sourceNode.data?.imageUrl) {
         const url = sourceNode.data.imageUrl as string;
-        if (typeof url === 'string' && url) imageSources.push(url);
+        if (typeof url === 'string' && url) {
+          imageSources.push(url);
+          if (isPixverseFusion) {
+            const rawAlias = (sourceNode.data as { imageAlias?: string }).imageAlias;
+            const ref = allocPixverseRefName(rawAlias, fusionPairs.length, fusionRefUsed);
+            const figureNum = parseImageFigureNumberFromAlias(rawAlias) ?? undefined;
+            fusionPairs.push({ url, ref, figureNum });
+          }
+        }
         imageSourceMeta.push({
           imageUrl: (sourceNode.data as any)?.imageUrl,
           isLoading: (sourceNode.data as any)?.isLoading,
@@ -628,8 +663,28 @@ watch(
         });
       }
       if (sourceNode.data?.imageUrls && Array.isArray(sourceNode.data.imageUrls)) {
+        const aliasBase = (sourceNode.data as { imageAlias?: string }).imageAlias;
+        let idx = 0;
         for (const u of sourceNode.data.imageUrls) {
-          if (typeof u === 'string' && u) imageSources.push(u);
+          if (typeof u === 'string' && u) {
+            imageSources.push(u);
+            if (isPixverseFusion) {
+              const rawAlias =
+                idx === 0
+                  ? aliasBase
+                  : aliasBase
+                    ? `${aliasBase}_${idx + 1}`
+                    : undefined;
+              const ref = allocPixverseRefName(rawAlias, fusionPairs.length, fusionRefUsed);
+              let figureNum = parseImageFigureNumberFromAlias(rawAlias);
+              if (figureNum == null && idx > 0 && aliasBase) {
+                const baseN = parseImageFigureNumberFromAlias(aliasBase);
+                if (baseN != null) figureNum = baseN + idx;
+              }
+              fusionPairs.push({ url: u, ref, figureNum: figureNum ?? undefined });
+            }
+            idx += 1;
+          }
         }
         // imageUrls 多用于结果聚合；这里只用 node 级别状态判断是否可用
         if (Array.isArray((sourceNode.data as any)?.imageUrls) && (sourceNode.data as any).imageUrls.length > 0) {
@@ -705,7 +760,31 @@ watch(
       provider.value === 'pixverse' &&
       (pixverseMode.value === 'image_to_video_first_only' || pixverseMode.value === 'fusion_multi_subject')
     ) {
-      connectedImageUrls.value = [...new Set(imageSources)].slice(0, 7);
+      if (pixverseMode.value === 'fusion_multi_subject') {
+        const seenU = new Set<string>();
+        const outUrls: string[] = [];
+        const outRefs: string[] = [];
+        const outFigures: number[] = [];
+        for (const p of fusionPairs) {
+          if (seenU.has(p.url)) continue;
+          seenU.add(p.url);
+          outUrls.push(p.url);
+          outRefs.push(p.ref);
+          const slot = outUrls.length;
+          outFigures.push(
+            typeof p.figureNum === 'number' && Number.isFinite(p.figureNum) && p.figureNum >= 1
+              ? p.figureNum
+              : slot
+          );
+        }
+        connectedImageUrls.value = outUrls.slice(0, 7);
+        connectedImageRefNames.value = outRefs.slice(0, 7);
+        connectedImageFigureNumbers.value = outFigures.slice(0, 7);
+      } else {
+        connectedImageUrls.value = [...new Set(imageSources)].slice(0, 7);
+        connectedImageRefNames.value = [];
+        connectedImageFigureNumbers.value = [];
+      }
       if (imageSources.length > 0) {
         connectedImageUrl.value = imageSources[0] ?? null;
       }
@@ -941,6 +1020,12 @@ function getPixverseEffectiveDurationSeconds(): number {
     // 转场接口 duration 通常限制为 5/8；这里做兜底映射，保证前后端一致计费。
     return rawSeconds <= 5 ? 5 : 8;
   }
+  if (pixverseMode.value === 'fusion_multi_subject') {
+    // fusion（v5.5/5.6）：仅 5/8/10；1080p 时不可用 10（文档）
+    let d = rawSeconds <= 5 ? 5 : rawSeconds <= 8 ? 8 : 10;
+    if (resolution.value === '1080p' && d === 10) d = 8;
+    return d;
+  }
   return rawSeconds;
 }
 
@@ -1157,12 +1242,15 @@ watch(
       if (!['540p', '720p', '1080p'].includes(resolution.value)) resolution.value = '720p';
       if (!['16:9', '9:16', '4:3', '3:4', '1:1'].includes(aspectRatio.value)) aspectRatio.value = '16:9';
       durationAuto.value = false;
-      // PixVerse：默认 1 秒，且仅支持手动 1-15
+      // PixVerse：默认 1 秒，且仅支持手动 1-15（多主体 fusion 会在下方 watch 中改为 5/8/10）
       durationManual.value = 1;
 
       // 切换到 PixVerse 时，按连线自动识别模式（首尾帧不自动切）
       const c = Number(imageSourceCount.value || 0);
       pixverseMode.value = c >= 2 ? 'fusion_multi_subject' : connectedImageUrl.value ? 'image_to_video_first_only' : 'text_to_video';
+      if (pixverseMode.value === 'fusion_multi_subject') {
+        durationManual.value = 5;
+      }
       return;
     }
     if (p === 'seedance') {
@@ -1200,6 +1288,25 @@ watch(
     }
   },
   { immediate: true }
+);
+
+/** PixVerse 多主体：时长仅 5/8/10；1080p 不可选 10 */
+watch(
+  () =>
+    [provider.value, pixverseMode.value, resolution.value, durationManual.value] as const,
+  () => {
+    if (provider.value !== 'pixverse' || pixverseMode.value !== 'fusion_multi_subject') return;
+    const allowed: number[] = resolution.value === '1080p' ? [5, 8] : [5, 8, 10];
+    const n = Number(durationManual.value);
+    if (resolution.value === '1080p' && n === 10) {
+      durationManual.value = 8;
+      return;
+    }
+    if (!allowed.includes(n)) {
+      durationManual.value = 5;
+    }
+  },
+  { flush: 'sync' }
 );
 
 const startPollingKling = (id: number, opts?: { silent?: boolean }) => {
@@ -1456,7 +1563,8 @@ const startPollingPixverse = (videoId: number, opts?: { silent?: boolean }) => {
 
       syncResultVideoNode();
 
-      const shouldStopByTerminalState = nextStatus === 'failed';
+      // PixVerse 可能出现 status=7 等与「失败」映射但仍返回 url；有 url 时只走成功终态
+      const shouldStopByTerminalState = nextStatus === 'failed' && !hasVideoUrl;
       const shouldStopBySuccess = hasVideoUrl;
 
       if (shouldStopBySuccess || shouldStopByTerminalState) {
@@ -2069,7 +2177,18 @@ const handleGenerate = async () => {
       };
 
       const durationSeconds = getPixverseEffectiveDurationSeconds();
-      if (!Number.isFinite(durationSeconds) || durationSeconds < 1 || durationSeconds > 15) {
+      if (pixverseMode.value === 'fusion_multi_subject') {
+        const q = normalizePixverseQuality(resolution.value);
+        const ok =
+          durationSeconds === 5 ||
+          durationSeconds === 8 ||
+          (durationSeconds === 10 && q !== '1080p');
+        if (!Number.isFinite(durationSeconds) || !ok) {
+          ElMessage.error('多主体模式仅支持 5 / 8 / 10 秒，且 1080p 时不可选 10 秒');
+          loading.value = false;
+          return;
+        }
+      } else if (!Number.isFinite(durationSeconds) || durationSeconds < 1 || durationSeconds > 15) {
         ElMessage.error('PixVerse duration 需在 1~15 秒范围内');
         loading.value = false;
         return;
@@ -2186,10 +2305,15 @@ const handleGenerate = async () => {
           return;
         }
 
-        const imageUrls = connectedImageUrls.value
-          .slice(0, 7)
-          .map((u) => normalizeImageUrl(u))
-          .filter((u) => typeof u === 'string' && u.trim());
+        const zipped = connectedImageUrls.value.slice(0, 7).map((u, i) => ({
+          url: normalizeImageUrl(u),
+          ref: connectedImageRefNames.value[i] ?? '',
+          figure: connectedImageFigureNumbers.value[i] ?? i + 1,
+        }));
+        const filtered = zipped.filter((z) => typeof z.url === 'string' && z.url.trim());
+        const imageUrls = filtered.map((z) => z.url);
+        const imageRefNamesPayload = filtered.map((z) => z.ref);
+        const imageFigureNumbersPayload = filtered.map((z) => z.figure);
         if (imageUrls.length < 2) {
           ElMessage.warning('PixVerse 多主体模式请至少连接两张有效图片。');
           loading.value = false;
@@ -2201,6 +2325,10 @@ const handleGenerate = async () => {
           mode: 'fusion_multi_subject',
           ...commonPayload,
           imageUrls,
+          imageRefNames:
+            imageRefNamesPayload.length === imageUrls.length ? imageRefNamesPayload : undefined,
+          imageFigureNumbers:
+            imageFigureNumbersPayload.length === imageUrls.length ? imageFigureNumbersPayload : undefined,
         });
 
         creditTracker?.addSpent?.(executeCost.value);

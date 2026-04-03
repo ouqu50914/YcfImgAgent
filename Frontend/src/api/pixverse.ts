@@ -46,6 +46,10 @@ export interface CreatePixverseFusionGenerationParams {
     mode: "fusion_multi_subject";
     prompt: string;
     imageUrls: string[]; // 2~7
+    /** 与 imageUrls 同序，对应画布图片节点别名（PixVerse image_references.ref_name） */
+    imageRefNames?: string[];
+    /** 与 imageUrls 同序：画布「图N」中的 N，用于将提示词里的 @图4 映射到该张图对应的 ref_name */
+    imageFigureNumbers?: number[];
     aspect_ratio: string;
     duration: number; // UI 仍用 1~15，后端会按上游支持映射为 5/8/10
     quality: "540p" | "720p" | "1080p" | string;

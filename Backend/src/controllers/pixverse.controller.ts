@@ -20,7 +20,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 function normalizePixverseStatusForUi(status?: number | null): string {
     const s = Number(status);
     if (!Number.isFinite(s) || s === 0) return "pending";
-    // status 码来自 PixVerse：1=成功，5=处理中，7=审核未通过，8=失败
+    // status 码来自 PixVerse：1=成功，5=处理中，7=审核相关（仍可能返回可播放 url），8=失败
+    // 若 Resp 里已有 url，在 worker/GET 里用 hasVideoUrl 覆盖为 succeeded，避免「有片仍显示失败」
     if (s === 1) return "succeeded";
     if (s === 5) return "running";
     if (s === 7) return "failed";
@@ -79,12 +80,16 @@ const startPixverseWorkerIfNeeded = (userId: number, providerTaskId: string) => 
                 const normalizedStatusRaw = normalizePixverseStatusForUi(result?.status);
                 const hasVideoUrl =
                     typeof result?.videoUrl === "string" && result.videoUrl.trim().length > 0;
-                const normalizedStatus =
-                    normalizedStatusRaw === "succeeded" && !hasVideoUrl ? "running" : normalizedStatusRaw;
+                const normalizedStatus = hasVideoUrl
+                    ? "succeeded"
+                    : normalizedStatusRaw === "succeeded" && !hasVideoUrl
+                      ? "running"
+                      : normalizedStatusRaw;
 
                 console.log("[PixVerseWorker] poll", {
                     providerTaskId,
                     statusRaw: result?.status,
+                    statusRawUi: normalizedStatusRaw,
                     status: normalizedStatus,
                     hasVideoUrl,
                     videoUrl: hasVideoUrl ? result?.videoUrl : undefined,
@@ -175,6 +180,8 @@ export const createPixverseGeneration = async (req: Request, res: Response) => {
             imageUrl,
             endImageUrl,
             imageUrls,
+            imageRefNames,
+            imageFigureNumbers,
         } = req.body || {};
 
         const promptStr = typeof prompt === "string" ? prompt : "";
@@ -194,8 +201,13 @@ export const createPixverseGeneration = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "duration 最终值需为 1~15 秒" });
         }
 
+        const qualityStr = String(quality ?? resolution ?? "");
+        if (!qualityStr.trim()) {
+            return res.status(400).json({ message: "quality（或 resolution）为必填项" });
+        }
+
         // 不同模式对 duration 的上游约束不同；这里把 1~15 映射成合法值，保证前后端计费一致。
-        const effectiveDurationSeconds =
+        let effectiveDurationSeconds =
             mode === "image_to_video_first_last"
                 ? durationSeconds <= 5
                     ? 5
@@ -208,9 +220,12 @@ export const createPixverseGeneration = async (req: Request, res: Response) => {
                         : 10
                   : durationSeconds;
 
-        const qualityStr = String(quality ?? resolution ?? "");
-        if (!qualityStr.trim()) {
-            return res.status(400).json({ message: "quality（或 resolution）为必填项" });
+        // fusion：v5.5/5.6 支持 5/8/10；1080p 时不可用 10（与官方文档一致）
+        if (mode === "fusion_multi_subject") {
+            const qLow = qualityStr.toLowerCase();
+            if ((qLow.includes("1080") || qLow === "1080p") && effectiveDurationSeconds === 10) {
+                effectiveDurationSeconds = 8;
+            }
         }
 
         const arRaw = String(aspect_ratio ?? aspectRatio ?? "");
@@ -284,7 +299,31 @@ export const createPixverseGeneration = async (req: Request, res: Response) => {
                         if (typeof u === "string" && u.trim()) urls.push(u.trim());
                     }
                 }
-                const uniq = Array.from(new Set(urls));
+                const rawRefs = Array.isArray(imageRefNames)
+                    ? (imageRefNames as unknown[]).map((x) => (typeof x === "string" ? x.trim() : ""))
+                    : [];
+                const rawFigures = Array.isArray(imageFigureNumbers)
+                    ? (imageFigureNumbers as unknown[]).map((x) =>
+                          typeof x === "number" && Number.isFinite(x) ? x : Number.NaN
+                      )
+                    : [];
+                const uniq: string[] = [];
+                const alignedRefs: string[] = [];
+                const alignedFigures: number[] = [];
+                const seenUrl = new Set<string>();
+                for (let i = 0; i < urls.length; i++) {
+                    const u = urls[i]!;
+                    if (seenUrl.has(u)) continue;
+                    seenUrl.add(u);
+                    uniq.push(u);
+                    alignedRefs.push(rawRefs[i] ?? "");
+                    const figN = rawFigures[i];
+                    alignedFigures.push(
+                        typeof figN === "number" && Number.isFinite(figN) && figN >= 1
+                            ? figN
+                            : uniq.length
+                    );
+                }
                 if (uniq.length < 2) {
                     throw new Error("PixVerse 多主体模式至少需要 2 张图片");
                 }
@@ -294,6 +333,8 @@ export const createPixverseGeneration = async (req: Request, res: Response) => {
 
                 upstreamResult = await adapter.createFusionGenerateFromUrls({
                     imageUrls: uniq.slice(0, 7),
+                    ...(alignedRefs.length === uniq.length ? { refNames: alignedRefs.slice(0, 7) } : {}),
+                    ...(alignedFigures.length === uniq.length ? { figureNumbers: alignedFigures.slice(0, 7) } : {}),
                     aspect_ratio: ar,
                     duration: Math.round(effectiveDurationSeconds),
                     prompt: promptStr,
@@ -439,46 +480,41 @@ export const getPixverseVideo = async (req: Request, res: Response) => {
             where: { user_id: userId, provider: "pixverse", provider_task_id: id },
         });
 
-        if (existingTask && ["succeeded", "failed"].includes(existingTask.status)) {
+        if (existingTask && existingTask.status === "succeeded") {
             // 防御：已缓存 succeeded 但视频链接可能不可达（CDN 负缓存/同步延迟/过期）。
             // 先探测缓存里的 videoUrl，只有可访问才短路返回；否则降级为 running 并继续同步上游。
-            if (existingTask.status === "succeeded") {
-                const cachedUrl =
-                    Array.isArray(existingTask.video_urls) && typeof existingTask.video_urls[0] === "string"
-                        ? existingTask.video_urls[0]
-                        : null;
-                if (cachedUrl) {
-                    const probe = await adapter.probeVideoUrlAccessible(cachedUrl, { maxAttempts: 3 });
-                    if (probe.ok) {
-                        return res.status(200).json({
-                            message: "获取 PixVerse 视频任务成功",
-                            data: buildPixverseResultFromTask(existingTask),
-                        });
-                    }
-                    console.log("[PixVerseController] cache_video_unreachable", {
-                        userId,
-                        id,
-                        status: existingTask.status,
-                        cachedUrl,
-                        probeStatus: probe.status,
+            const cachedUrl =
+                Array.isArray(existingTask.video_urls) && typeof existingTask.video_urls[0] === "string"
+                    ? existingTask.video_urls[0]
+                    : null;
+            if (cachedUrl) {
+                const probe = await adapter.probeVideoUrlAccessible(cachedUrl, { maxAttempts: 3 });
+                if (probe.ok) {
+                    return res.status(200).json({
+                        message: "获取 PixVerse 视频任务成功",
+                        data: buildPixverseResultFromTask(existingTask),
                     });
                 }
-
-                // 缓存不可用：降级为 running，避免前端持续请求 404
-                try {
-                    existingTask.status = "running";
-                    existingTask.video_urls = [];
-                    await videoTaskRepo.save(existingTask);
-                } catch {
-                    // ignore
-                }
-            } else {
-                return res.status(200).json({
-                    message: "获取 PixVerse 视频任务成功",
-                    data: buildPixverseResultFromTask(existingTask),
+                console.log("[PixVerseController] cache_video_unreachable", {
+                    userId,
+                    id,
+                    status: existingTask.status,
+                    cachedUrl,
+                    probeStatus: probe.status,
                 });
             }
+
+            // 缓存不可用：降级为 running，避免前端持续请求 404
+            try {
+                existingTask.status = "running";
+                existingTask.video_urls = [];
+                await videoTaskRepo.save(existingTask);
+            } catch {
+                // ignore
+            }
         }
+        // 注意：不在此处短路返回 failed。历史上可能误标失败或上游稍后成功，
+        // 必须继续拉取 PixVerse，否则前端会永久卡在「失败」。
 
         // 先按本地快照返回，避免上游限流导致卡住（但仍会尝试同步）
         let upstreamResult: any;
@@ -497,8 +533,12 @@ export const getPixverseVideo = async (req: Request, res: Response) => {
         const normalizedStatusRaw = normalizePixverseStatusForUi(upstreamResult?.status);
         const hasVideoUrl =
             typeof upstreamResult?.videoUrl === "string" && upstreamResult.videoUrl.trim().length > 0;
-        const normalizedStatus =
-            normalizedStatusRaw === "succeeded" && !hasVideoUrl ? "running" : normalizedStatusRaw;
+        // 有可播放地址即以成功为准（避免上游状态码与 url 短暂不一致）
+        const normalizedStatus = hasVideoUrl
+            ? "succeeded"
+            : normalizedStatusRaw === "succeeded" && !hasVideoUrl
+              ? "running"
+              : normalizedStatusRaw;
 
         console.log("[PixVerseController] status", {
             userId,

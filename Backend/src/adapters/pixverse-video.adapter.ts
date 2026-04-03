@@ -1,5 +1,6 @@
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
+import { allocPixverseRefName, normalizeFusionPromptForPixverse } from "../utils/pixverse-ref-name";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -44,6 +45,10 @@ export interface PixverseCreateTransitionGenerateFromUrlsInput {
 
 export interface PixverseCreateFusionGenerateFromUrlsInput {
     imageUrls: string[]; // 2~7
+    /** 与 imageUrls 同序，对应各图的 ref_name（画布图片节点别名）；不传则 ref1/ref2… */
+    refNames?: string[];
+    /** 与 imageUrls 同序：画布「图N」中的 N，用于 @图4 → 该张图对应的 ref_name */
+    figureNumbers?: number[];
     prompt: string;
     aspect_ratio: string;
     duration: number; // 上游支持 5/8/10（v5.6）
@@ -558,17 +563,33 @@ export class PixverseVideoAdapter {
             imgIds.push(up.img_id);
         }
 
-        const image_references = imgIds.map((img_id, idx) => ({
-            type: idx === 0 ? "subject" : "background",
-            img_id,
-            ref_name: `ref${idx + 1}`,
-        }));
+        const refUsed = new Set<string>();
+        const refNamesIn = Array.isArray(input.refNames) ? input.refNames : [];
+        const image_references = imgIds.map((img_id, idx) => {
+            const raw =
+                refNamesIn.length === urls.length && typeof refNamesIn[idx] === "string"
+                    ? refNamesIn[idx]
+                    : undefined;
+            const ref_name = allocPixverseRefName(raw, idx, refUsed);
+            return {
+                type: idx === 0 ? "subject" : "background",
+                img_id,
+                ref_name,
+            };
+        });
 
         const basePrompt = String(input.prompt ?? "").trim();
-        const hasAnyRef = image_references.some((r: any) => basePrompt.includes(`@${r.ref_name}`));
+        const refNamesOrdered = image_references.map((r: any) => String(r.ref_name ?? ""));
+        const figureNums = Array.isArray(input.figureNumbers) ? input.figureNumbers : null;
+        const normalizedBase = normalizeFusionPromptForPixverse(
+            basePrompt,
+            refNamesOrdered,
+            figureNums && figureNums.length === refNamesOrdered.length ? figureNums : undefined
+        );
+        const hasAnyRef = image_references.some((r: any) => normalizedBase.includes(`@${r.ref_name}`));
         const prompt = hasAnyRef
-            ? basePrompt
-            : `${image_references.map((r: any) => `@${r.ref_name}`).join(" ")} ${basePrompt}`.trim();
+            ? normalizedBase
+            : `${image_references.map((r: any) => `@${r.ref_name}`).join(" ")} ${normalizedBase}`.trim();
 
         const url = `${getBaseUrl()}/openapi/v2/video/fusion/generate`;
         const payload: Record<string, any> = {
