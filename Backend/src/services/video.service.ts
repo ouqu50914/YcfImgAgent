@@ -1,6 +1,7 @@
 import { AppDataSource } from "../data-source";
 import { VideoTask } from "../entities/VideoTask";
 import { ApiConfig } from "../entities/ApiConfig";
+import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { KlingVideoAdapter, KlingCreateTaskParams } from "../adapters/kling-video.adapter";
 
 /** 图生视频子类型：仅首帧 / 首尾帧（一镜到底）/ 多图多镜头 */
@@ -9,6 +10,8 @@ export type ImageSubType = "first_only" | "first_last" | "multi_shot";
 export interface CreateVideoTaskInput {
     mode: "text_to_video" | "image_to_video" | "omni";
     prompt: string;
+    /** 工作流项目 workflow_template.id */
+    templateId?: number | null;
     imageUrl?: string;
     /** 尾帧 URL，仅 imageSubType=first_last 时使用，可灵字段 image_tail */
     endImageUrl?: string;
@@ -28,6 +31,7 @@ export interface CreateVideoTaskInput {
 export class VideoService {
     private videoRepo = AppDataSource.getRepository(VideoTask);
     private configRepo = AppDataSource.getRepository(ApiConfig);
+    private templateRepo = AppDataSource.getRepository(WorkflowTemplate);
     private adapter = new KlingVideoAdapter();
 
     /**
@@ -69,6 +73,8 @@ export class VideoService {
         task.error_message = null;
         task.video_urls = null;
         task.finished_at = null;
+        task.template_id = input.templateId != null && input.templateId > 0 ? input.templateId : null;
+        task.credits_spent = null;
 
         await this.videoRepo.save(task);
 
@@ -129,7 +135,20 @@ export class VideoService {
     /**
      * 简单的任务列表查询，按创建时间倒序
      */
-    async listTasks(userId: number, opts?: { mode?: string; status?: string; take?: number }) {
+    async listTasks(
+        userId: number,
+        opts?: { mode?: string; status?: string; take?: number; templateId?: number; from?: string; to?: string }
+    ) {
+        if (opts?.templateId != null && opts.templateId > 0) {
+            const t = await this.templateRepo.findOne({
+                where: { id: opts.templateId },
+                select: ["id", "user_id"],
+            });
+            if (!t || Number(t.user_id) !== Number(userId)) {
+                throw Object.assign(new Error("无权查看该项目下的视频记录"), { status: 403 });
+            }
+        }
+
         const qb = this.videoRepo
             .createQueryBuilder("t")
             .where("t.user_id = :userId", { userId })
@@ -140,6 +159,15 @@ export class VideoService {
         }
         if (opts?.status) {
             qb.andWhere("t.status = :status", { status: opts.status });
+        }
+        if (opts?.templateId != null && opts.templateId > 0) {
+            qb.andWhere("t.template_id = :tid", { tid: opts.templateId });
+        }
+        if (opts?.from) {
+            qb.andWhere("t.created_at >= :from", { from: opts.from });
+        }
+        if (opts?.to) {
+            qb.andWhere("t.created_at <= :to", { to: opts.to });
         }
         qb.take(opts?.take ?? 50);
 

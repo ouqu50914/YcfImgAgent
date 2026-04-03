@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, inject } from 'vue';
+import { ref, watch, computed, inject, type Ref } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Grid, CircleCheck } from '@element-plus/icons-vue';
 import { splitImage } from '../../api/image';
@@ -140,6 +140,7 @@ const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
+const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 const userStore = useUserStore();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
@@ -232,6 +233,8 @@ const handleSplit = async () => {
         if (apiType.value === 'nano' && nanoModel.value) {
             params.model = nanoModel.value;
         }
+        const tid = workflowTemplateId?.value;
+        if (tid != null && tid > 0) params.templateId = tid;
 
         console.log('[前端 SplitNode] 调用 splitImage，参数:', params);
 

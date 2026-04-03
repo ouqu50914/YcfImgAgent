@@ -9,7 +9,7 @@ export const generateImage = async (req: Request, res: Response) => {
     try {
         // 从 JWT 中解析出的 userId (在 middleware 中赋值，稍后补充)
         const userId = (req as any).user?.userId; 
-        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, aspectRatio, generationKey } = req.body;
+        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, aspectRatio, generationKey, templateId } = req.body;
 
         // 图生图时提示词可以为空，但必须有参考图片
         const hasImage = !!imageUrl || (imageUrls && imageUrls.length > 0);
@@ -17,6 +17,7 @@ export const generateImage = async (req: Request, res: Response) => {
             return res.status(400).json({ message: "提示词或参考图片至少需要提供一个" });
         }
 
+        const tid = templateId != null && templateId !== '' ? Number(templateId) : undefined;
         const result = await imageService.generate(userId, apiType || 'dream', {
             prompt: prompt || '基于参考图片生成',
             width,
@@ -30,6 +31,7 @@ export const generateImage = async (req: Request, res: Response) => {
             model, // 传递 Nano 子模型参数
             aspectRatio, // 传递比例参数（Nano 使用）
             generationKey, // 用于刷新/历史恢复后查询最终态
+            ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
         });
 
         // 记录生图日志
@@ -78,6 +80,36 @@ export const generateImage = async (req: Request, res: Response) => {
 /**
  * 按 generationKey 查询图片生成最终结果（用于刷新/历史恢复后拉取成功/失败态）
  */
+export const listImageResults = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) return res.status(401).json({ message: "未登录或登录已失效" });
+
+        const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
+        const pageSize = req.query.pageSize ? parseInt(String(req.query.pageSize), 10) : 30;
+        const from = typeof req.query.from === "string" && req.query.from.trim() ? req.query.from.trim() : undefined;
+        const to = typeof req.query.to === "string" && req.query.to.trim() ? req.query.to.trim() : undefined;
+        const templateId = req.query.templateId ? parseInt(String(req.query.templateId), 10) : undefined;
+        const status =
+            req.query.status !== undefined && req.query.status !== ""
+                ? parseInt(String(req.query.status), 10)
+                : undefined;
+
+        const opt: Parameters<typeof imageService.listResults>[1] = { page, pageSize };
+        if (from) opt.from = from;
+        if (to) opt.to = to;
+        if (templateId != null && !Number.isNaN(templateId) && templateId > 0) opt.templateId = templateId;
+        if (status != null && !Number.isNaN(status)) opt.status = status;
+
+        const data = await imageService.listResults(userId, opt);
+
+        return res.status(200).json({ message: "获取成功", data });
+    } catch (error: any) {
+        const status = typeof error?.status === "number" ? error.status : 500;
+        return res.status(status).json({ message: error.message || "获取图片记录失败" });
+    }
+};
+
 export const getImageGenerateResultByGenerationKey = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
@@ -101,7 +133,8 @@ export const getImageGenerateResultByGenerationKey = async (req: Request, res: R
 export const upscaleImage = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { apiType, imageUrl, scale } = req.body;
+        const { apiType, imageUrl, scale, templateId } = req.body;
+        const tid = templateId != null && templateId !== '' ? Number(templateId) : undefined;
 
         if (!imageUrl) {
             return res.status(400).json({ message: "图片URL不能为空" });
@@ -109,7 +142,8 @@ export const upscaleImage = async (req: Request, res: Response) => {
 
         const result = await imageService.upscale(userId, apiType || 'dream', {
             imageUrl,
-            scale: scale || 2
+            scale: scale || 2,
+            ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
         });
 
         // 记录操作日志
@@ -144,7 +178,8 @@ export const upscaleImage = async (req: Request, res: Response) => {
 export const extendImage = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { apiType, imageUrl, direction, width, height, ratio, prompt } = req.body;
+        const { apiType, imageUrl, direction, width, height, ratio, prompt, templateId } = req.body;
+        const tid = templateId != null && templateId !== '' ? Number(templateId) : undefined;
 
         if (!imageUrl) {
             return res.status(400).json({ message: "图片URL不能为空" });
@@ -160,7 +195,8 @@ export const extendImage = async (req: Request, res: Response) => {
             width,
             height,
             ratio,
-            prompt
+            prompt,
+            ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
         });
 
         // 记录操作日志
@@ -195,7 +231,8 @@ export const extendImage = async (req: Request, res: Response) => {
 export const splitImage = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { apiType, imageUrl, splitCount, splitDirection, prompt } = req.body;
+        const { apiType, imageUrl, splitCount, splitDirection, prompt, templateId } = req.body;
+        const tid = templateId != null && templateId !== '' ? Number(templateId) : undefined;
 
         if (!imageUrl) {
             return res.status(400).json({ message: "图片URL不能为空" });
@@ -205,7 +242,8 @@ export const splitImage = async (req: Request, res: Response) => {
             imageUrl,
             splitCount,
             splitDirection,
-            prompt
+            prompt,
+            ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
         });
 
         // 记录操作日志

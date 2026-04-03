@@ -16,11 +16,14 @@ export interface GenerateParams {
     quality?: string; // 画质：1K、2K、4K（Nano Banana Pro）或 standard（Seedream）
     model?: 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview'; // Nano 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）
+    /** 工作流项目 workflow_template.id */
+    templateId?: number;
 }
 
 export interface UpscaleParams {
     imageUrl: string; // 原图片URL
     scale?: number;  // 放大倍数：2 或 4，默认2
+    templateId?: number;
 }
 
 export interface ExtendParams {
@@ -30,6 +33,7 @@ export interface ExtendParams {
     height?: number; // 扩展后的高度
     ratio?: string;  // 比例：auto, 1:1, 4:3, 3:4, 16:9, 9:16 等
     prompt?: string;  // 扩展区域的提示词
+    templateId?: number;
 }
 
 export interface SplitParams {
@@ -37,6 +41,7 @@ export interface SplitParams {
     splitCount?: number; // 拆分的数量，默认为 2
     splitDirection?: 'horizontal' | 'vertical'; // 拆分方向，水平或垂直
     prompt?: string;  // 拆分的提示词，用于指导拆分过程
+    templateId?: number;
 }
 
 export interface AiResponse {

@@ -10,7 +10,7 @@ export const createVideoTask = async (req: Request, res: Response) => {
             return res.status(401).json({ message: "未登录或登录已失效" });
         }
 
-        const { mode, prompt, imageUrl, endImageUrl, imageUrls, imageSubType, duration, resolution, aspectRatio, style, fps, seed, klingMode } = req.body;
+        const { mode, prompt, imageUrl, endImageUrl, imageUrls, imageSubType, duration, resolution, aspectRatio, style, fps, seed, klingMode, templateId } = req.body;
 
         if (!mode || !["text_to_video", "image_to_video", "omni"].includes(mode)) {
             return res.status(400).json({ message: "mode 必须是 text_to_video / image_to_video / omni 之一" });
@@ -39,9 +39,11 @@ export const createVideoTask = async (req: Request, res: Response) => {
             }
         }
 
+        const tid = templateId != null && templateId !== '' ? Number(templateId) : undefined;
         const input: CreateVideoTaskInput = {
             mode,
             prompt,
+            ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
         };
         if (imageUrl != null) input.imageUrl = imageUrl;
         if (endImageUrl != null) input.endImageUrl = endImageUrl;
@@ -125,13 +127,24 @@ export const listVideoTasks = async (req: Request, res: Response) => {
             return res.status(401).json({ message: "未登录或登录已失效" });
         }
 
-        const { mode, status, limit } = req.query;
+        const { mode, status, limit, templateId, from, to } = req.query;
         const take = typeof limit === "string" ? Number(limit) : undefined;
+        const tid = typeof templateId === "string" ? Number(templateId) : undefined;
 
-        const listOptions: { mode?: string; status?: string; take?: number } = {};
+        const listOptions: {
+            mode?: string;
+            status?: string;
+            take?: number;
+            templateId?: number;
+            from?: string;
+            to?: string;
+        } = {};
         if (typeof mode === "string") listOptions.mode = mode;
         if (typeof status === "string") listOptions.status = status;
         if (typeof take === "number" && !Number.isNaN(take)) listOptions.take = take;
+        if (tid != null && !Number.isNaN(tid) && tid > 0) listOptions.templateId = tid;
+        if (typeof from === "string" && from.trim()) listOptions.from = from.trim();
+        if (typeof to === "string" && to.trim()) listOptions.to = to.trim();
 
         const tasks = await videoService.listTasks(userId, listOptions);
 

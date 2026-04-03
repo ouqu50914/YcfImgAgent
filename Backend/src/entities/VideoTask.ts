@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from "typeorm";
 
 @Entity({ name: "video_task" })
+@Index(["template_id"])
 export class VideoTask {
     @PrimaryGeneratedColumn({ type: "bigint" })
     id!: number;
@@ -31,6 +32,12 @@ export class VideoTask {
 
     @Column({ type: "json", nullable: true, comment: "生成的视频URL数组（本地或远程）" })
     video_urls!: string[] | null;
+
+    @Column({ type: "bigint", nullable: true, comment: "关联 workflow_template.id" })
+    template_id!: number | null;
+
+    @Column({ type: "int", nullable: true, comment: "本次生成消耗的积分（扣费成功时写入）" })
+    credits_spent!: number | null;
 
     @CreateDateColumn()
     created_at!: Date;

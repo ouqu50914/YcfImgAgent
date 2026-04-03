@@ -59,7 +59,7 @@
         </div>
       </el-tooltip>
 
-      <el-tooltip v-if="isAdmin" content="管理中心" placement="right">
+      <el-tooltip v-if="isLoggedIn" :content="adminEntryTooltip" placement="right">
         <el-badge
           :is-dot="showPendingCreditDot"
           :hidden="!showPendingCreditDot"
@@ -97,6 +97,7 @@ import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { useAdminPendingStore } from '@/store/admin-pending';
 import { getHelpDocUrlForClient } from '@/api/user';
+import { getUserRoleFromInfo } from '@/utils/user-role';
 
 const router = useRouter();
 const route = useRoute();
@@ -108,10 +109,10 @@ const helpDocUrl = ref<string | null>(null);
 const currentRoute = computed(() => route.path);
 const routeQuery = computed(() => route.query.id);
 const isPublic = computed(() => route.query.public === 'true');
-const isAdmin = computed(() => {
-  const role = userStore.userInfo.role || userStore.userInfo.role_id;
-  return role === 1;
-});
+const isLoggedIn = computed(() => !!userStore.token);
+const adminEntryTooltip = computed(() =>
+  getUserRoleFromInfo(userStore.userInfo) === 1 ? '管理中心' : '我的生成记录'
+);
 
 const handleNavClick = (path: string, query?: any) => {
   if (query) {

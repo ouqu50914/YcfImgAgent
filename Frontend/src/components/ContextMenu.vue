@@ -35,7 +35,7 @@
         >
             <el-icon><VideoCamera /></el-icon>
             <span>插入视频生成节点</span>
-            <span class="shortcut">V</span>
+            <span class="shortcut">B</span>
         </div>
         <div 
             class="menu-item"

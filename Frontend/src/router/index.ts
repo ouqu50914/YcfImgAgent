@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { ElMessage } from 'element-plus';
 import Login from '@/views/Login.vue';
 import Home from '@/views/Home.vue';
 import Workflow from '@/views/Workflow.vue';
@@ -7,7 +6,6 @@ import Profile from '@/views/Profile.vue';
 import Admin from '@/views/Admin.vue';
 import WorkflowPlaza from '@/views/WorkflowPlaza.vue';
 import SeedanceDemo from '@/views/SeedanceDemo.vue';
-import { getUserRoleFromInfo } from '@/utils/user-role';
 
 const routes = [
   {
@@ -37,7 +35,7 @@ const routes = [
     path: '/admin',
     name: 'Admin',
     component: Admin,
-    meta: { requiresAuth: true, requiresAdmin: true }
+    meta: { requiresAuth: true }
   },
   {
     path: '/workflow-plaza',
@@ -65,10 +63,6 @@ router.beforeEach((to, _from, next) => {
   
   if (to.meta.requiresAuth && !token) {
     next('/login');
-  } else if (to.meta.requiresAdmin && getUserRoleFromInfo(userInfo) !== 1) {
-    // 需要管理员权限但当前用户不是管理员
-    ElMessage.error('需要超级管理员权限');
-    next('/');
   } else {
     next();
   }

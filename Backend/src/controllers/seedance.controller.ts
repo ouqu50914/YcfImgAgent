@@ -3,6 +3,7 @@ import { SeedanceVideoAdapter, type SeedanceActionType } from "../adapters/seeda
 import { CreditService } from "../services/credit.service";
 import { AppDataSource } from "../data-source";
 import { VideoTask } from "../entities/VideoTask";
+import { parseTemplateIdFromBody } from "../utils/template-id";
 
 const adapter = new SeedanceVideoAdapter();
 const creditService = new CreditService();
@@ -96,8 +97,9 @@ const startSeedanceWorkerIfNeeded = (userId: number, providerTaskId: string) => 
 
 function getSeedanceCreditsPerSecond(): number {
     const raw = process.env.SEEDANCE_CREDITS_PER_SECOND;
-    const n = raw ? Number(raw) : 20;
-    if (Number.isNaN(n) || n <= 0) return 20;
+    // 与前端默认保持一致：28 积分/秒
+    const n = raw ? Number(raw) : 28;
+    if (Number.isNaN(n) || n <= 0) return 28;
     return n;
 }
 
@@ -202,6 +204,7 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
         const creditsPerSecond = getSeedanceCreditsPerSecond();
         const seconds = durationNum === undefined || durationNum === -1 ? defaultDuration : durationNum;
         const cost = seconds * creditsPerSecond;
+        const templateId = parseTemplateIdFromBody(req.body);
 
         await creditService.deductCredits(userId, cost);
 
@@ -235,6 +238,8 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
                 task.error_message = null;
                 task.video_urls = null;
                 task.finished_at = null;
+                task.template_id = templateId;
+                task.credits_spent = cost;
                 await videoTaskRepo.save(task);
 
                 // 启动后台 worker：保证终态最终一定会落库
@@ -479,6 +484,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
         const resultDuration = durationNum === undefined || durationNum === -1 ? getSeedanceDefaultDuration() : durationNum;
         const creditsPerSecond = getSeedanceCreditsPerSecond();
         const advCost = resultDuration * creditsPerSecond;
+        const templateId = parseTemplateIdFromBody(req.body);
 
         await creditService.deductCredits(userId, advCost);
 
@@ -525,6 +531,8 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                 task.error_message = null;
                 task.video_urls = null;
                 task.finished_at = null;
+                task.template_id = templateId;
+                task.credits_spent = advCost;
                 await videoTaskRepo.save(task);
 
                 // 启动后台 worker：保证终态最终一定会落库

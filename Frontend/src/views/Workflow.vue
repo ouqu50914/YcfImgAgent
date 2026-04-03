@@ -40,6 +40,14 @@
                     size="small"
                     type="primary"
                     text
+                    @click="openProjectAssetsDrawer"
+                >
+                    项目产物
+                </el-button>
+                <el-button
+                    size="small"
+                    type="primary"
+                    text
                     :loading="manualSaving"
                     @click="handleManualSave"
                 >
@@ -293,6 +301,54 @@
             </el-table>
         </el-dialog>
 
+        <!-- 当前项目下的生成产物（误删节点时可在此找回链接） -->
+        <el-drawer v-model="showProjectAssetsDrawer" title="项目产物" direction="rtl" size="min(520px, 92vw)">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px">
+                <el-date-picker
+                    v-model="projectAssetsDateRange"
+                    type="datetimerange"
+                    range-separator="至"
+                    start-placeholder="开始"
+                    end-placeholder="结束"
+                    style="max-width: 100%"
+                    @change="onProjectAssetsFilterChange"
+                />
+                <el-button size="small" @click="loadProjectAssets">刷新</el-button>
+            </div>
+            <p v-if="currentTemplateId == null" class="workflow-assets-hint">
+                尚未关联保存的项目：将列出您在所选时间范围内的全部生成记录；保存/自动保存后即可按项目筛选。
+            </p>
+            <el-table v-loading="projectAssetsLoading" :data="projectAssetsItems" border size="small" max-height="70vh">
+                <el-table-column prop="created_at" label="时间" width="150" :formatter="formatTableDateTime" />
+                <el-table-column prop="type_label" label="类型" min-width="120" show-overflow-tooltip />
+                <el-table-column prop="credits_spent" label="积分" width="72">
+                    <template #default="{ row }">
+                        {{ row.credits_spent != null ? row.credits_spent : '—' }}
+                    </template>
+                </el-table-column>
+                <el-table-column label="结果" min-width="140">
+                    <template #default="{ row }">
+                        <template v-if="row.result_urls?.length">
+                            <el-button size="small" text type="primary" @click="openProjectAssetUrl(row.result_urls[0])">打开</el-button>
+                            <el-button size="small" text @click="copyProjectAssetUrls(row.result_urls)">复制</el-button>
+                        </template>
+                        <span v-else>—</span>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <el-pagination
+                v-model:current-page="projectAssetsPage"
+                v-model:page-size="projectAssetsPageSize"
+                :total="projectAssetsTotal"
+                :page-sizes="[10, 20, 50]"
+                layout="total, sizes, prev, pager, next"
+                small
+                style="margin-top: 12px"
+                @size-change="loadProjectAssets"
+                @current-change="loadProjectAssets"
+            />
+        </el-drawer>
+
         <!-- Gemini 聊天面板（包含右侧悬浮开关按钮） -->
         <WorkflowChatPanel
             :workflow-context="workflowContextForChat"
@@ -318,6 +374,7 @@ import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Coll
 import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
 import { applyCredits } from '@/api/user';
+import { getGenerationRecords } from '@/api/admin';
 import { uploadImage, uploadVideo, uploadAudio } from '@/api/upload';
 import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
@@ -664,8 +721,64 @@ const {
 } = useVueFlow();
 /** 从「我的项目」进入时的模板 id，保存时覆盖该模板；否则保存为新项目 */
 const currentTemplateId = ref<number | null>(null);
+provide('workflowTemplateId', currentTemplateId);
 /** 当前打开的模板所属用户 id，与当前用户一致时保存为覆盖 */
 const templateOwnerId = ref<number | null>(null);
+
+const showProjectAssetsDrawer = ref(false);
+const projectAssetsLoading = ref(false);
+const projectAssetsItems = ref<any[]>([]);
+const projectAssetsPage = ref(1);
+const projectAssetsPageSize = ref(20);
+const projectAssetsTotal = ref(0);
+const projectAssetsDateRange = ref<[Date, Date] | null>(null);
+
+const openProjectAssetsDrawer = () => {
+    showProjectAssetsDrawer.value = true;
+    if (!projectAssetsDateRange.value) {
+        const end = new Date();
+        const start = new Date(end.getTime() - 7 * 24 * 3600 * 1000);
+        projectAssetsDateRange.value = [start, end];
+    }
+    projectAssetsPage.value = 1;
+    void loadProjectAssets();
+};
+
+const onProjectAssetsFilterChange = () => {
+    projectAssetsPage.value = 1;
+    void loadProjectAssets();
+};
+
+const loadProjectAssets = async () => {
+    projectAssetsLoading.value = true;
+    try {
+        const params: Record<string, unknown> = {
+            page: projectAssetsPage.value,
+            pageSize: projectAssetsPageSize.value,
+            kind: 'all',
+        };
+        if (currentTemplateId.value != null && currentTemplateId.value > 0) {
+            params.templateId = currentTemplateId.value;
+        }
+        if (projectAssetsDateRange.value?.length === 2) {
+            params.from = projectAssetsDateRange.value[0].toISOString();
+            params.to = projectAssetsDateRange.value[1].toISOString();
+        }
+        const res: any = await getGenerationRecords(params);
+        projectAssetsItems.value = res.data?.items ?? [];
+        projectAssetsTotal.value = res.data?.total ?? 0;
+    } finally {
+        projectAssetsLoading.value = false;
+    }
+};
+
+const openProjectAssetUrl = (u: string) => {
+    window.open(u, '_blank', 'noopener');
+};
+
+const copyProjectAssetUrls = (urls: string[]) => {
+    void navigator.clipboard.writeText(urls.join('\n')).then(() => ElMessage.success('已复制'));
+};
 /** 若当前为从公开模板派生的临时项目，则记录来源公开模板 ID */
 const sourceTemplateIdForTemp = ref<number | null>(null);
 const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
@@ -3258,6 +3371,13 @@ onUnmounted(() => {
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
+}
+
+.workflow-assets-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+    line-height: 1.5;
 }
 
 .workflow-user-info {

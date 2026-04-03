@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
 import { AdminService } from "../services/admin.service";
+import { GenerationRecordService, type GenerationRecordQuery } from "../services/generation-record.service";
 
 const adminService = new AdminService();
+const generationRecordService = new GenerationRecordService();
 
 /**
  * 获取用户列表
@@ -276,5 +278,72 @@ export const updateHelpDocUrl = async (req: Request, res: Response) => {
     } catch (error: any) {
         // AdminService 内部已经做了更详细的校验，这里统一返回 400
         return res.status(400).json({ message: error.message });
+    }
+};
+
+/**
+ * 生成记录（超管可查全员；普通用户仅本人）。需登录，不要求超管。
+ */
+export const getGenerationRecords = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId as number | undefined;
+        const roleRaw = (req as any).user?.role;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录或登录已失效" });
+        }
+        const isSuperAdmin = Number(roleRaw) === 1;
+
+        const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+        const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : 20;
+        const from = typeof req.query.from === "string" && req.query.from.trim() ? req.query.from.trim() : undefined;
+        const to = typeof req.query.to === "string" && req.query.to.trim() ? req.query.to.trim() : undefined;
+        const kindRaw = req.query.kind as string | undefined;
+        const kind =
+            kindRaw === "image" || kindRaw === "video" || kindRaw === "all" ? (kindRaw as "image" | "video" | "all") : "all";
+
+        let filterUserId: number | undefined;
+        let filterRoleId: number | undefined;
+        let templateId: number | undefined;
+        let provider: string | undefined;
+
+        if (isSuperAdmin) {
+            if (req.query.userId) {
+                const n = parseInt(String(req.query.userId), 10);
+                if (!Number.isNaN(n) && n > 0) filterUserId = n;
+            }
+            if (req.query.roleId !== undefined && req.query.roleId !== "") {
+                const r = parseInt(String(req.query.roleId), 10);
+                if (r === 1 || r === 2) filterRoleId = r;
+            }
+            if (req.query.templateId) {
+                const t = parseInt(String(req.query.templateId), 10);
+                if (!Number.isNaN(t) && t > 0) templateId = t;
+            }
+        } else if (req.query.templateId) {
+            const t = parseInt(String(req.query.templateId), 10);
+            if (!Number.isNaN(t) && t > 0) templateId = t;
+        }
+        if (typeof req.query.provider === "string" && req.query.provider.trim()) {
+            provider = req.query.provider.trim();
+        }
+
+        const q: GenerationRecordQuery = { page, pageSize, kind };
+        if (from) q.from = from;
+        if (to) q.to = to;
+        if (filterUserId != null) q.userId = filterUserId;
+        if (filterRoleId != null) q.roleId = filterRoleId;
+        if (templateId != null) q.templateId = templateId;
+        if (provider) q.provider = provider;
+
+        const data = await generationRecordService.list(userId, isSuperAdmin, q);
+
+        return res.status(200).json({ message: "获取成功", data });
+    } catch (error: any) {
+        const status = typeof error?.status === "number" ? error.status : 500;
+        const sqlMsg = typeof error?.sqlMessage === "string" ? error.sqlMessage : undefined;
+        console.error("[getGenerationRecords]", error?.message, sqlMsg || "");
+        return res.status(status).json({
+            message: sqlMsg || error?.message || "获取生成记录失败",
+        });
     }
 };

@@ -79,3 +79,18 @@ export const getHelpDocUrl = () => {
 export const updateHelpDocUrl = (url: string) => {
   return request.put('/admin/config/help-doc-url', { url });
 };
+
+/** 生成记录（超管可查全员；普通用户仅本人） */
+export const getGenerationRecords = (params?: {
+  page?: number;
+  pageSize?: number;
+  from?: string;
+  to?: string;
+  kind?: 'all' | 'image' | 'video';
+  userId?: number;
+  roleId?: number;
+  templateId?: number;
+  provider?: string;
+}) => {
+  return request.get('/admin/generation-records', { params });
+};

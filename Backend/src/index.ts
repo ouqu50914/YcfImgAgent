@@ -17,6 +17,7 @@ import layerRoutes from "./routes/layer.routes";
 import workflowRoutes from "./routes/workflow.routes";
 import videoRoutes from "./routes/video.routes";
 import seedanceRoutes from "./routes/seedance.routes";
+import pixverseRoutes from "./routes/pixverse.routes";
 import mediaRoutes from "./routes/media.routes";
 import notificationRoutes from "./routes/notification.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
@@ -58,7 +59,8 @@ app.use(cors({
 }));
 
 // 调大请求体大小上限，避免工作流自动保存被 100KB 默认限制拦截
-const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '10mb';
+// PixVerse 侧要求请求体 < 20MB，这里默认放宽到 20mb（可用 JSON_BODY_LIMIT 环境变量覆盖）。
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '20mb';
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
@@ -102,6 +104,7 @@ app.use("/api/layer", layerRoutes);
 app.use("/api/workflow", workflowRoutes);
 app.use("/api/video", videoRoutes);
 app.use("/api/seedance", seedanceRoutes);
+app.use("/api/pixverse", pixverseRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/notifications", notificationRoutes);
 

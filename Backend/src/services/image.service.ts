@@ -1,6 +1,7 @@
 import { AppDataSource } from "../data-source";
 import { ImageResult } from "../entities/ImageResult";
 import { ApiConfig } from "../entities/ApiConfig";
+import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
@@ -9,6 +10,7 @@ import { CreditService, type CreditLogInfo } from "./credit.service";
 export class ImageService {
     private imageRepo = AppDataSource.getRepository(ImageResult);
     private configRepo = AppDataSource.getRepository(ApiConfig);
+    private templateRepo = AppDataSource.getRepository(WorkflowTemplate);
     private creditService = new CreditService();
 
     private adapters = {
@@ -65,6 +67,9 @@ export class ImageService {
             imageRecord.generation_key = generationKey ?? '';
             // 0 = pending（未完成）
             imageRecord.status = 0;
+            imageRecord.template_id = params.templateId != null ? params.templateId : null;
+            imageRecord.credits_spent = cost;
+            imageRecord.operation_type = "generate";
             await this.imageRepo.save(imageRecord);
 
             try {
@@ -199,6 +204,9 @@ export class ImageService {
                 imageRecord.image_url = firstImageUrl;
             }
             imageRecord.status = 1;
+            imageRecord.template_id = params.templateId != null ? params.templateId : null;
+            imageRecord.credits_spent = cost;
+            imageRecord.operation_type = "upscale";
             await this.imageRepo.save(imageRecord);
 
             config.used_quota += 1;
@@ -251,6 +259,9 @@ export class ImageService {
                 imageRecord.image_url = firstImageUrl;
             }
             imageRecord.status = 1;
+            imageRecord.template_id = params.templateId != null ? params.templateId : null;
+            imageRecord.credits_spent = cost;
+            imageRecord.operation_type = "extend";
             await this.imageRepo.save(imageRecord);
 
             config.used_quota += 1;
@@ -303,6 +314,9 @@ export class ImageService {
                 imageRecord.image_url = firstImageUrl;
             }
             imageRecord.status = 1;
+            imageRecord.template_id = params.templateId != null ? params.templateId : null;
+            imageRecord.credits_spent = cost;
+            imageRecord.operation_type = "split";
             await this.imageRepo.save(imageRecord);
 
             config.used_quota += 1;
@@ -354,6 +368,9 @@ export class ImageService {
                 imageRecord.image_url = firstImageUrl;
             }
             imageRecord.status = 1;
+            imageRecord.template_id = params.templateId != null ? params.templateId : null;
+            imageRecord.credits_spent = cost;
+            imageRecord.operation_type = "generate";
             await this.imageRepo.save(imageRecord);
 
             config.used_quota += 1;
@@ -363,5 +380,62 @@ export class ImageService {
         }, { operationType: 'generate', apiType });
 
         return result;
+    }
+
+    /**
+     * 当前用户的图片生成记录列表（画布「项目产物」等）
+     */
+    async listResults(
+        userId: number,
+        opts?: {
+            templateId?: number;
+            from?: string;
+            to?: string;
+            status?: number;
+            page?: number;
+            pageSize?: number;
+        }
+    ) {
+        const page = Math.max(1, opts?.page ?? 1);
+        const pageSize = Math.min(100, Math.max(1, opts?.pageSize ?? 30));
+
+        if (opts?.templateId != null && opts.templateId > 0) {
+            const t = await this.templateRepo.findOne({
+                where: { id: opts.templateId },
+                select: ["id", "user_id"],
+            });
+            if (!t || Number(t.user_id) !== Number(userId)) {
+                throw Object.assign(new Error("无权查看该项目下的图片记录"), { status: 403 });
+            }
+        }
+
+        const qb = this.imageRepo
+            .createQueryBuilder("ir")
+            .where("ir.user_id = :uid", { uid: userId })
+            .orderBy("ir.created_at", "DESC");
+
+        if (opts?.templateId != null && opts.templateId > 0) {
+            qb.andWhere("ir.template_id = :tid", { tid: opts.templateId });
+        }
+        if (opts?.from) {
+            qb.andWhere("ir.created_at >= :from", { from: opts.from });
+        }
+        if (opts?.to) {
+            qb.andWhere("ir.created_at <= :to", { to: opts.to });
+        }
+        if (opts?.status !== undefined && opts.status !== null && !Number.isNaN(Number(opts.status))) {
+            qb.andWhere("ir.status = :st", { st: Number(opts.status) });
+        }
+
+        const total = await qb.getCount();
+        qb.skip((page - 1) * pageSize).take(pageSize);
+        const rows = await qb.getMany();
+
+        return {
+            list: rows,
+            total,
+            page,
+            pageSize,
+        };
     }
 }

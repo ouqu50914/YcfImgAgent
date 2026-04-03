@@ -13,9 +13,11 @@
       <div class="params-section nodrag">
         <div class="param-item">
           <div class="param-label">模型</div>
-          <el-select v-model="provider" size="small" class="param-select" disabled>
-            <!-- 目前仅支持 Seedance，暂时禁用 Kling 选项 -->
+          <el-select v-model="provider" size="small" class="param-select">
+            <!-- Kling 目前作为历史兼容分支存在：前端不允许新建选择 -->
             <el-option label="Seedance" value="seedance" />
+            <el-option label="PixVerse" value="pixverse" />
+            <el-option label="Kling(内部)" value="kling" disabled />
           </el-select>
         </div>
 
@@ -26,6 +28,17 @@
             <el-option label="图生视频-首帧" value="image_first_frame" />
             <el-option label="图生视频-首尾帧" value="image_first_last" />
             <el-option label="多模态参考" value="multi_modal" />
+          </el-select>
+        </div>
+
+        <!-- PixVerse 生成类型：文生 / 图生 / 首尾帧 / 多主体（不支持多模态参考） -->
+        <div v-if="provider === 'pixverse'" class="param-item">
+          <div class="param-label">PixVerse 类型</div>
+          <el-select v-model="pixverseMode" size="small" class="param-select">
+            <el-option label="文生视频" value="text_to_video" />
+            <el-option label="图生视频" value="image_to_video_first_only" />
+            <el-option label="首尾帧生视频" value="image_to_video_first_last" />
+            <el-option label="多主体（多参考）" value="fusion_multi_subject" />
           </el-select>
         </div>
 
@@ -72,6 +85,27 @@
           </div>
         </template>
 
+        <!-- PixVerse 图生视频/首尾帧：仅展示连线图片数量，不标注“首帧/尾帧” -->
+        <template
+          v-if="provider === 'pixverse' && (pixverseMode === 'image_to_video_first_only' || pixverseMode === 'image_to_video_first_last')"
+        >
+          <div class="param-item">
+            <div class="param-label">图片</div>
+            <span class="param-hint">{{ imageSourceCount }} 张（连线）</span>
+            <span
+              v-if="pixverseMode === 'image_to_video_first_only' && imageSourceCount > 1"
+              class="param-hint warn"
+            >仅首张用于图生（API 仅 img_id）</span>
+          </div>
+        </template>
+
+        <template v-if="provider === 'pixverse' && pixverseMode === 'fusion_multi_subject'">
+          <div class="param-item">
+            <div class="param-label">图片</div>
+            <span class="param-hint">{{ connectedImageUrls.length }} 张（连线）</span>
+          </div>
+        </template>
+
         <!-- 多图多镜头：展示已汇聚的图片数量 -->
         <div v-if="provider === 'kling' && mode === 'image_to_video' && imageSubType === 'multi_shot'" class="param-item">
           <div class="param-label">多图</div>
@@ -99,6 +133,7 @@
           <!-- Seedance：支持自动(-1) 或 4-15 手动，避免数值跳动 -->
           <div style="display: flex; align-items: center; gap: 6px;">
             <el-switch
+              v-if="provider !== 'pixverse'"
               v-model="durationAuto"
               inline-prompt
               active-text="自动"
@@ -107,11 +142,11 @@
             />
             <el-input-number
               v-model="durationManual"
-              :min="4"
               :max="15"
+              :min="provider === 'pixverse' ? 1 : 4"
               :step="1"
               size="small"
-              :disabled="durationAuto"
+              :disabled="provider !== 'pixverse' && durationAuto"
               :controls="false"
             />
           </div>
@@ -124,9 +159,15 @@
               <el-option label="480p" value="480p" />
               <el-option label="720p" value="720p" />
             </template>
+            <template v-else-if="provider === 'pixverse'">
+              <el-option label="540p" value="540p" />
+              <el-option label="720p" value="720p" />
+              <el-option label="1080p" value="1080p" />
+            </template>
             <template v-else>
               <el-option label="720p" value="720p" />
               <el-option label="1080p" value="1080p" />
+              <el-option label="4k" value="4k" />
             </template>
           </el-select>
         </div>
@@ -134,13 +175,22 @@
         <div class="param-item">
           <div class="param-label">比例</div>
           <el-select v-model="aspectRatio" size="small" class="param-select">
-            <el-option label="自适应 (adaptive)" value="adaptive" />
-            <el-option label="16:9" value="16:9" />
-            <el-option label="4:3" value="4:3" />
-            <el-option label="1:1" value="1:1" />
-            <el-option label="3:4" value="3:4" />
-            <el-option label="9:16" value="9:16" />
-            <el-option label="21:9" value="21:9" />
+            <template v-if="provider === 'pixverse'">
+              <el-option label="16:9" value="16:9" />
+              <el-option label="9:16" value="9:16" />
+              <el-option label="4:3" value="4:3" />
+              <el-option label="3:4" value="3:4" />
+              <el-option label="1:1" value="1:1" />
+            </template>
+            <template v-else>
+              <el-option label="自适应 (adaptive)" value="adaptive" />
+              <el-option label="16:9" value="16:9" />
+              <el-option label="4:3" value="4:3" />
+              <el-option label="1:1" value="1:1" />
+              <el-option label="3:4" value="3:4" />
+              <el-option label="9:16" value="9:16" />
+              <el-option label="21:9" value="21:9" />
+            </template>
           </el-select>
         </div>
 
@@ -154,49 +204,6 @@
         >
           {{ executeButtonText }}
         </el-button>
-      </div>
-
-      <!-- 下半部分：任务状态 & 播放器 -->
-      <div class="result-section" v-if="taskId">
-        <div class="status-row">
-          <span class="status-label">状态</span>
-          <span class="status-value" :class="`status-${status}`">
-            {{ statusText }}
-          </span>
-          <el-tag v-if="progress != null" size="small" effect="dark">
-            {{ progress }}%
-          </el-tag>
-          <el-button
-            v-if="status === 'pending' || status === 'running'"
-            size="small"
-            text
-            @click="manualRefresh"
-          >
-            刷新
-          </el-button>
-        </div>
-
-        <div v-if="errorMessage" class="error-row">
-          {{ errorMessage }}
-        </div>
-
-        <div v-if="videoUrls.length" class="player-wrapper">
-          <video
-            :src="videoUrls[0]"
-            controls
-            class="video-player"
-            @click.stop="handleVideoClick($event, videoUrls[0] || '')"
-          />
-          <div class="player-actions">
-            <el-button
-              v-if="videoUrls[0]"
-              size="small"
-              @click="downloadVideo(videoUrls[0])"
-            >
-              下载视频
-            </el-button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -259,13 +266,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick, type Ref } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
 import { getUploadUrl } from '@/utils/image-loader';
 import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
+import {
+  createPixverseGeneration,
+  createPixverseImageGeneration,
+  createPixverseFusionGeneration,
+  createPixverseTransitionGeneration,
+  getPixverseGenerationStatus,
+} from '@/api/pixverse';
 import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
@@ -293,6 +307,15 @@ type CreditTrackerStore = {
   getTotalSpent: () => number;
 };
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
+const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
+
+function withTemplateId<T extends object>(obj: T): T {
+  const tid = workflowTemplateId?.value;
+  if (tid != null && tid > 0) {
+    (obj as { templateId?: number }).templateId = tid;
+  }
+  return obj;
+}
 
 type WorkflowPersistenceStore = {
   saveImmediately: () => void;
@@ -309,11 +332,16 @@ const saveWorkflowImmediately = () => {
   }
 };
 
-// 模型提供方：kling / seedance（Seedance 仅支持文生视频）
-const provider = ref<'kling' | 'seedance'>('seedance');
+// 模型提供方：kling / seedance / pixverse（PixVerse 支持文生 + 图生首帧/首尾帧）
+const provider = ref<'kling' | 'seedance' | 'pixverse'>('seedance');
 
 // Seedance 内部模式：文生 / 图生首帧 / 首尾帧 / 多参考图
 const seedanceMode = ref<SeedanceAdvancedAction>('text');
+
+// PixVerse 生成类型：文生 / 图生(单图) / 首尾帧 / 多主体(多参考)
+const pixverseMode = ref<
+  'text_to_video' | 'image_to_video_first_only' | 'image_to_video_first_last' | 'fusion_multi_subject'
+>('text_to_video');
 
 // 输入：从上游节点采集的提示词 & 图片 / 视频 / 音频参考
 const connectedPrompt = ref('');
@@ -343,6 +371,78 @@ const currentNode = computed(() => {
   return getNodes.value.find(n => n.id === props.id);
 });
 
+/** 当前这次任务要写入的 videoResult 节点 id；重新生成时会新建节点并切换到此 id，旧节点保留 */
+const activeVideoResultNodeId = ref<string | null>(null);
+
+const VIDEO_RESULT_EST_HEIGHT = 280;
+const VIDEO_RESULT_STACK_GAP = 24;
+
+function getNextVideoResultPosition(): { x: number; y: number } {
+  const self = currentNode.value;
+  if (!self) return { x: 0, y: 0 };
+  const nodeWidth = self.dimensions?.width || 360;
+  const baseX = self.position.x + nodeWidth + 100;
+  const siblings = getNodes.value.filter(
+    n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
+  );
+  if (siblings.length === 0) {
+    return { x: baseX, y: self.position.y };
+  }
+  let maxBottom = self.position.y;
+  for (const n of siblings) {
+    const h = n.dimensions?.height ?? VIDEO_RESULT_EST_HEIGHT;
+    maxBottom = Math.max(maxBottom, n.position.y + h);
+  }
+  return { x: baseX, y: maxBottom + VIDEO_RESULT_STACK_GAP };
+}
+
+/** 已成功生成过视频后再次点击生成：新建结果节点，旧节点不覆盖 */
+function forkNewVideoResultNodeIfNeeded() {
+  const hasVideo =
+    status.value === 'succeeded' &&
+    videoUrls.value.length > 0 &&
+    typeof videoUrls.value[0] === 'string' &&
+    videoUrls.value[0].trim().length > 0;
+  if (!hasVideo) return;
+
+  const self = currentNode.value;
+  if (!self) return;
+
+  const pos = getNextVideoResultPosition();
+  const nodeId = `video_result_${Date.now()}`;
+  const edgeId = `edge_${props.id}_to_${nodeId}_${Date.now()}`;
+  activeVideoResultNodeId.value = nodeId;
+
+  addNodes({
+    id: nodeId,
+    type: 'videoResult',
+    position: pos,
+    data: {
+      fromNodeId: props.id,
+      videoUrl: '',
+      status: 'pending',
+      progress: null,
+      errorMessage: null,
+      taskMeta: {
+        provider: provider.value,
+        taskId: null as number | null,
+        seedanceTaskKey: null as string | null,
+      },
+    },
+  });
+  updateNodeInternals([nodeId]);
+  addEdges({
+    id: edgeId,
+    source: props.id,
+    target: nodeId,
+    sourceHandle: 'source',
+    targetHandle: 'source',
+    type: 'default',
+    animated: true,
+  });
+  saveWorkflowImmediately();
+}
+
 // 创建或更新“视频结果节点”：从创建任务开始就存在，并在轮询过程中实时同步状态
 const syncResultVideoNode = () => {
   const self = currentNode.value;
@@ -364,15 +464,12 @@ const syncResultVideoNode = () => {
     progress: progress.value,
     errorMessage: errorMessage.value,
     videoUrl: url,
+    activeResultNodeId: activeVideoResultNodeId.value,
   };
 
-  // 若已存在当前 VideoNode 派生的结果节点，则直接更新其数据
-  const existing = getNodes.value.find(
-    n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
-  );
-  if (existing) {
-    existing.data = {
-      ...(existing.data || {}),
+  const patchResultData = (target: { id: string; data?: any; type?: string }) => {
+    target.data = {
+      ...(target.data || {}),
       fromNodeId: props.id,
       videoUrl: url,
       status: status.value,
@@ -380,9 +477,25 @@ const syncResultVideoNode = () => {
       errorMessage: errorMessage.value,
       taskMeta,
     };
-    // 视频 URL/状态变化可能导致节点高度变化，刷新内部端口锚点位置
-    updateNodeInternals([existing.id]);
+    updateNodeInternals([target.id]);
     saveWorkflowImmediately();
+  };
+
+  const byId = activeVideoResultNodeId.value
+    ? getNodes.value.find(n => n.id === activeVideoResultNodeId.value)
+    : undefined;
+  if (byId && byId.type === 'videoResult') {
+    patchResultData(byId);
+    return;
+  }
+
+  // 兼容旧工作流：未记录 active 时，更新第一个派生结果节点
+  const existing = getNodes.value.find(
+    n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
+  );
+  if (existing) {
+    activeVideoResultNodeId.value = existing.id;
+    patchResultData(existing);
     return;
   }
 
@@ -393,6 +506,7 @@ const syncResultVideoNode = () => {
 
   const nodeId = `video_result_${Date.now()}`;
   const edgeId = `edge_${props.id}_to_${nodeId}_${Date.now()}`;
+  activeVideoResultNodeId.value = nodeId;
 
   addNodes({
     id: nodeId,
@@ -411,7 +525,6 @@ const syncResultVideoNode = () => {
     },
   });
 
-  // 新建节点后先刷新一次端口布局
   updateNodeInternals([nodeId]);
 
   addEdges({
@@ -419,14 +532,11 @@ const syncResultVideoNode = () => {
     source: props.id,
     target: nodeId,
     sourceHandle: 'source',
-    // VideoResultNode 目前只有一个 Handle：id='source'（type='source', position='left'）
-    // 这里必须对齐 handle id，否则 VueFlow 会回退到默认锚点，导致连线位置偏移。
     targetHandle: 'source',
     type: 'default',
     animated: true,
   });
 
-  // 新建结果节点后立即保存一次工作流，避免用户在首次创建结果节点后立刻刷新导致该节点未写入历史记录
   saveWorkflowImmediately();
 };
 
@@ -483,7 +593,7 @@ function readConnectedPromptFromEdges(): string {
 
 // 监听连接变化，提取提示词、图片、视频参考、音频参考
 watch(
-  () => [getEdges.value, imageSubType.value, videoUpstreamSig.value],
+  () => [getEdges.value, imageSubType.value, videoUpstreamSig.value, provider.value, pixverseMode.value, seedanceMode.value],
   () => {
     const edges = getEdges.value;
     const nodes = getNodes.value;
@@ -590,8 +700,21 @@ watch(
     connectedVideoRefMeta.value = dedupeMeta(videoRefMetaSources);
     connectedAudioRefMeta.value = dedupeMeta(audioRefMetaSources);
 
+    // PixVerse：图生（单图）与多主体 fusion 都需要完整连线 URL 列表（最多 7 张）
+    if (
+      provider.value === 'pixverse' &&
+      (pixverseMode.value === 'image_to_video_first_only' || pixverseMode.value === 'fusion_multi_subject')
+    ) {
+      connectedImageUrls.value = [...new Set(imageSources)].slice(0, 7);
+      if (imageSources.length > 0) {
+        connectedImageUrl.value = imageSources[0] ?? null;
+      }
+      if (imageSources.length > 1) {
+        connectedEndImageUrl.value = imageSources[1] ?? null;
+      }
+    }
     // Kling 多图多镜头：把所有图片作为序列
-    if (provider.value === 'kling' && imageSubType.value === 'multi_shot') {
+    else if (provider.value === 'kling' && imageSubType.value === 'multi_shot') {
       connectedImageUrls.value = [...new Set(imageSources)];
       if (imageSources.length > 0) {
         connectedImageUrl.value = imageSources[0] ?? null;
@@ -616,6 +739,7 @@ watch(
     }
 
     // Seedance 模式下，根据连线自动调整为多模态模式，并提示用户
+    // 防御：避免在 PixVerse/Kling 时也触发 Seedance 的提示/自动切换
     if (provider.value === 'seedance') {
       const hasImages = imageSourceCount.value > 0;
       const hasExtraImagesForFirst =
@@ -631,7 +755,7 @@ watch(
         (hasImages || hasVideoRefs || hasAudioRefs)
       ) {
         seedanceMode.value = 'multi_modal';
-        ElMessage.info('检测到已连接图片或视频/音频参考，已自动切换到 Seedance 多模态参考模式。');
+        ElMessage.info('检测到已连接图片或视频/音频参考，已自动切换模式，请确认模式是否正确。');
       }
 
       // 首帧模式：如果图片数量 >1，或连入了视频/音频，也自动切到多模态
@@ -640,7 +764,7 @@ watch(
         (hasExtraImagesForFirst || hasVideoRefs || hasAudioRefs)
       ) {
         seedanceMode.value = 'multi_modal';
-        ElMessage.info('首帧模式仅支持 1 张图片，检测到多张图片或视频/音频参考，已自动切换为多模态参考模式。');
+        ElMessage.info('首帧模式仅支持 1 张图片，检测到多张图片或视频/音频参考，已自动切换模式，请确认模式是否正确。');
       }
 
       // 首帧+尾帧模式：如果图片数量 >2，或连入了视频/音频，也自动切到多模态
@@ -649,7 +773,7 @@ watch(
         (hasExtraImagesForFirstLast || hasVideoRefs || hasAudioRefs)
       ) {
         seedanceMode.value = 'multi_modal';
-        ElMessage.info('首帧+尾帧模式仅支持 2 张图片，检测到更多图片或视频/音频参考，已自动切换为多模态参考模式。');
+        ElMessage.info('首帧+尾帧模式仅支持 2 张图片，检测到更多图片或视频/音频参考，已自动切换模式，请确认模式是否正确。');
       }
     }
   },
@@ -657,13 +781,17 @@ watch(
 );
 
 // 表单状态（其余）
-// 时长：自动(-1) 或手动 4-15 秒
+// 时长：
+// - Seedance：自动(-1) 或手动 4-15 秒
+// - PixVerse：仅手动 1-15 秒（隐藏“自动/自定义”开关），默认 1 秒
 const durationAuto = ref(false);
 const durationManual = ref<number>(4);
-const resolution = ref<'720p' | '1080p' | '4k'>('720p');
+const resolution = ref<'540p' | '720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
 
-const providerLabel = computed(() => (provider.value === 'kling' ? 'Kling' : 'Seedance'));
+const providerLabel = computed(() =>
+  provider.value === 'pixverse' ? 'PixVerse' : provider.value === 'kling' ? 'Kling' : 'Seedance'
+);
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -788,11 +916,49 @@ function getSeedanceDefaultDurationSeconds(): number {
   return n;
 }
 
+function getPixverseDefaultDurationSeconds(): number {
+  // 与后端兜底保持一致：5 秒；如前端配置了 VITE_PIXVERSE_DEFAULT_DURATION 则优先使用
+  const raw = (import.meta as any)?.env?.VITE_PIXVERSE_DEFAULT_DURATION;
+  const n = raw != null ? Number(raw) : 5;
+  if (Number.isNaN(n) || n <= 0) return 5;
+  return n;
+}
+
+function getPixverseCreditsPerSecond(): number {
+  // PixVerse：V6 且 generate_audio_switch=true
+  // 540p => 5/s, 720p => 7/s, 1080p => 14/s
+  if (resolution.value === '540p') return 5;
+  if (resolution.value === '720p') return 7;
+  return 14;
+}
+
+function getPixverseEffectiveDurationSeconds(): number {
+  const manualSeconds = Number(durationManual.value);
+  const rawSeconds = manualSeconds;
+
+  if (!Number.isFinite(rawSeconds) || rawSeconds <= 0) return 0;
+  if (pixverseMode.value === 'image_to_video_first_last') {
+    // 转场接口 duration 通常限制为 5/8；这里做兜底映射，保证前后端一致计费。
+    return rawSeconds <= 5 ? 5 : 8;
+  }
+  return rawSeconds;
+}
+
 const executeCost = computed(() => {
-  if (provider.value !== 'seedance') return 0;
-  const seconds = durationAuto.value ? getSeedanceDefaultDurationSeconds() : Number(durationManual.value);
-  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-  return Math.round(seconds) * getSeedanceCreditsPerSecond();
+  if (provider.value === 'seedance') {
+    const seconds = durationAuto.value ? getSeedanceDefaultDurationSeconds() : Number(durationManual.value);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.round(seconds) * getSeedanceCreditsPerSecond();
+  }
+
+  if (provider.value === 'pixverse') {
+    const seconds = getPixverseEffectiveDurationSeconds();
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.round(seconds) * getPixverseCreditsPerSecond();
+  }
+
+  // kling 或其它默认不计费（或在后端计费体系尚未接入该计费口径）
+  return 0;
 });
 
 const canAfford = computed(() => {
@@ -850,6 +1016,60 @@ const inputReady = computed(() => {
     return !!connectedPrompt.value;
   }
 
+  // PixVerse：仅文生视频（禁止图片/视频/音频参考连线）
+  if (provider.value === 'pixverse') {
+    // PixVerse 平台限制：最多 7 张图片
+    if (imageSourceCount.value > 7) return false;
+
+    if (pixverseMode.value === 'text_to_video') {
+      return (
+        !!connectedPrompt.value &&
+        imageSourceCount.value === 0 &&
+        connectedVideoRefUrls.value.length === 0 &&
+        connectedAudioRefUrls.value.length === 0
+      );
+    }
+
+    // PixVerse 图生视频：单图 img_id（连线可多张，但仅首张有效），不支持视频/音频参考
+    if (pixverseMode.value === 'image_to_video_first_only') {
+      const first = !!connectedImageUrl.value;
+      return (
+        !!connectedPrompt.value &&
+        first &&
+        imageSourceCount.value >= 1 &&
+        imageSourceCount.value <= 7 &&
+        connectedVideoRefUrls.value.length === 0 &&
+        connectedAudioRefUrls.value.length === 0
+      );
+    }
+
+    // PixVerse 多主体（fusion）：>=2 张图片，不支持视频/音频参考
+    if (pixverseMode.value === 'fusion_multi_subject') {
+      return (
+        !!connectedPrompt.value &&
+        imageSourceCount.value >= 2 &&
+        imageSourceCount.value <= 7 &&
+        connectedVideoRefUrls.value.length === 0 &&
+        connectedAudioRefUrls.value.length === 0
+      );
+    }
+
+    if (pixverseMode.value === 'image_to_video_first_last') {
+      const first = !!connectedImageUrl.value;
+      const last = !!connectedEndImageUrl.value;
+      return (
+        !!connectedPrompt.value &&
+        first &&
+        last &&
+        imageSourceCount.value === 2 &&
+        connectedVideoRefUrls.value.length === 0 &&
+        connectedAudioRefUrls.value.length === 0
+      );
+    }
+
+    return false;
+  }
+
   if (mode.value === 'text_to_video') {
     return !!connectedPrompt.value;
   }
@@ -882,9 +1102,12 @@ const executeButtonText = computed(() => {
 const canExecute = computed(() => {
   // 只有当确实连入了图片（图生视频/多模态等）时，才强制要求图片已就绪
   const hasAnyImageInput = imageSourceCount.value > 0;
-  const imagesReady = !hasAnyImageInput || connectedImageReadiness.value.total === 0
-    ? true
-    : connectedImageReadiness.value.ready === connectedImageReadiness.value.total;
+  const imagesReady =
+    provider.value === 'pixverse'
+      ? true
+      : !hasAnyImageInput || connectedImageReadiness.value.total === 0
+        ? true
+        : connectedImageReadiness.value.ready === connectedImageReadiness.value.total;
   return inputReady.value && canAfford.value && imagesReady;
 });
 
@@ -896,6 +1119,84 @@ watch(
       mode.value = 'image_to_video';
     } else if (provider.value === 'kling' && mode.value === 'image_to_video') {
       mode.value = 'text_to_video';
+    }
+  },
+  { immediate: true }
+);
+
+// PixVerse 自动调整生成类型：
+// - 0 张图：文生
+// - 1 张图：图生（单图 img_id）
+// - >=2 张图：多主体（fusion，多参考）
+// - 首尾帧模式必须用户手动选择，不自动切入/切出
+watch(
+  () => [provider.value, connectedImageUrl.value, connectedEndImageUrl.value, imageSourceCount.value],
+  ([p, img, endImg, imgCount]) => {
+    if (p !== 'pixverse') return;
+    if (pixverseMode.value === 'image_to_video_first_last') return;
+
+    const count = Number(imgCount || 0);
+    if (!img || count <= 0) {
+      pixverseMode.value = 'text_to_video';
+      return;
+    }
+    if (count === 1) {
+      pixverseMode.value = 'image_to_video_first_only';
+      return;
+    }
+    pixverseMode.value = 'fusion_multi_subject';
+  },
+  { immediate: true }
+);
+
+// 切换 provider 时，把分辨率/比例/时长约束到各平台允许范围内，避免切换后状态非法导致创建失败。
+watch(
+  () => provider.value,
+  (p) => {
+    if (p === 'pixverse') {
+      if (!['540p', '720p', '1080p'].includes(resolution.value)) resolution.value = '720p';
+      if (!['16:9', '9:16', '4:3', '3:4', '1:1'].includes(aspectRatio.value)) aspectRatio.value = '16:9';
+      durationAuto.value = false;
+      // PixVerse：默认 1 秒，且仅支持手动 1-15
+      durationManual.value = 1;
+
+      // 切换到 PixVerse 时，按连线自动识别模式（首尾帧不自动切）
+      const c = Number(imageSourceCount.value || 0);
+      pixverseMode.value = c >= 2 ? 'fusion_multi_subject' : connectedImageUrl.value ? 'image_to_video_first_only' : 'text_to_video';
+      return;
+    }
+    if (p === 'seedance') {
+      if (!['480p', '720p'].includes(resolution.value)) resolution.value = '720p';
+      durationManual.value = Math.min(15, Math.max(4, Number(durationManual.value) || 4));
+
+      // 切换到 Seedance 时，根据连线自动识别模式（无 toast，避免切换时打扰）
+      const imgCount = imageSourceCount.value;
+      const hasVideoRefs = connectedVideoRefUrls.value.length > 0;
+      const hasAudioRefs = connectedAudioRefUrls.value.length > 0;
+      if (hasVideoRefs || hasAudioRefs || imgCount > 2) {
+        seedanceMode.value = 'multi_modal';
+      } else if (imgCount === 2) {
+        seedanceMode.value = 'image_first_last';
+      } else if (imgCount === 1) {
+        seedanceMode.value = 'image_first_frame';
+      } else {
+        seedanceMode.value = 'text';
+      }
+      return;
+    }
+
+    if (p === 'kling') {
+      if (!['720p', '1080p', '4k'].includes(resolution.value)) resolution.value = '720p';
+      durationManual.value = Math.min(15, Math.max(4, Number(durationManual.value) || 4));
+
+      // 切换到 Kling 时，根据连线自动识别模式
+      if (imageSourceCount.value > 0) {
+        mode.value = 'image_to_video';
+        imageSubType.value = connectedEndImageUrl.value ? 'first_last' : 'first_only';
+      } else {
+        mode.value = 'text_to_video';
+      }
+      return;
     }
   },
   { immediate: true }
@@ -1012,6 +1313,9 @@ const startPollingSeedance = (taskKey: string, opts?: { silent?: boolean }) => {
       } else if (nextStatus === 'succeeded') {
         // succeeded 但没有 videoUrl：继续等到后续轮询返回 videoUrl
         videoUrls.value = [];
+      } else if (nextStatus === 'running' || nextStatus === 'pending' || nextStatus === 'queued') {
+        // 进行中时如果后端回传了空 videoUrl，强制清掉旧链接，避免继续请求到过期/404 的 mp4
+        videoUrls.value = [];
       }
 
       syncResultVideoNode();
@@ -1094,6 +1398,128 @@ const startPollingSeedance = (taskKey: string, opts?: { silent?: boolean }) => {
   scheduleNext(SEEDANCE_POLL_BASE_INTERVAL_MS);
 };
 
+const startPollingPixverse = (videoId: number, opts?: { silent?: boolean }) => {
+  clearPollTimer();
+  const silent = !!opts?.silent;
+
+  const PIXVERSE_POLL_BASE_INTERVAL_MS = 5000;
+  const PIXVERSE_POLL_MAX_WAIT_MS = 60 * 60 * 1000; // 最多等待 60 分钟
+  const pixverseStartTs = Date.now();
+
+  let currentIntervalMs = PIXVERSE_POLL_BASE_INTERVAL_MS;
+  let pollingActive = true;
+
+  const stopPolling = () => {
+    pollingActive = false;
+    clearPollTimer();
+  };
+
+  const scheduleNext = (delayMs: number) => {
+    if (!pollingActive) return;
+    clearPollTimer();
+    pollTimer = setTimeout(() => void loop(), delayMs) as any;
+  };
+
+  const loop = async () => {
+    if (!pollingActive) return;
+    try {
+      const r = await getPixverseGenerationStatus(videoId);
+      const rawStatus = (r as any);
+      const data = rawStatus?.data?.data ?? rawStatus?.data ?? rawStatus;
+      if (!data) {
+        currentIntervalMs = PIXVERSE_POLL_BASE_INTERVAL_MS;
+        scheduleNext(currentIntervalMs);
+        return;
+      }
+
+      const nextStatus = (data.status as any) || 'pending';
+      progress.value = (data as any).progress ?? null;
+      // 仅失败/取消展示 errorMessage；running 时上游可能带 ErrMsg=Success 等非错误字段
+      if (nextStatus === 'failed' || nextStatus === 'canceled') {
+        errorMessage.value = normalizeErrorMessage((data as any).errorMessage);
+      } else {
+        errorMessage.value = null;
+      }
+
+      const nextVideoUrl = (data as any).videoUrl;
+      const hasVideoUrl = typeof nextVideoUrl === 'string' && nextVideoUrl.trim().length > 0;
+
+      // 防御：PixVerse 可能出现 status=succeeded 但 url 还未就绪，此时保持 running，避免 0s 空视频
+      status.value = hasVideoUrl ? 'succeeded' : nextStatus === 'succeeded' ? 'running' : nextStatus;
+
+      if (hasVideoUrl) {
+        videoUrls.value = [normalizeMediaUrl(nextVideoUrl)];
+        errorMessage.value = null;
+      } else if (nextStatus === 'succeeded') {
+        videoUrls.value = [];
+      }
+
+      syncResultVideoNode();
+
+      const shouldStopByTerminalState = nextStatus === 'failed';
+      const shouldStopBySuccess = hasVideoUrl;
+
+      if (shouldStopBySuccess || shouldStopByTerminalState) {
+        saveWorkflowImmediately();
+
+        if (!silent) {
+          if (shouldStopBySuccess) {
+            notifyVideoGen(true, 'PixVerse 视频任务已完成。');
+          } else {
+            notifyVideoGen(false, errorMessage.value || '视频生成失败');
+          }
+        }
+
+        stopPolling();
+        return;
+      }
+
+      // 防御：最多等待 60 分钟仍未拿到 videoUrl，则强制失败，避免节点卡住
+      const elapsedMs = Date.now() - pixverseStartTs;
+      if (!hasVideoUrl && elapsedMs >= PIXVERSE_POLL_MAX_WAIT_MS) {
+        status.value = 'failed';
+        errorMessage.value = '任务已完成但未返回视频链接，已超时放弃回显';
+        videoUrls.value = [];
+        syncResultVideoNode();
+        saveWorkflowImmediately();
+
+        if (!silent) notifyVideoGen(false, errorMessage.value);
+        stopPolling();
+        return;
+      }
+
+      currentIntervalMs = PIXVERSE_POLL_BASE_INTERVAL_MS;
+      scheduleNext(currentIntervalMs);
+    } catch (err: any) {
+      const statusCode: number | undefined = err?.response?.status ?? err?.status;
+      const retryAfterSeconds: number | undefined =
+        typeof err?.response?.data?.retryAfter === 'number' ? err.response.data.retryAfter : undefined;
+
+      if (statusCode === 429) {
+        const waitMsFromServer =
+          typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : null;
+        currentIntervalMs =
+          waitMsFromServer != null
+            ? Math.max(waitMsFromServer, PIXVERSE_POLL_BASE_INTERVAL_MS)
+            : Math.min(Math.round(currentIntervalMs * 1.8), 120000);
+        scheduleNext(currentIntervalMs);
+        return;
+      }
+
+      currentIntervalMs = Math.min(Math.round(currentIntervalMs * 1.5), 60000);
+      errorMessage.value = normalizeErrorMessage(err?.message) || '查询 PixVerse 任务状态失败';
+      if (!silent) {
+        notifyVideoGen(false, errorMessage.value);
+      }
+      scheduleNext(currentIntervalMs);
+    }
+  };
+
+  scheduleNext(PIXVERSE_POLL_BASE_INTERVAL_MS);
+};
+
 const handleGenerate = async () => {
   // 互斥：避免同一节点在 UI 尚未刷新时被重复点击触发多次创建
   if (generationInFlight.value) return;
@@ -1137,13 +1563,20 @@ const handleGenerate = async () => {
   // 富文本提示词就地更新 data.text 时，兜底再读一次连线（与 dreamUpstreamSig / watch 一致）
   connectedPrompt.value = readConnectedPromptFromEdges();
 
+  // 重新生成：若已有成功视频，新建结果节点（保留旧节点上的历史视频）
+  forkNewVideoResultNodeIfNeeded();
+
   // 开始一次新生成前，先清空旧任务 key（避免历史/并发导致的错误恢复）
+  taskId.value = null;
   seedanceTaskKey.value = null;
 
-  // 无论后端是否成功，先创建 / 更新一次结果节点，显示“排队中”
-  status.value = 'pending';
-  progress.value = null;
-  syncResultVideoNode();
+  const markPendingBeforeRequest = () => {
+    // 只有在即将真正发出请求时，才把 UI 切到“排队中”，避免校验失败但 UI 误显示排队。
+    status.value = 'pending';
+    progress.value = null;
+    videoUrls.value = [];
+    syncResultVideoNode();
+  };
 
   try {
     if (provider.value === 'seedance') {
@@ -1151,14 +1584,15 @@ const handleGenerate = async () => {
 
       // 纯文生视频仍走简单接口
       if (seedanceMode.value === 'text') {
-        const payload = {
+        markPendingBeforeRequest();
+        const payload = withTemplateId({
           prompt: basePrompt,
           ratio: aspectRatio.value,
           duration: durationAuto.value ? -1 : durationManual.value,
           resolution: resolution.value,
           generateAudio: true,
           enableWebSearch: false,
-        };
+        });
         const res = await createSeedanceGeneration(payload);
         // Seedance 在创建任务成功时即完成扣费，这里用于累计展示“本次消耗”
         creditTracker?.addSpent?.(executeCost.value);
@@ -1469,7 +1903,7 @@ const handleGenerate = async () => {
         if (finalAudios.length) payloadAdv.referenceAudioUrls = finalAudios;
       }
 
-      const res = await createSeedanceAdvanced(payloadAdv);
+      const res = await createSeedanceAdvanced(withTemplateId(payloadAdv));
       // Seedance 在创建任务成功时即完成扣费，这里用于累计展示“本次消耗”
       creditTracker?.addSpent?.(executeCost.value);
       const raw = (res as any);
@@ -1613,7 +2047,245 @@ const handleGenerate = async () => {
       return;
     }
 
+    if (provider.value === 'pixverse') {
+      if (imageSourceCount.value > 7) {
+        ElMessage.warning('PixVerse 最多支持 7 张图片（请减少连线图片数量）。');
+        loading.value = false;
+        return;
+      }
+
+      const basePrompt = connectedPrompt.value || '生成一个简短的视频';
+
+      const normalizePixverseAspectRatio = (ar: string) => {
+        if (ar === '9:16') return '9.16';
+        if (!ar || ar === 'adaptive' || ar === '21:9') return '16:9';
+        return ar;
+      };
+
+      const normalizePixverseQuality = (q: string) => {
+        // 前端可能保留 4k（给 kling），PixVerse 侧按 1080p 计费/生成
+        if (q === '4k') return '1080p';
+        return q;
+      };
+
+      const durationSeconds = getPixverseEffectiveDurationSeconds();
+      if (!Number.isFinite(durationSeconds) || durationSeconds < 1 || durationSeconds > 15) {
+        ElMessage.error('PixVerse duration 需在 1~15 秒范围内');
+        loading.value = false;
+        return;
+      }
+
+      // 通用请求字段（勿用 Record<string, unknown>，否则展开后不满足 PixVerse 各 API 的强类型参数）
+      const commonPayload = withTemplateId({
+        prompt: basePrompt,
+        aspect_ratio: normalizePixverseAspectRatio(aspectRatio.value),
+        duration: Math.round(durationSeconds),
+        quality: normalizePixverseQuality(resolution.value),
+        generate_audio_switch: true,
+      });
+
+      if (pixverseMode.value === 'text_to_video') {
+        // 文生视频：禁止连接图片/视频/音频
+        if (
+          imageSourceCount.value > 0 ||
+          connectedVideoRefUrls.value.length > 0 ||
+          connectedAudioRefUrls.value.length > 0
+        ) {
+          ElMessage.warning('PixVerse 文生视频请不要连接图片/视频/音频参考。');
+          loading.value = false;
+          return;
+        }
+
+        markPendingBeforeRequest();
+        const res = await createPixverseGeneration(commonPayload);
+        const raw = (res as any);
+        const d = raw?.data ?? raw;
+        const videoId = Number(d?.video_id ?? d?.videoId ?? d?.id);
+        if (!Number.isFinite(videoId)) {
+          ElMessage.error('PixVerse 返回结果缺少 video_id');
+          notifyVideoGen(false, 'PixVerse 返回结果缺少 video_id');
+          return;
+        }
+
+        status.value = d?.status || 'pending';
+        progress.value = d?.progress ?? null;
+        videoUrls.value = [];
+
+        taskId.value = videoId;
+        seedanceTaskKey.value = null;
+
+        syncResultVideoNode();
+        clearPollTimer();
+        startPollingPixverse(videoId);
+        ElMessage.success('PixVerse 任务已创建，开始生成…');
+        return;
+      }
+
+      if (pixverseMode.value === 'image_to_video_first_only') {
+        // 图生：OpenAPI /video/img/generate 仅 img_id；多连线时只取首张
+        if (imageSourceCount.value < 1 || imageSourceCount.value > 7 || !connectedImageUrl.value) {
+          ElMessage.warning('PixVerse 图生视频请连接 1~7 张图片。');
+          loading.value = false;
+          return;
+        }
+        if (connectedVideoRefUrls.value.length > 0 || connectedAudioRefUrls.value.length > 0) {
+          ElMessage.warning('PixVerse 图生视频不支持视频/音频参考。');
+          loading.value = false;
+          return;
+        }
+
+        const imageUrl = normalizeImageUrl(connectedImageUrl.value);
+
+        markPendingBeforeRequest();
+        const res = await createPixverseImageGeneration({
+          mode: 'image_to_video_first_only',
+          ...commonPayload,
+          imageUrl,
+        });
+
+        creditTracker?.addSpent?.(executeCost.value);
+
+        const raw = (res as any);
+        const d = raw?.data ?? raw;
+
+        const videoId = Number(d?.video_id ?? d?.videoId ?? d?.id);
+        if (!Number.isFinite(videoId)) {
+          ElMessage.error('PixVerse 返回结果缺少 video_id');
+          notifyVideoGen(false, 'PixVerse 返回结果缺少 video_id');
+          return;
+        }
+
+        status.value = d?.status || 'pending';
+        progress.value = d?.progress ?? null;
+        videoUrls.value = [];
+
+        taskId.value = videoId;
+        seedanceTaskKey.value = null;
+
+        syncResultVideoNode();
+        clearPollTimer();
+        startPollingPixverse(videoId);
+        ElMessage.success('PixVerse 任务已创建，开始生成…');
+        return;
+      }
+
+      if (pixverseMode.value === 'fusion_multi_subject') {
+        if (imageSourceCount.value < 2 || imageSourceCount.value > 7) {
+          ElMessage.warning('PixVerse 多主体模式请连接 2~7 张图片。');
+          loading.value = false;
+          return;
+        }
+        if (connectedVideoRefUrls.value.length > 0 || connectedAudioRefUrls.value.length > 0) {
+          ElMessage.warning('PixVerse 多主体模式不支持视频/音频参考。');
+          loading.value = false;
+          return;
+        }
+        if (!connectedImageUrls.value.length) {
+          ElMessage.warning('未检测到连线图片列表，请重新连接图片节点。');
+          loading.value = false;
+          return;
+        }
+
+        const imageUrls = connectedImageUrls.value
+          .slice(0, 7)
+          .map((u) => normalizeImageUrl(u))
+          .filter((u) => typeof u === 'string' && u.trim());
+        if (imageUrls.length < 2) {
+          ElMessage.warning('PixVerse 多主体模式请至少连接两张有效图片。');
+          loading.value = false;
+          return;
+        }
+
+        markPendingBeforeRequest();
+        const res = await createPixverseFusionGeneration({
+          mode: 'fusion_multi_subject',
+          ...commonPayload,
+          imageUrls,
+        });
+
+        creditTracker?.addSpent?.(executeCost.value);
+
+        const raw = (res as any);
+        const d = raw?.data ?? raw;
+
+        const videoId = Number(d?.video_id ?? d?.videoId ?? d?.id);
+        if (!Number.isFinite(videoId)) {
+          ElMessage.error('PixVerse 返回结果缺少 video_id');
+          notifyVideoGen(false, 'PixVerse 返回结果缺少 video_id');
+          return;
+        }
+
+        status.value = d?.status || 'pending';
+        progress.value = d?.progress ?? null;
+        videoUrls.value = [];
+
+        taskId.value = videoId;
+        seedanceTaskKey.value = null;
+
+        syncResultVideoNode();
+        clearPollTimer();
+        startPollingPixverse(videoId);
+        ElMessage.success('PixVerse 任务已创建，开始生成…');
+        return;
+      }
+
+      if (pixverseMode.value === 'image_to_video_first_last') {
+        // 图生视频：首尾帧（2 张图）
+        if (imageSourceCount.value !== 2 || !connectedImageUrl.value || !connectedEndImageUrl.value) {
+          ElMessage.warning('PixVerse 图生视频（首尾帧）请连接两张图片（首帧/尾帧）。');
+          loading.value = false;
+          return;
+        }
+        if (connectedVideoRefUrls.value.length > 0 || connectedAudioRefUrls.value.length > 0) {
+          ElMessage.warning('PixVerse 图生视频不支持视频/音频参考。');
+          loading.value = false;
+          return;
+        }
+
+        const imageUrl = normalizeImageUrl(connectedImageUrl.value);
+        const endImageUrl = normalizeImageUrl(connectedEndImageUrl.value);
+
+        markPendingBeforeRequest();
+        const res = await createPixverseTransitionGeneration({
+          mode: 'image_to_video_first_last',
+          ...commonPayload,
+          imageUrl,
+          endImageUrl,
+        });
+
+        creditTracker?.addSpent?.(executeCost.value);
+
+        const raw = (res as any);
+        const d = raw?.data ?? raw;
+
+        const videoId = Number(d?.video_id ?? d?.videoId ?? d?.id);
+        if (!Number.isFinite(videoId)) {
+          ElMessage.error('PixVerse 返回结果缺少 video_id');
+          notifyVideoGen(false, 'PixVerse 返回结果缺少 video_id');
+          return;
+        }
+
+        status.value = d?.status || 'pending';
+        progress.value = d?.progress ?? null;
+        videoUrls.value = [];
+
+        taskId.value = videoId;
+        seedanceTaskKey.value = null;
+
+        syncResultVideoNode();
+        clearPollTimer();
+        startPollingPixverse(videoId);
+        ElMessage.success('PixVerse 任务已创建，开始生成…');
+        return;
+      }
+
+      ElMessage.warning('PixVerse 未知的生成类型');
+      loading.value = false;
+      return;
+    }
+
     // Kling 流程
+    markPendingBeforeRequest();
     const body: any = {
       mode: mode.value,
       prompt: connectedPrompt.value || '生成一个简短的视频',
@@ -1652,7 +2324,7 @@ const handleGenerate = async () => {
       }
     }
 
-    const res = await createVideoTask(body) as any;
+    const res = await createVideoTask(withTemplateId(body)) as any;
     const t = (res?.data ?? res) as any;
     if (!t || typeof t !== 'object') {
       throw new Error('创建视频任务返回结果异常');
@@ -1705,6 +2377,15 @@ const manualRefresh = async () => {
       videoUrls.value = Array.isArray(t?.video_urls)
         ? t.video_urls.map((u: string) => normalizeImageUrl(u))
         : [];
+      syncResultVideoNode();
+    } else if (provider.value === 'pixverse') {
+      const res = await getPixverseGenerationStatus(taskId.value) as any;
+      const d = res?.data ?? res;
+      status.value = (d.status as any) || 'pending';
+      progress.value = d?.progress ?? null;
+      errorMessage.value = normalizeErrorMessage(d?.errorMessage);
+      const u = d?.videoUrl;
+      videoUrls.value = typeof u === 'string' && u.trim() ? [normalizeMediaUrl(u)] : [];
       syncResultVideoNode();
     }
   } catch (e: any) {
@@ -1760,14 +2441,33 @@ onMounted(() => {
 
   const tryRestore = async () => {
     try {
-      const resultNode = getNodes.value.find(
+      const selfNode = getNodes.value.find(n => n.id === props.id);
+      const selfVideoTask = (selfNode?.data as any)?.__videoTask as any;
+      const preferredResultId =
+        typeof selfVideoTask?.activeResultNodeId === 'string' ? selfVideoTask.activeResultNodeId : null;
+
+      const candidates = getNodes.value.filter(
         n => n.type === 'videoResult' && (n.data as any)?.fromNodeId === props.id
       );
-      const selfNode = getNodes.value.find(n => n.id === props.id);
+
+      let resultNode = preferredResultId
+        ? candidates.find(n => n.id === preferredResultId)
+        : undefined;
+      if (!resultNode && candidates.length === 1) {
+        resultNode = candidates[0];
+      } else if (!resultNode && candidates.length > 1) {
+        resultNode = [...candidates].sort(
+          (a, b) =>
+            b.position.y + (b.dimensions?.height ?? VIDEO_RESULT_EST_HEIGHT) -
+            (a.position.y + (a.dimensions?.height ?? VIDEO_RESULT_EST_HEIGHT))
+        )[0];
+      }
+      if (resultNode) {
+        activeVideoResultNodeId.value = resultNode.id;
+      }
 
       // 优先使用 videoResult；若尚未渲染/快照不完整，则回退到 VideoNode 自身数据
       const resultData = resultNode?.data as any;
-      const selfVideoTask = (selfNode?.data as any)?.__videoTask as any;
 
       // 两份快照都拿不到：继续重试
       if (!resultData && !selfVideoTask) return false;
@@ -1799,7 +2499,7 @@ onMounted(() => {
       const legacyProvider = d.provider;
 
       const metaProvider = taskMeta?.provider ?? legacyProvider;
-      if (metaProvider === 'kling' || metaProvider === 'seedance') {
+      if (metaProvider === 'kling' || metaProvider === 'seedance' || metaProvider === 'pixverse') {
         provider.value = metaProvider;
       }
 
@@ -1844,6 +2544,13 @@ onMounted(() => {
         return false;
       }
 
+      if (
+        provider.value === 'pixverse' &&
+        (typeof taskId.value !== 'number' || Number.isNaN(taskId.value))
+      ) {
+        return false;
+      }
+
       if (provider.value === 'kling' && typeof taskId.value === 'number' && !Number.isNaN(taskId.value)) {
         startPollingKling(taskId.value, { silent: true });
         return true;
@@ -1855,6 +2562,15 @@ onMounted(() => {
         seedanceTaskKey.value
       ) {
         startPollingSeedance(seedanceTaskKey.value, { silent: true });
+        return true;
+      }
+
+      if (
+        provider.value === 'pixverse' &&
+        typeof taskId.value === 'number' &&
+        !Number.isNaN(taskId.value)
+      ) {
+        startPollingPixverse(taskId.value, { silent: true });
         return true;
       }
 
@@ -2000,6 +2716,12 @@ onUnmounted(() => {
 .param-hint {
   font-size: 12px;
   color: #b0b0b0;
+}
+
+.param-hint.warn {
+  display: block;
+  margin-top: 2px;
+  color: #e6a23c;
 }
 
 .execute-btn {

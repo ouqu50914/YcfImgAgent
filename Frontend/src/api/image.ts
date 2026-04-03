@@ -3,6 +3,8 @@ import request from '@/utils/request.ts';
 export interface GenerateParams {
     apiType: 'dream' | 'nano';
     prompt: string;
+    /** 工作流项目 ID */
+    templateId?: number;
     /**
      * 前端生成的幂等 key，用于刷新/历史恢复后查询最终生成结果
      */
@@ -19,11 +21,13 @@ export interface UpscaleParams {
     apiType: 'dream' | 'nano';
     imageUrl: string;
     scale?: number; // 2 或 4
+    templateId?: number;
 }
 
 export interface ExtendParams {
     apiType: 'dream' | 'nano';
     imageUrl: string;
+    templateId?: number;
     direction: 'top' | 'bottom' | 'left' | 'right' | 'all';
     width?: number;
     height?: number;
@@ -34,6 +38,7 @@ export interface ExtendParams {
 export interface SplitParams {
     apiType: 'dream' | 'nano';
     imageUrl: string;
+    templateId?: number;
     splitCount: number;
     splitDirection: 'horizontal' | 'vertical';
     prompt?: string;
@@ -72,4 +77,16 @@ export const extendImage = (data: ExtendParams) => {
 // 调用拆分接口
 export const splitImage = (data: SplitParams) => {
     return request.post('/image/split', data);
+};
+
+/** 当前用户的图片生成记录 */
+export const listImageResults = (params?: {
+    page?: number;
+    pageSize?: number;
+    from?: string;
+    to?: string;
+    templateId?: number;
+    status?: number;
+}) => {
+    return request.get('/image/results', { params });
 };

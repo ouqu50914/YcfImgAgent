@@ -17,7 +17,8 @@ import {
     rejectCreditApplication,
     updateUserCredits,
     getHelpDocUrl,
-    updateHelpDocUrl
+    updateHelpDocUrl,
+    getGenerationRecords
 } from "../controllers/admin.controller";
 import {
     getAllCategories,
@@ -28,8 +29,11 @@ import {
 
 const router = Router();
 
-// 所有管理员路由都需要登录且为超级管理员
 router.use(authenticateToken);
+// 生成记录：已登录即可（普通用户仅本人数据由服务层强制）
+router.get("/generation-records", getGenerationRecords);
+
+// 以下需超级管理员
 router.use(requireAdmin);
 
 // 用户管理

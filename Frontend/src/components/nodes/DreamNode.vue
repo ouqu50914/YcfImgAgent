@@ -138,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, inject } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject, type Ref } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
 import { generateImage, getImageGenerateResultByGenerationKey } from '../../api/image';
@@ -170,6 +170,7 @@ type CreditTrackerStore = {
 const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
 const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
+const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 
 // 积分：普通用户需要校验
 const executeCost = computed(() => {
@@ -588,6 +589,10 @@ const handleGenerate = async () => {
         // 并为本次生成生成一个幂等 generationKey，刷新/历史恢复后可用该 key 查询最终结果。
         const generationKey = `imggen_${String(props.id)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         requestParams.generationKey = generationKey;
+        const tid = workflowTemplateId?.value;
+        if (tid != null && tid > 0) {
+            requestParams.templateId = tid;
+        }
 
         const expectedCount = numImages.value || 1;
         createPlaceholderImageNodes(expectedCount, generationKey);

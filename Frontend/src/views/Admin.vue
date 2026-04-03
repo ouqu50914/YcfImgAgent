@@ -8,12 +8,12 @@
       >
         <el-icon><ArrowLeft /></el-icon>
       </el-button>
-      <h1 class="page-title">管理后台</h1>
+      <h1 class="page-title">{{ pageTitle }}</h1>
     </div>
     
-    <el-tabs v-model="activeTab" type="border-card">
+    <el-tabs v-model="activeTab" type="border-card" class="admin-main-tabs">
       <!-- 用户管理 -->
-      <el-tab-pane label="用户管理" name="users">
+      <el-tab-pane v-if="isSuperAdmin" label="用户管理" name="users">
         <div class="toolbar">
           <el-button type="primary" @click="showCreateDialog = true">新增用户</el-button>
           <el-input
@@ -91,7 +91,7 @@
       </el-tab-pane>
 
       <!-- 积分申请（有待处理时 Tab 上显示红点） -->
-      <el-tab-pane name="creditApplications">
+      <el-tab-pane v-if="isSuperAdmin" name="creditApplications">
         <template #label>
           <el-badge
             :is-dot="adminPendingStore.showPendingCreditDot"
@@ -143,7 +143,7 @@
       </el-tab-pane>
 
       <!-- 日志查看 -->
-      <el-tab-pane label="操作日志" name="logs">
+      <el-tab-pane v-if="isSuperAdmin" label="操作日志" name="logs">
         <div class="toolbar">
           <el-date-picker
             v-model="logDateRange"
@@ -210,7 +210,7 @@
       </el-tab-pane>
 
       <!-- 分类管理 -->
-      <el-tab-pane label="分类管理" name="categories">
+      <el-tab-pane v-if="isSuperAdmin" label="分类管理" name="categories">
         <div class="toolbar">
           <el-button type="primary" @click="showCreateCategoryDialog = true">新增分类</el-button>
           <el-button @click="loadCategories" style="margin-left: 10px">刷新</el-button>
@@ -238,8 +238,154 @@
         </el-table>
       </el-tab-pane>
 
-      <!-- API配置 -->
-      <el-tab-pane label="API配置" name="configs">
+      <!-- 生成记录：所有登录用户；数据范围由后端按角色限制 -->
+      <el-tab-pane :label="generationTabLabel" name="generationRecords">
+        <div class="generation-records-toolbar gen-filter-panel">
+          <div class="gen-filter-row">
+            <div class="gen-filter-item gen-filter-item--date">
+              <span class="gen-filter-label">时间</span>
+              <el-date-picker
+                v-model="genDateRange"
+                class="gen-filter-date"
+                type="datetimerange"
+                range-separator="至"
+                start-placeholder="开始"
+                end-placeholder="结束"
+                @change="onGenFilterChange"
+              />
+            </div>
+            <div class="gen-filter-item">
+              <span class="gen-filter-label">类型</span>
+              <el-select v-model="genFilters.kind" placeholder="全部" style="width: 120px" @change="onGenFilterChange">
+                <el-option label="全部" value="all" />
+                <el-option label="图片" value="image" />
+                <el-option label="视频" value="video" />
+              </el-select>
+            </div>
+            <div class="gen-filter-item">
+              <span class="gen-filter-label">模型/渠道</span>
+              <el-select v-model="genFilters.provider" placeholder="全部" clearable style="width: 168px" @change="onGenFilterChange">
+                <el-option-group label="图片">
+                  <el-option label="即梦 (dream)" value="dream" />
+                  <el-option label="Nano" value="nano" />
+                </el-option-group>
+                <el-option-group label="视频">
+                  <el-option label="Kling" value="kling" />
+                  <el-option label="Seedance" value="seedance" />
+                  <el-option label="PixVerse" value="pixverse" />
+                </el-option-group>
+              </el-select>
+            </div>
+            <template v-if="isSuperAdmin">
+              <div class="gen-filter-item">
+                <span class="gen-filter-label">用户ID</span>
+                <el-input-number
+                  v-model="genFilters.userId"
+                  :min="1"
+                  :step="1"
+                  placeholder="可选"
+                  controls-position="right"
+                  class="gen-filter-input-num"
+                  @change="onGenFilterChange"
+                />
+              </div>
+              <div class="gen-filter-item">
+                <span class="gen-filter-label">角色</span>
+                <el-select v-model="genFilters.roleId" placeholder="全部" clearable style="width: 120px" @change="onGenFilterChange">
+                  <el-option label="超级管理员" :value="1" />
+                  <el-option label="普通用户" :value="2" />
+                </el-select>
+              </div>
+            </template>
+            <div class="gen-filter-item gen-filter-item--action">
+              <el-button type="primary" @click="loadGenerationRecords">搜索</el-button>
+            </div>
+          </div>
+        </div>
+
+        <el-table v-loading="genLoading" :data="genRecords" border class="gen-records-table" style="margin-top: 12px">
+          <el-table-column prop="created_at" label="时间" width="170" :formatter="formatTableDateTime" />
+          <el-table-column v-if="isSuperAdmin" prop="username" label="生成人" width="120" />
+          <el-table-column v-if="isSuperAdmin" prop="user_role_id" label="角色" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.user_role_id === 1 ? 'danger' : 'primary'" size="small">
+                {{ row.user_role_id === 1 ? '超管' : '普通' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="type_label" label="类型" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="model_or_provider" label="模型/提供方" width="120" />
+          <el-table-column prop="credits_spent" label="消耗积分" width="100">
+            <template #default="{ row }">
+              {{ row.credits_spent != null ? row.credits_spent : '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column prop="prompt" label="提示词摘要" min-width="160" show-overflow-tooltip />
+          <el-table-column label="结果" min-width="220" align="center">
+            <template #default="{ row }">
+              <template v-if="row.result_urls && row.result_urls.length">
+                <div class="gen-result-cell">
+                  <div class="gen-result-thumbs">
+                    <button
+                      v-for="(u, idx) in row.result_urls.slice(0, 6)"
+                      :key="idx"
+                      type="button"
+                      class="gen-result-thumb-wrap"
+                      :title="`全屏预览 ${idx + 1}`"
+                      @click="openGenPreview(u, row.kind === 'video' ? 'video' : 'image')"
+                    >
+                      <img
+                        v-if="row.kind !== 'video'"
+                        :src="u"
+                        class="gen-result-thumb"
+                        loading="lazy"
+                        alt=""
+                      />
+                      <template v-else>
+                        <video
+                          class="gen-result-thumb gen-result-thumb-video"
+                          muted
+                          playsinline
+                          preload="metadata"
+                          :src="u"
+                        />
+                        <span class="gen-result-thumb-play" aria-hidden="true">
+                          <el-icon><VideoPlay /></el-icon>
+                        </span>
+                      </template>
+                    </button>
+                  </div>
+                  <el-button size="small" text type="primary" class="gen-result-copy" @click="copyGenUrls(row.result_urls)">
+                    复制链接
+                  </el-button>
+                </div>
+              </template>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="template_id" label="项目ID" width="90">
+            <template #default="{ row }">
+              {{ row.template_id != null ? row.template_id : '—' }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-pagination
+          class="generation-records-pagination"
+          v-model:current-page="genPagination.page"
+          v-model:page-size="genPagination.pageSize"
+          :total="genPagination.total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          style="margin-top: 16px"
+          @size-change="loadGenerationRecords"
+          @current-change="loadGenerationRecords"
+        />
+      </el-tab-pane>
+
+      <!-- API配置：暂时隐藏，后端接口保留 -->
+      <el-tab-pane v-if="false" label="API配置" name="configs">
         <el-table :data="apiConfigs" border>
           <el-table-column prop="api_type" label="API类型" width="120" />
           <el-table-column prop="api_url" label="API地址" />
@@ -269,7 +415,7 @@
       </el-tab-pane>
 
       <!-- 系统配置 -->
-      <el-tab-pane label="系统配置" name="system">
+      <el-tab-pane v-if="isSuperAdmin" label="系统配置" name="system">
         <div class="toolbar">
           <el-form :inline="false" label-width="120px" style="max-width: 640px">
             <el-form-item label="操作手册链接">
@@ -424,14 +570,44 @@
         <el-button type="primary" @click="handleResetPassword">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 生成记录：结果全屏预览 -->
+    <el-dialog
+      v-model="genPreviewVisible"
+      title="预览"
+      fullscreen
+      destroy-on-close
+      append-to-body
+      class="gen-records-preview-dialog"
+      @closed="onGenPreviewClosed"
+    >
+      <div class="gen-records-preview-body">
+        <img
+          v-if="genPreviewKind === 'image' && genPreviewUrl"
+          :src="genPreviewUrl"
+          alt="预览"
+          class="gen-records-preview-media"
+        />
+        <video
+          v-else-if="genPreviewKind === 'video' && genPreviewUrl"
+          :key="genPreviewUrl"
+          class="gen-records-preview-media"
+          controls
+          playsinline
+          :src="genPreviewUrl"
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue';
+import { ref, reactive, onMounted, watch, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import { useUserStore } from '@/store/user';
+import { getUserRoleFromInfo } from '@/utils/user-role';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft } from '@element-plus/icons-vue';
+import { ArrowLeft, VideoPlay } from '@element-plus/icons-vue';
 import type { FormInstance } from 'element-plus';
 import { formatIsoToYmdHms } from '@/utils/date';
 import {
@@ -449,7 +625,8 @@ import {
   rejectCreditApplication,
   updateUserCredits,
   getHelpDocUrl,
-  updateHelpDocUrl
+  updateHelpDocUrl,
+  getGenerationRecords
 } from '@/api/admin';
 import {
   getAllCategories,
@@ -462,6 +639,11 @@ import { useAdminPendingStore } from '@/store/admin-pending';
 
 const router = useRouter();
 const adminPendingStore = useAdminPendingStore();
+const userStore = useUserStore();
+
+const isSuperAdmin = computed(() => getUserRoleFromInfo(userStore.userInfo) === 1);
+const pageTitle = computed(() => (isSuperAdmin.value ? '管理后台' : '我的生成记录'));
+const generationTabLabel = computed(() => (isSuperAdmin.value ? '生成记录' : '我的生成记录'));
 
 const activeTab = ref('users');
 
@@ -856,17 +1038,93 @@ const updateApiConfigLimit = async (apiType: string, limit: number) => {
   }
 };
 
+// 生成记录
+const genLoading = ref(false);
+const genRecords = ref<any[]>([]);
+const genPagination = reactive({ page: 1, pageSize: 20, total: 0 });
+const genDateRange = ref<[Date, Date] | null>(null);
+const genFilters = reactive({
+  kind: 'all' as 'all' | 'image' | 'video',
+  userId: undefined as number | undefined,
+  roleId: undefined as number | undefined,
+  provider: '' as string
+});
+
+const onGenFilterChange = () => {
+  genPagination.page = 1;
+  void loadGenerationRecords();
+};
+
+const loadGenerationRecords = async () => {
+  genLoading.value = true;
+  try {
+    const params: Record<string, unknown> = {
+      page: genPagination.page,
+      pageSize: genPagination.pageSize,
+      kind: genFilters.kind
+    };
+    if (genDateRange.value && genDateRange.value.length === 2) {
+      params.from = genDateRange.value[0].toISOString();
+      params.to = genDateRange.value[1].toISOString();
+    }
+    if (isSuperAdmin.value && genFilters.userId != null && genFilters.userId > 0) {
+      params.userId = genFilters.userId;
+    }
+    if (isSuperAdmin.value && (genFilters.roleId === 1 || genFilters.roleId === 2)) {
+      params.roleId = genFilters.roleId;
+    }
+    if (genFilters.provider) {
+      params.provider = genFilters.provider;
+    }
+    const res: any = await getGenerationRecords(params);
+    const payload = res.data;
+    genRecords.value = payload.items || [];
+    genPagination.total = payload.total ?? 0;
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载失败');
+  } finally {
+    genLoading.value = false;
+  }
+};
+
+const copyGenUrls = (urls: string[]) => {
+  const text = urls.join('\n');
+  void navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制'));
+};
+
+const genPreviewVisible = ref(false);
+const genPreviewUrl = ref('');
+const genPreviewKind = ref<'image' | 'video'>('image');
+
+const openGenPreview = (url: string, kind: 'image' | 'video') => {
+  genPreviewUrl.value = url;
+  genPreviewKind.value = kind;
+  genPreviewVisible.value = true;
+};
+
+const onGenPreviewClosed = () => {
+  genPreviewUrl.value = '';
+};
+
 watch(activeTab, (tab) => {
   if (tab === 'creditApplications') loadCreditApplications();
   if (tab === 'system') loadHelpDocUrl();
+  if (tab === 'generationRecords') void loadGenerationRecords();
 });
 
 onMounted(async () => {
-  loadUserList();
-  loadLogs();
-  loadApiConfigs();
-  loadCategories();
+  if (isSuperAdmin.value) {
+    loadUserList();
+    loadLogs();
+    loadApiConfigs();
+    loadCategories();
+  } else {
+    activeTab.value = 'generationRecords';
+  }
   void adminPendingStore.refreshPendingCreditApplications();
+  if (activeTab.value === 'generationRecords') {
+    void loadGenerationRecords();
+  }
 });
 </script>
 
@@ -893,6 +1151,14 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--text-main);
   margin: 0;
+}
+
+/* 管理页 Tab：收紧标题与内容区之间的空白 */
+.admin-container :deep(.admin-main-tabs.el-tabs--border-card > .el-tabs__header) {
+  margin-bottom: 0;
+}
+.admin-container :deep(.admin-main-tabs.el-tabs--border-card > .el-tabs__content) {
+  padding: 6px 12px 16px;
 }
 
 .back-button {
@@ -982,5 +1248,223 @@ onMounted(async () => {
 .stats-meta {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* 生成记录：筛选面板布局 */
+.generation-records-toolbar.gen-filter-panel {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--app-bg-sub);
+  border: 1px solid var(--app-border-color);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+.gen-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+.gen-filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.gen-filter-item--date {
+  flex: 0.5;
+  max-width: 100%;
+}
+.gen-filter-item :deep(.el-select__wrapper){
+  background: none;
+}
+.gen-filter-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.gen-filter-date {
+  width: 100%;
+  max-width: 420px;
+}
+.gen-filter-item--action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-bottom: 1px;
+}
+.gen-filter-input-num {
+  width: 132px;
+}
+
+/* 生成记录：筛选区与分页控件对比度（文字、箭头、图标） */
+.generation-records-toolbar :deep(.el-input__wrapper),
+.generation-records-toolbar :deep(.el-input-number .el-input__wrapper) {
+  background-color: var(--app-surface) !important;
+  border-color: var(--app-border-strong) !important;
+  /* box-shadow: none !important; */
+}
+.generation-records-toolbar :deep(.el-input-number .el-input__inner) {
+  color: var(--text-main) !important;
+}
+.generation-records-toolbar :deep(.el-input__inner),
+.generation-records-toolbar :deep(.el-range-input),
+.generation-records-toolbar :deep(.el-select__selected-item),
+.generation-records-toolbar :deep(.el-select__placeholder) {
+  color: var(--text-main) !important;
+}
+.generation-records-toolbar :deep(.el-range-separator) {
+  color: var(--text-main);
+}
+.generation-records-toolbar :deep(.el-range-editor .el-icon),
+.generation-records-toolbar :deep(.el-select__caret) {
+  color: var(--text-main) !important;
+}
+.generation-records-toolbar :deep(.el-input-number__decrease),
+.generation-records-toolbar :deep(.el-input-number__increase) {
+  color: var(--text-main);
+  background: var(--app-bg-sub);
+  border-color: var(--app-border-strong);
+}
+
+.generation-records-pagination :deep(.el-pagination__total),
+.generation-records-pagination :deep(.el-pagination__jump),
+.generation-records-pagination :deep(.el-pagination__goto) {
+  color: var(--text-main);
+}
+.generation-records-pagination :deep(.el-pagination .el-input__inner) {
+  color: var(--text-main) !important;
+}
+.generation-records-pagination :deep(.btn-prev),
+.generation-records-pagination :deep(.btn-next),
+.generation-records-pagination :deep(.el-pager li) {
+  background: var(--app-surface);
+  color: var(--text-main);
+}
+.generation-records-pagination :deep(.el-pagination button:disabled) {
+  color: var(--text-muted);
+}
+.generation-records-pagination :deep(.el-pagination .el-select .el-input__wrapper) {
+  background-color: var(--app-surface) !important;
+  border-color: var(--app-border-strong) !important;
+}
+.generation-records-pagination :deep(.el-pagination .el-select .el-input__inner) {
+  color: var(--text-main) !important;
+}
+.generation-records-pagination :deep(.el-pagination .el-select .el-select__caret) {
+  color: var(--text-main) !important;
+}
+
+.gen-result-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+.gen-result-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+.gen-result-thumb-wrap {
+  position: relative;
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--app-bg-sub);
+  line-height: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gen-result-thumb-wrap:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.45);
+}
+.gen-result-thumb {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+}
+.gen-result-thumb-video {
+  background: #0a0a0f;
+}
+.gen-result-thumb-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 20px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.gen-result-copy {
+  flex-shrink: 0;
+}
+</style>
+
+<style>
+/* 全屏 Dialog 默认非列布局，需自行占满视口并给 body 可收缩高度，媒体才能 max-height 居中自适应 */
+.gen-records-preview-dialog.el-dialog.is-fullscreen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh !important;
+  max-height: 100vh;
+  margin: 0 !important;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.gen-records-preview-dialog.is-fullscreen .el-dialog__header {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--app-border-color, #33343b);
+}
+
+.gen-records-preview-dialog.is-fullscreen .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto !important;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #0b0b10;
+  overflow: hidden;
+}
+
+.gen-records-preview-body {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.gen-records-preview-media {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  min-width: 0;
+  min-height: 0;
 }
 </style>

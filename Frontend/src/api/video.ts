@@ -23,6 +23,8 @@ export interface CreateVideoTaskParams {
   seed?: number;
   /** 可灵模式 std / pro */
   klingMode?: 'std' | 'pro';
+  /** 工作流项目 ID */
+  templateId?: number;
 }
 
 export interface VideoTask {
@@ -49,7 +51,14 @@ export const getVideoTask = (id: number) => {
   return request.get(`/video/tasks/${id}`) as Promise<{ message: string; data: VideoTask }>;
 };
 
-export const listVideoTasks = (params?: { mode?: string; status?: string; limit?: number }) => {
+export const listVideoTasks = (params?: {
+  mode?: string;
+  status?: string;
+  limit?: number;
+  templateId?: number;
+  from?: string;
+  to?: string;
+}) => {
   return request.get('/video/tasks', { params }) as Promise<{ message: string; data: VideoTask[] }>;
 };
 

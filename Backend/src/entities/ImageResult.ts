@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from "typeorm";
 
 @Entity({ name: 'image_result' })
+@Index(["template_id"])
 export class ImageResult {
     @PrimaryGeneratedColumn({ type: 'bigint' })
     id!: number;
@@ -28,8 +29,17 @@ export class ImageResult {
     @Column({ type: 'longtext', nullable: true, comment: '多图生成结果（JSON 数组）' })
     all_images!: string;
 
-    @Column({ type: 'tinyint', default: 1, comment: '1-成功, 0-失败' })
+    @Column({ type: 'tinyint', default: 0, comment: '0-进行中 1-成功 2-失败' })
     status!: number;
+
+    @Column({ type: 'bigint', nullable: true, comment: '关联 workflow_template.id' })
+    template_id!: number | null;
+
+    @Column({ type: 'int', nullable: true, comment: '本次操作消耗的积分' })
+    credits_spent!: number | null;
+
+    @Column({ length: 20, default: 'generate', comment: 'generate/upscale/extend/split' })
+    operation_type!: string;
 
     @CreateDateColumn()
     created_at!: Date;
