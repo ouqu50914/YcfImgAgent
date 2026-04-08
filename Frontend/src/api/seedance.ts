@@ -77,4 +77,17 @@ export function createSeedanceAdvanced(params: CreateSeedanceAdvancedParams) {
   }>('/seedance/advanced', params);
 }
 
+/** 与后端扣费一致（避免本地 VITE_* 与服务器 SEEDANCE_* 不一致导致按钮积分与实扣不符） */
+export interface SeedanceBillingConfig {
+  defaultDurationSeconds: number;
+  creditsPerSecond: number;
+}
+
+export function getSeedanceBillingConfig() {
+  return request.get<{
+    message: string;
+    data: SeedanceBillingConfig;
+  }>('/seedance/billing-config');
+}
+
 

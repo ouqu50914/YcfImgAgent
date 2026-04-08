@@ -1,9 +1,17 @@
 import { Router } from "express";
 import { authenticateToken } from "../middlewares/auth.middleware";
 import { rateLimit } from "../middlewares/rate-limit.middleware";
-import { createSeedanceVideo, getSeedanceVideo, createSeedanceAdvancedVideo } from "../controllers/seedance.controller";
+import {
+    createSeedanceVideo,
+    getSeedanceVideo,
+    createSeedanceAdvancedVideo,
+    getSeedanceBillingConfig,
+} from "../controllers/seedance.controller";
 
 const router = Router();
+
+// 计费参数（与扣费一致；供前端展示消耗）
+router.get("/billing-config", authenticateToken, rateLimit({ windowMs: 60_000, max: 30, apiType: "seedance_video_status" }), getSeedanceBillingConfig);
 
 // 创建 Seedance 简单文生视频任务
 router.post(

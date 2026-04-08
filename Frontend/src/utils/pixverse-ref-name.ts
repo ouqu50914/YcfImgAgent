@@ -33,6 +33,8 @@ export function parseImageFigureNumberFromAlias(alias: string | undefined): numb
     .trim()
     .match(/^图(\d+)$/);
   if (!m) return null;
-  const n = parseInt(m[1], 10);
+  const cap = m[1];
+  if (cap == null || cap === '') return null;
+  const n = parseInt(cap, 10);
   return Number.isFinite(n) && n >= 1 ? n : null;
 }

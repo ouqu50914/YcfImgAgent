@@ -289,7 +289,13 @@ import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
 import { getUploadUrl } from '@/utils/image-loader';
-import { createSeedanceGeneration, getSeedanceGenerationStatus, createSeedanceAdvanced, type SeedanceAdvancedAction } from '@/api/seedance';
+import {
+  createSeedanceGeneration,
+  getSeedanceGenerationStatus,
+  createSeedanceAdvanced,
+  getSeedanceBillingConfig,
+  type SeedanceAdvancedAction,
+} from '@/api/seedance';
 import {
   createPixverseGeneration,
   createPixverseImageGeneration,
@@ -325,6 +331,9 @@ type CreditTrackerStore = {
   getTotalSpent: () => number;
 };
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
+
+/** 与服务器 SEEDANCE_* 对齐，用于「消耗 N 积分」展示；拉取失败时回退本地 env */
+const seedanceBilling = ref<{ defaultDurationSeconds: number; creditsPerSecond: number } | null>(null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 
 function withTemplateId<T extends object>(obj: T): T {
@@ -992,7 +1001,14 @@ function getSeedanceDefaultDurationSeconds(): number {
   const raw = (import.meta as any)?.env?.VITE_SEEDANCE_DEFAULT_DURATION;
   const n = raw != null ? Number(raw) : 5;
   if (Number.isNaN(n) || n <= 0) return 5;
-  return n;
+  return Math.min(15, Math.max(4, Math.round(n)));
+}
+
+/** 与后端 clampSeedanceDurationSeconds 一致（4~15） */
+function clampSeedanceDurationSecondsClient(n: number): number {
+  const x = Math.round(Number(n));
+  if (Number.isNaN(x)) return 5;
+  return Math.min(15, Math.max(4, x));
 }
 
 function getPixverseDefaultDurationSeconds(): number {
@@ -1031,9 +1047,13 @@ function getPixverseEffectiveDurationSeconds(): number {
 
 const executeCost = computed(() => {
   if (provider.value === 'seedance') {
-    const seconds = durationAuto.value ? getSeedanceDefaultDurationSeconds() : Number(durationManual.value);
+    const cps = seedanceBilling.value?.creditsPerSecond ?? getSeedanceCreditsPerSecond();
+    const rawSec = durationAuto.value
+      ? (seedanceBilling.value?.defaultDurationSeconds ?? getSeedanceDefaultDurationSeconds())
+      : Number(durationManual.value);
+    const seconds = clampSeedanceDurationSecondsClient(rawSec);
     if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-    return Math.round(seconds) * getSeedanceCreditsPerSecond();
+    return Math.round(seconds) * cps;
   }
 
   if (provider.value === 'pixverse') {
@@ -1045,6 +1065,31 @@ const executeCost = computed(() => {
   // kling 或其它默认不计费（或在后端计费体系尚未接入该计费口径）
   return 0;
 });
+
+watch(
+  () => provider.value,
+  async (p) => {
+    if (p !== 'seedance') return;
+    if (seedanceBilling.value) return;
+    try {
+      const r: any = await getSeedanceBillingConfig();
+      const payload = r?.data;
+      if (
+        payload &&
+        typeof payload.defaultDurationSeconds === 'number' &&
+        typeof payload.creditsPerSecond === 'number'
+      ) {
+        seedanceBilling.value = {
+          defaultDurationSeconds: payload.defaultDurationSeconds,
+          creditsPerSecond: payload.creditsPerSecond,
+        };
+      }
+    } catch {
+      // 未登录/网络失败：仍用本地 VITE_* 估算
+    }
+  },
+  { immediate: true }
+);
 
 const canAfford = computed(() => {
   return userStore.canAffordOperation(executeCost.value);

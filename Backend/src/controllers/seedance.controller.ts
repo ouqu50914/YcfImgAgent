@@ -103,11 +103,18 @@ function getSeedanceCreditsPerSecond(): number {
     return n;
 }
 
+/** Seedance 文档：duration 为 4~15 或 -1；计费必须与实际上传一致并限制在合法区间 */
+function clampSeedanceDurationSeconds(n: number): number {
+    const x = Math.round(Number(n));
+    if (Number.isNaN(x)) return 5;
+    return Math.min(15, Math.max(4, x));
+}
+
 function getSeedanceDefaultDuration(): number {
     const raw = process.env.SEEDANCE_DEFAULT_DURATION;
     const n = raw ? Number(raw) : 5;
     if (Number.isNaN(n)) return 5;
-    return n;
+    return clampSeedanceDurationSeconds(n);
 }
 
 function buildSeedanceUpstreamUnauthorizedResponse(err: any) {
@@ -202,7 +209,8 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
         // 20 积分 / 秒（可通过 SEEDANCE_CREDITS_PER_SECOND 覆盖）；duration = -1 或未指定时按默认时长计算
         const defaultDuration = getSeedanceDefaultDuration();
         const creditsPerSecond = getSeedanceCreditsPerSecond();
-        const seconds = durationNum === undefined || durationNum === -1 ? defaultDuration : durationNum;
+        const rawSeconds = durationNum === undefined || durationNum === -1 ? defaultDuration : durationNum;
+        const seconds = clampSeedanceDurationSeconds(rawSeconds);
         const cost = seconds * creditsPerSecond;
         const templateId = parseTemplateIdFromBody(req.body);
 
@@ -481,7 +489,8 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
             }
         }
 
-        const resultDuration = durationNum === undefined || durationNum === -1 ? getSeedanceDefaultDuration() : durationNum;
+        const rawResultDuration = durationNum === undefined || durationNum === -1 ? getSeedanceDefaultDuration() : durationNum;
+        const resultDuration = clampSeedanceDurationSeconds(rawResultDuration);
         const creditsPerSecond = getSeedanceCreditsPerSecond();
         const advCost = resultDuration * creditsPerSecond;
         const templateId = parseTemplateIdFromBody(req.body);
@@ -565,6 +574,27 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                     ? "请求参数或内容不符合 Seedance 要求，请检查后重试。"
                     : "创建 Seedance 高级视频生成任务失败"),
         });
+    }
+};
+
+/**
+ * 与扣费逻辑一致的计费参数，供前端展示「本次消耗」积分，避免 VITE_* 与服务器 SEEDANCE_* 不一致。
+ */
+export const getSeedanceBillingConfig = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录或登录已失效" });
+        }
+        return res.status(200).json({
+            message: "ok",
+            data: {
+                defaultDurationSeconds: getSeedanceDefaultDuration(),
+                creditsPerSecond: getSeedanceCreditsPerSecond(),
+            },
+        });
+    } catch (error: any) {
+        return res.status(500).json({ message: error?.message || "获取 Seedance 计费配置失败" });
     }
 };
 

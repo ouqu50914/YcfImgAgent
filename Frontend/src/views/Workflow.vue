@@ -687,6 +687,8 @@ const creditTrackerStore: CreditTrackerStore = {
         const n = Number(amount);
         if (!Number.isFinite(n) || n <= 0) return;
         sessionCreditsSpent.value += Math.floor(n);
+        // 后端创建任务时已扣费；仅累加「本次消耗」不会更新 userInfo，顶部可用积分会滞后
+        void userStore.fetchCredits();
     },
     getTotalSpent: () => sessionCreditsSpent.value,
 };
