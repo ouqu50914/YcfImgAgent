@@ -278,7 +278,11 @@ const handleExtend = async () => {
         }
     } catch (error: any) {
         console.error(error);
-        ElMessage.error(error.message || '图片扩展失败');
+        const msg =
+            (error as any)?.response?.data?.message ||
+            (error as any)?.message ||
+            '图片扩展失败，请稍后重试';
+        ElMessage.error(msg);
     } finally {
         loading.value = false;
     }

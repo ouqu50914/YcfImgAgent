@@ -463,6 +463,39 @@ const currentNode = computed(() => {
     return getNodes.value.find(n => n.id === props.id);
 });
 
+const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'success' | 'failed' | 'pending' | 'not_found'> => {
+    if (!generationKey) return 'not_found';
+    try {
+        const res: any = await getImageGenerateResultByGenerationKey(generationKey);
+        const data = res?.data as any;
+        const status = data?.status;
+        const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
+
+        if (allImages.length > 0) {
+            const fullUrls = allImages.map((url: string) => getUploadUrl(url));
+            imageUrls.value = fullUrls;
+            imageUrl.value = fullUrls[0] || '';
+            props.data.imageUrl = allImages[0];
+            props.data.imageUrls = allImages;
+            isExecuted.value = true;
+
+            const filled = fillPlaceholderImageNodes(fullUrls, allImages);
+            if (!filled && fullUrls.length > 0) {
+                createImageNodes(fullUrls, allImages);
+            }
+            markPendingPlaceholdersAsError();
+            saveWorkflowImmediately();
+            return 'success';
+        }
+
+        if (status === 2) return 'failed';
+        if (status === 0 || status === 1) return 'pending';
+        return 'not_found';
+    } catch {
+        return 'not_found';
+    }
+};
+
 
 
 // 生成图片
@@ -497,6 +530,7 @@ const handleGenerate = async () => {
         return;
     }
     loading.value = true;
+    let generationKey = '';
     try {
         // 1. 从连接读取数据（执行前再读一次，防止 watch 未触发的边界情况）
         const finalPrompt = readConnectedPromptFromEdges();
@@ -587,7 +621,7 @@ const handleGenerate = async () => {
 
         // 在发送请求前，根据生成数量预创建占位图片节点（loading 状态）
         // 并为本次生成生成一个幂等 generationKey，刷新/历史恢复后可用该 key 查询最终结果。
-        const generationKey = `imggen_${String(props.id)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        generationKey = `imggen_${String(props.id)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         requestParams.generationKey = generationKey;
         const tid = workflowTemplateId?.value;
         if (tid != null && tid > 0) {
@@ -706,21 +740,38 @@ const handleGenerate = async () => {
     } catch (error) {
         console.error('[DreamNode] 图片生成失败', error);
 
-        // 如果存在占位图片节点，将其标记为失败状态，以便在 ImageNode 中展示“生成失败”
-        markPendingPlaceholdersAsError();
+        const recoverState = await tryRecoverFromGenerationKey(generationKey);
+        if (recoverState === 'success') {
+            ElMessage.success('图片已生成成功，已自动同步结果');
+            void notifyMediaGeneration({
+                kind: 'image',
+                success: true,
+                nodeId: String(props.id),
+                message: '请求异常后已从生成记录恢复成功'
+            });
+            return;
+        }
+        if (recoverState === 'failed') {
+            // 只有后端明确失败时才将占位节点落为失败态，避免“已成功但前端先报错”的误判。
+            markPendingPlaceholdersAsError();
+        }
 
         const errMsg =
             (error as Error)?.message ||
             (typeof error === 'string' ? error : '') ||
             '图片生成失败，请稍后重试';
+        if (recoverState === 'pending' || recoverState === 'not_found') {
+            ElMessage.warning('请求异常，正在后台同步生成结果，请稍后查看');
+            saveWorkflowImmediately();
+            return;
+        }
         void notifyMediaGeneration({
             kind: 'image',
             success: false,
             nodeId: String(props.id),
             message: errMsg
         });
-
-        ElMessage.error('图片生成失败，请稍后重试');
+        ElMessage.error(errMsg || '图片生成失败，请稍后重试');
         saveWorkflowImmediately();
     } finally {
         loading.value = false;

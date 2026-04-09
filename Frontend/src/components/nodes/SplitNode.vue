@@ -262,10 +262,11 @@ const handleSplit = async () => {
         }
     } catch (error: any) {
         console.error('[SplitNode] 图片拆分失败', error);
-        // 统一错误提示交给全局拦截器，这里仅在无响应时兜底
-        if (!(error as any)?.response) {
-            ElMessage.error('图片拆分失败，请稍后重试');
-        }
+        const msg =
+            (error as any)?.response?.data?.message ||
+            (error as any)?.message ||
+            '图片拆分失败，请稍后重试';
+        ElMessage.error(msg);
     } finally {
         loading.value = false;
     }

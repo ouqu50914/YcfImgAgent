@@ -2526,6 +2526,25 @@ const handleGenerate = async () => {
       setGenerationCooldownSeconds(retryAfterSeconds);
     }
 
+    const providerName = provider.value;
+    const hasRecoverKey =
+      (typeof taskId.value === 'number' && !Number.isNaN(taskId.value)) ||
+      (typeof seedanceTaskKey.value === 'string' && seedanceTaskKey.value.trim().length > 0);
+    const maybeCreatedButResponseLost =
+      !hasRecoverKey &&
+      (providerName === 'seedance' || providerName === 'pixverse') &&
+      (statusCode == null || statusCode >= 500);
+
+    // Seedance/PixVerse 在 5xx/超时场景下存在“上游已创建但响应链路失败”的可能。
+    // 此时不要立刻标失败，避免出现“实际成功但前端先判死”。
+    if (maybeCreatedButResponseLost) {
+      status.value = 'pending';
+      errorMessage.value = '创建请求响应异常，任务可能已提交，正在等待结果同步';
+      syncResultVideoNode();
+      ElMessage.warning('请求异常，任务可能已提交，请稍后查看结果');
+      return;
+    }
+
     // 失败时也同步到结果节点，显示错误状态与文案
     status.value = 'failed';
     errorMessage.value = normalizeErrorMessage(e?.message) || '创建视频任务失败';
