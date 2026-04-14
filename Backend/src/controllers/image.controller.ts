@@ -9,7 +9,7 @@ export const generateImage = async (req: Request, res: Response) => {
     try {
         // 从 JWT 中解析出的 userId (在 middleware 中赋值，稍后补充)
         const userId = (req as any).user?.userId; 
-        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, aspectRatio, generationKey, templateId } = req.body;
+        const { apiType, prompt, width, height, style, imageUrl, imageUrls, imageAliases, numImages, quality, model, providerHint, aspectRatio, generationKey, templateId } = req.body;
 
         // 图生图时提示词可以为空，但必须有参考图片
         const hasImage = !!imageUrl || (imageUrls && imageUrls.length > 0);
@@ -29,6 +29,7 @@ export const generateImage = async (req: Request, res: Response) => {
             imageAliases,
             quality,
             model, // 传递 Nano 子模型参数
+            providerHint, // 传递供应商提示（超级管理员可直连 AnyFast）
             aspectRatio, // 传递比例参数（Nano 使用）
             generationKey, // 用于刷新/历史恢复后查询最终态
             ...(Number.isFinite(tid) && (tid as number) > 0 ? { templateId: tid as number } : {}),
@@ -42,7 +43,14 @@ export const generateImage = async (req: Request, res: Response) => {
             ipAddress?: string;
         } = {
             apiType: apiType || 'dream',
-            details: { prompt, width, height, style, imageId: result.id }
+            details: {
+                prompt,
+                width,
+                height,
+                style,
+                imageId: result.id,
+                providerPolicy: (result as any)?.provider_policy || null,
+            }
         };
         
         if (ipAddressRaw) {

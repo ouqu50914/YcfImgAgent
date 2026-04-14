@@ -1,7 +1,7 @@
 /**
  * 积分计算规则（与后端 CreditService 一致）
  * 即梦 2K/1K/standard = 1/张，即梦 4K = 2/张
- * Nano = 5/次
+ * Nano = 6/次
  * Dream 放大/扩展/拆分/图层分离 = 1
  */
 export type CreditOperation = 'generate' | 'upscale' | 'extend' | 'split' | 'layer_split';
@@ -14,7 +14,7 @@ export function getCreditCost(
   const count = options?.imageCount ?? 1;
 
   if (apiType === 'nano') {
-    return 5 * count;
+    return 6 * count;
   }
 
   if (operation === 'generate') {

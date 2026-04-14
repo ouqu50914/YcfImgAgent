@@ -16,6 +16,16 @@
                         <el-option label="Seedream" value="dream" />
                         <el-option label="Nano Banana 2" value="nano:nano-banana-2" />
                         <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
+                        <el-option
+                            v-if="userStore.userInfo?.role === 1"
+                            label="AnyFast Gemini 2.5 Flash Image"
+                            value="anyfast:gemini-2.5-flash-image"
+                        />
+                        <el-option
+                            v-if="userStore.userInfo?.role === 1"
+                            label="AnyFast Gemini 3 Pro Image Preview"
+                            value="anyfast:gemini-3-pro-image-preview"
+                        />
                     </el-select>
                 </div>
 
@@ -190,6 +200,8 @@ const executeButtonText = computed(() => {
 const initialSelectedModel = (() => {
     if (props.data?.apiType === 'nano') {
         const m = (props.data as any).model as string | undefined;
+        if (m === 'gemini-2.5-flash-image') return 'anyfast:gemini-2.5-flash-image';
+        if (m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image-preview';
         if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
         if (m === 'nano-banana-2') return 'nano:nano-banana-2';
         // 默认使用 nano-banana-2
@@ -205,14 +217,20 @@ const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number'
 
 // 计算属性：apiType 由 selectedModel 推导
 const apiType = computed<'dream' | 'nano'>(() => {
-    return selectedModel.value.startsWith('nano:') ? 'nano' : 'dream';
+    return selectedModel.value.startsWith('nano:') || selectedModel.value.startsWith('anyfast:') ? 'nano' : 'dream';
 });
 
 // 计算属性：从 selectedModel 中提取具体的 nano 模型
-const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | undefined>(() => {
-    if (!selectedModel.value.startsWith('nano:')) return undefined;
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview' | undefined>(() => {
+    if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
     const parts = selectedModel.value.split(':');
-    return parts[1] as 'nano-banana-2' | 'nano-banana-pro';
+    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+});
+
+const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
+    if (selectedModel.value.startsWith('anyfast:')) return 'anyfast';
+    if (selectedModel.value.startsWith('nano:')) return 'ace';
+    return undefined;
 });
 
 // toast 去重，避免频繁提示
@@ -265,7 +283,7 @@ const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): 
 
 // 监听模型切换，重置不兼容的选项，并同步到节点数据
 watch(selectedModel, (newModel) => {
-    const isNano = newModel.startsWith('nano:');
+    const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:');
     if (isNano) {
         if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
             quality.value = '2K';
@@ -279,6 +297,7 @@ watch(selectedModel, (newModel) => {
     const api: 'dream' | 'nano' = isNano ? 'nano' : 'dream';
     (props.data as any).apiType = api;
     (props.data as any).model = isNano ? newModel.split(':')[1] : undefined;
+    (props.data as any).providerHint = isNano ? providerHint.value : undefined;
 }, { immediate: true });
 
 // 将本地参数同步到节点数据，确保自动保存能带上这些配置
@@ -614,7 +633,8 @@ const handleGenerate = async () => {
             requestParams.aspectRatio = aspectRatio.value;
             if (quality.value) requestParams.quality = quality.value;
             if (nanoModel.value) requestParams.model = nanoModel.value;
-            console.log(`[前端] Nano Banana 模型=${nanoModel.value || 'nano-banana-2'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+            if (providerHint.value) requestParams.providerHint = providerHint.value;
+            console.log(`[前端] Nano/AnyFast 模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
         }
         
         console.log('发送生图请求，参数:', requestParams);

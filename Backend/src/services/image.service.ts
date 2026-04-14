@@ -4,8 +4,11 @@ import { ApiConfig } from "../entities/ApiConfig";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
+import { AnyfastNanoAdapter } from "../adapters/anyfast-nano.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
 import { CreditService, type CreditLogInfo } from "./credit.service";
+import { ProviderError } from "../adapters/provider-error";
+import { calculateNanoPolicyRates, isFallbackEligible } from "./nano-policy.util";
 
 export class ImageService {
     private imageRepo = AppDataSource.getRepository(ImageResult);
@@ -13,9 +16,29 @@ export class ImageService {
     private templateRepo = AppDataSource.getRepository(WorkflowTemplate);
     private creditService = new CreditService();
 
+    private static anyfastConsecutiveFailures = 0;
+    private static anyfastCircuitOpenUntil = 0;
+    private static nanoPolicyMetrics = {
+        totalRequests: 0,
+        switchedToAnyfast: 0,
+        finalAnyfast: 0,
+    };
+    private static nanoPolicyRequestSeq = 0;
+
+    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "ace") as "ace" | "anyfast";
+    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "anyfast") as "ace" | "anyfast";
+    private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "2"));
+    private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY !== "false";
+    private readonly anyfastCircuitFailureThreshold = Math.max(1, Number(process.env.NANO_ANYFAST_CIRCUIT_FAILURE_THRESHOLD || "3"));
+    private readonly anyfastCircuitOpenMs = Math.max(1000, Number(process.env.NANO_ANYFAST_CIRCUIT_OPEN_MS || "60000"));
+
     private adapters = {
         'dream': new DreamAdapter(),
         'nano': new NanoAdapter()
+    };
+    private nanoProviderAdapters = {
+        ace: new NanoAdapter(),
+        anyfast: new AnyfastNanoAdapter(),
     };
 
     /**
@@ -51,10 +74,6 @@ export class ImageService {
             imageCount
         });
 
-        // 3. 调用适配器（先扣积分，失败回滚）
-        const adapter = this.adapters[apiType];
-        if (!adapter) throw new Error("未知的API类型");
-
         const generationKey = params.generationKey;
 
         const result = await this.deductAndExecute(userId, cost, async () => {
@@ -73,8 +92,9 @@ export class ImageService {
             await this.imageRepo.save(imageRecord);
 
             try {
-                // 2) 调用适配器生成图片
-                const apiResult = await adapter.generateImage(params, config.api_key, config.api_url);
+                // 2) 调用适配器生成图片（nano 走 Ace 优先 + AnyFast 回退策略）
+                const providerResult = await this.generateByPolicy(apiType, params, config.api_key, config.api_url, userId);
+                const apiResult = providerResult.apiResult;
 
                 // 3) 保存结果到数据库
                 const allImageUrls = apiResult.images || [];
@@ -95,6 +115,7 @@ export class ImageService {
                 return {
                     ...imageRecord,
                     all_images: allImageUrls,
+                    provider_policy: providerResult.policyTrace,
                 } as any;
             } catch (error) {
                 // 生成失败：标记失败态（status=2），避免前端靠等待时间“猜测”失败。
@@ -106,6 +127,295 @@ export class ImageService {
         }, { operationType: 'generate', apiType });
 
         return result;
+    }
+
+    private isAnyfastCircuitOpen(): boolean {
+        return Date.now() < ImageService.anyfastCircuitOpenUntil;
+    }
+
+    private markAnyfastFailure() {
+        ImageService.anyfastConsecutiveFailures += 1;
+        if (ImageService.anyfastConsecutiveFailures >= this.anyfastCircuitFailureThreshold) {
+            ImageService.anyfastCircuitOpenUntil = Date.now() + this.anyfastCircuitOpenMs;
+        }
+    }
+
+    private markAnyfastSuccess() {
+        ImageService.anyfastConsecutiveFailures = 0;
+        ImageService.anyfastCircuitOpenUntil = 0;
+    }
+
+    private recordNanoPolicyMetric(finalProvider: "ace" | "anyfast", switched: boolean) {
+        ImageService.nanoPolicyMetrics.totalRequests += 1;
+        if (switched) ImageService.nanoPolicyMetrics.switchedToAnyfast += 1;
+        if (finalProvider === "anyfast") ImageService.nanoPolicyMetrics.finalAnyfast += 1;
+    }
+
+    private shouldFallback(error: unknown): boolean {
+        return isFallbackEligible(error, this.nanoFallbackOnTransientOnly);
+    }
+
+    private async generateByPolicy(
+        apiType: "dream" | "nano",
+        params: GenerateParams,
+        apiKey: string,
+        apiUrl: string,
+        userId?: number
+    ): Promise<{ apiResult: { images?: string[]; original_id: string }; policyTrace: Record<string, unknown> }> {
+        if (apiType !== "nano") {
+            const adapter = this.adapters[apiType];
+            if (!adapter) throw new Error("未知的API类型");
+            const apiResult = await adapter.generateImage(params, apiKey, apiUrl);
+            return {
+                apiResult,
+                policyTrace: {
+                    provider_chain: [apiType],
+                    final_provider: apiType,
+                    attempt_count: 1,
+                },
+            };
+        }
+
+        const providerChain: string[] = [];
+        let switchReason = "";
+        const startedAt = Date.now();
+        const requestId = params.generationKey || `nano-${Date.now()}`;
+        const requestSeq = ++ImageService.nanoPolicyRequestSeq;
+        const requestedAnyfastDirect =
+            params.providerHint === "anyfast" ||
+            params.model === "gemini-2.5-flash-image" ||
+            params.model === "gemini-3-pro-image-preview";
+        const normalizedUserId = Number(userId);
+        const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
+        const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
+        if (requestedAnyfastDirect && !isAdmin) {
+            throw Object.assign(new Error("仅超级管理员可直接选择 AnyFast 图片模型"), { status: 403 });
+        }
+
+        const primary = requestedAnyfastDirect ? "anyfast" : this.nanoPrimaryProvider;
+        const fallback = requestedAnyfastDirect ? "anyfast" : this.nanoFallbackProvider;
+        const refCount =
+            (params.imageUrls && params.imageUrls.length > 0)
+                ? params.imageUrls.length
+                : params.imageUrl
+                    ? 1
+                    : 0;
+
+        console.log("[ImageService][NanoPolicyRequest] start", {
+            request_seq: requestSeq,
+            request_id: requestId,
+            user_id: hasValidUserId ? normalizedUserId : undefined,
+            primary_provider: primary,
+            fallback_provider: fallback,
+            direct_anyfast: requestedAnyfastDirect,
+            prompt: params.prompt,
+            model: params.model,
+            quality: params.quality,
+            aspect_ratio: params.aspectRatio,
+            num_images: params.num_images || (params as any).numImages || 1,
+            reference_image_count: refCount,
+        });
+
+        const tryProvider = async (provider: "ace" | "anyfast", attempt: number) => {
+            providerChain.push(provider);
+            console.log("[ImageService][NanoPolicyRequest] attempt_start", {
+                request_seq: requestSeq,
+                request_id: requestId,
+                attempt,
+                provider,
+                provider_chain: providerChain.join("->"),
+            });
+            const adapter = this.nanoProviderAdapters[provider];
+            const result = await adapter.generateImage({ ...params, providerHint: provider }, apiKey, apiUrl);
+            console.log("[ImageService][NanoPolicyRequest] attempt_success", {
+                request_seq: requestSeq,
+                request_id: requestId,
+                attempt,
+                provider,
+                image_count: result.images?.length || 0,
+                first_image: result.images?.[0],
+                original_id: result.original_id,
+            });
+            return { result, attempt, provider };
+        };
+
+        try {
+            if (primary === "ace") {
+                let lastError: unknown;
+                for (let i = 1; i <= this.nanoAceMaxAttemptsPerRequest; i++) {
+                    try {
+                        const ok = await tryProvider("ace", i);
+                        console.log("[ImageService][NanoPolicyRequest] completed", {
+                            request_seq: requestSeq,
+                            request_id: requestId,
+                            final_provider: "ace",
+                            provider_chain: providerChain.join("->"),
+                            attempt_count: providerChain.length,
+                            switch_reason: switchReason || undefined,
+                            latency_ms: Date.now() - startedAt,
+                            image_count: ok.result.images?.length || 0,
+                            first_image: ok.result.images?.[0],
+                            original_id: ok.result.original_id,
+                        });
+                        return {
+                            apiResult: ok.result,
+                            policyTrace: {
+                                request_seq: requestSeq,
+                                request_id: requestId,
+                                provider_chain: providerChain.join("->"),
+                                final_provider: "ace",
+                                attempt_count: providerChain.length,
+                                latency_ms: Date.now() - startedAt,
+                            },
+                        };
+                    } catch (error) {
+                        lastError = error;
+                        console.warn("[ImageService][NanoPolicyRequest] attempt_failed", {
+                            request_seq: requestSeq,
+                            request_id: requestId,
+                            attempt: i,
+                            provider: "ace",
+                            message: error instanceof Error ? error.message : String(error),
+                        });
+                        const canRetryAce = this.shouldFallback(error) && i < this.nanoAceMaxAttemptsPerRequest;
+                        if (!canRetryAce) break;
+                    }
+                }
+
+                const canFallback = this.shouldFallback(lastError) && fallback === "anyfast" && !this.isAnyfastCircuitOpen();
+                if (!canFallback) throw lastError;
+                switchReason = lastError instanceof ProviderError ? lastError.code : "ACE_FAILED";
+                try {
+                    const fallbackOk = await tryProvider("anyfast", providerChain.length + 1);
+                    this.markAnyfastSuccess();
+                    console.log("[ImageService][NanoPolicyRequest] completed", {
+                        request_seq: requestSeq,
+                        request_id: requestId,
+                        final_provider: "anyfast",
+                        provider_chain: providerChain.join("->"),
+                        attempt_count: providerChain.length,
+                        switch_reason: switchReason || undefined,
+                        latency_ms: Date.now() - startedAt,
+                        image_count: fallbackOk.result.images?.length || 0,
+                        first_image: fallbackOk.result.images?.[0],
+                        original_id: fallbackOk.result.original_id,
+                    });
+                    return {
+                        apiResult: fallbackOk.result,
+                        policyTrace: {
+                            request_seq: requestSeq,
+                            request_id: requestId,
+                            provider_chain: providerChain.join("->"),
+                            final_provider: "anyfast",
+                            attempt_count: providerChain.length,
+                            switch_reason: switchReason,
+                            latency_ms: Date.now() - startedAt,
+                        },
+                    };
+                } catch (fallbackError) {
+                    this.markAnyfastFailure();
+                    console.warn("[ImageService][NanoPolicyRequest] attempt_failed", {
+                        request_seq: requestSeq,
+                        request_id: requestId,
+                        attempt: providerChain.length,
+                        provider: "anyfast",
+                        message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                    });
+                    throw fallbackError;
+                }
+            }
+
+            // 兼容 future: anyfast 作为主，ace 作为备
+            try {
+                const first = await tryProvider(primary, 1);
+                this.markAnyfastSuccess();
+                console.log("[ImageService][NanoPolicyRequest] completed", {
+                    request_seq: requestSeq,
+                    request_id: requestId,
+                    final_provider: primary,
+                    provider_chain: providerChain.join("->"),
+                    attempt_count: providerChain.length,
+                    switch_reason: switchReason || undefined,
+                    latency_ms: Date.now() - startedAt,
+                    image_count: first.result.images?.length || 0,
+                    first_image: first.result.images?.[0],
+                    original_id: first.result.original_id,
+                });
+                return {
+                    apiResult: first.result,
+                    policyTrace: {
+                        request_seq: requestSeq,
+                        request_id: requestId,
+                        provider_chain: providerChain.join("->"),
+                        final_provider: primary,
+                        attempt_count: providerChain.length,
+                        latency_ms: Date.now() - startedAt,
+                    },
+                };
+            } catch (primaryError) {
+                this.markAnyfastFailure();
+                console.warn("[ImageService][NanoPolicyRequest] attempt_failed", {
+                    request_seq: requestSeq,
+                    request_id: requestId,
+                    attempt: 1,
+                    provider: primary,
+                    message: primaryError instanceof Error ? primaryError.message : String(primaryError),
+                });
+                if (!this.shouldFallback(primaryError) || fallback === primary) throw primaryError;
+                switchReason = primaryError instanceof ProviderError ? primaryError.code : "PRIMARY_FAILED";
+                const second = await tryProvider(fallback, 2);
+                console.log("[ImageService][NanoPolicyRequest] completed", {
+                    request_seq: requestSeq,
+                    request_id: requestId,
+                    final_provider: fallback,
+                    provider_chain: providerChain.join("->"),
+                    attempt_count: providerChain.length,
+                    switch_reason: switchReason || undefined,
+                    latency_ms: Date.now() - startedAt,
+                    image_count: second.result.images?.length || 0,
+                    first_image: second.result.images?.[0],
+                    original_id: second.result.original_id,
+                });
+                return {
+                    apiResult: second.result,
+                    policyTrace: {
+                        request_seq: requestSeq,
+                        request_id: requestId,
+                        provider_chain: providerChain.join("->"),
+                        final_provider: fallback,
+                        attempt_count: providerChain.length,
+                        switch_reason: switchReason,
+                        latency_ms: Date.now() - startedAt,
+                    },
+                };
+            }
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : "未知错误";
+            console.error("[ImageService][NanoPolicyRequest] failed", {
+                request_seq: requestSeq,
+                request_id: requestId,
+                provider_chain: providerChain.join("->") || "none",
+                attempt_count: providerChain.length,
+                switch_reason: switchReason || undefined,
+                latency_ms: Date.now() - startedAt,
+                message: msg,
+            });
+            throw new Error(`Nano 生成失败，供应商链路 ${providerChain.join("->") || "none"}: ${msg}`);
+        } finally {
+            const finalProvider = providerChain[providerChain.length - 1];
+            if (finalProvider === "ace" || finalProvider === "anyfast") {
+                const switched = providerChain.length > 1 && providerChain.includes("anyfast");
+                this.recordNanoPolicyMetric(finalProvider, switched);
+                const m = ImageService.nanoPolicyMetrics;
+                const rates = calculateNanoPolicyRates(m);
+                console.log("[ImageService][NanoPolicy]", {
+                    total_requests: m.totalRequests,
+                    switch_to_anyfast_rate: rates.switchToAnyfastRate,
+                    anyfast_final_rate: rates.anyfastFinalRate,
+                    anyfast_circuit_open: this.isAnyfastCircuitOpen(),
+                });
+            }
+        }
     }
 
     /**

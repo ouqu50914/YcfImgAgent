@@ -11,7 +11,7 @@ export interface CreditLogInfo {
 
 /**
  * 积分计算与扣减服务
- * 规则：即梦2K/1K/standard=1/张，即梦4K=2/张；Nano=5/次；Dream放大/扩展/拆分/图层分离=1
+ * 规则：即梦2K/1K/standard=1/张，即梦4K=2/张；Nano=6/次；Dream放大/扩展/拆分/图层分离=1
  */
 export class CreditService {
     private userRepo = AppDataSource.getRepository(User);
@@ -28,7 +28,7 @@ export class CreditService {
         const count = options?.imageCount ?? 1;
 
         if (apiType === 'nano') {
-            return 5 * count;
+            return 6 * count;
         }
 
         // dream

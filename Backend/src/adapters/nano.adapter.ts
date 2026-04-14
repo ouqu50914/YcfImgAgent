@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
 import { detectImageFormat } from "../utils/image-format";
+import { ProviderError } from "./provider-error";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -28,16 +29,6 @@ const NANO_DRY_RUN = process.env.ACE_NANO_DRY_RUN === "true";
 const ACE_RETURN_REMOTE_URL = process.env.ACE_RETURN_REMOTE_URL === "true";
 const ACE_REQUEST_BODY_MAX_BYTES = 20 * 1024 * 1024; // 20MB
 
-class ProviderError extends Error {
-    code: string;
-    status: number;
-    constructor(params: { code: string; message: string; status?: number }) {
-        super(params.message);
-        this.code = params.code;
-        this.status = params.status ?? 502;
-    }
-}
-
 export class NanoAdapter implements AiProvider {
     /**
      * Ace 对请求体大小有限制。这里在调用上游前先做本地校验，
@@ -50,6 +41,8 @@ export class NanoAdapter implements AiProvider {
                 code: "ACE_REQUEST_BODY_TOO_LARGE",
                 status: 413,
                 message: "请求主体超过 20MB，请减少上传图片数量或压缩图片大小后重试。",
+                provider: "ace",
+                transient: false,
             });
         }
     }
@@ -62,6 +55,8 @@ export class NanoAdapter implements AiProvider {
                 code: "ACE_IMAGE_URL_TO_BASE64_FAILED",
                 status: 422,
                 message: "参考图片处理失败：无法将图片 URL 转为 Base64。请检查参考图链接是否可公网访问、未过期且返回的是图片内容。",
+                provider: "ace",
+                transient: false,
             });
         }
         if (lower.includes("failed to process generated image") && lower.includes("no content available")) {
@@ -69,12 +64,25 @@ export class NanoAdapter implements AiProvider {
                 code: "ACE_GENERATED_IMAGE_EMPTY",
                 status: 502,
                 message: "生成失败：上游返回的图片内容为空。请稍后重试；若持续出现，可更换参考图或降低分辨率/质量后再试。",
+                provider: "ace",
+                transient: true,
+            });
+        }
+        if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("network")) {
+            return new ProviderError({
+                code: "ACE_TRANSIENT_NETWORK",
+                status: 504,
+                message: `Ace 网络波动或超时: ${m || "未知错误"}`,
+                provider: "ace",
+                transient: true,
             });
         }
         return new ProviderError({
             code: "ACE_TASK_FAILED",
             status: 502,
             message: `Ace 任务失败: ${m || "未知错误"}`,
+            provider: "ace",
+            transient: false,
         });
     }
 
@@ -253,7 +261,17 @@ export class NanoAdapter implements AiProvider {
                     return { taskId: taskIdFromError };
                 }
                 const msg = this.formatAceErrorMessage(data, error.message);
-                // 统一按上游失败映射为 ProviderError，带上清晰的 message/status
+                // 429/5xx 优先标记为可恢复，服务层可决定重试或切换 AnyFast
+                if (typeof status === "number" && (status === 429 || status >= 500)) {
+                    throw new ProviderError({
+                        code: status === 429 ? "ACE_RATE_LIMITED" : "ACE_UPSTREAM_5XX",
+                        status,
+                        message: `Ace 上游暂时不可用: ${msg}`,
+                        provider: "ace",
+                        transient: true,
+                    });
+                }
+                // 其它错误统一映射（多数为请求本身问题）
                 throw this.mapAceFailureToProviderError(msg);
             }
             throw error;
@@ -280,7 +298,13 @@ export class NanoAdapter implements AiProvider {
         while (true) {
             const elapsed = Date.now() - start;
             if (elapsed > maxWaitMs) {
-                throw new Error("Ace 任务超时（超过10分钟未完成）");
+                throw new ProviderError({
+                    code: "ACE_TASK_TIMEOUT",
+                    status: 504,
+                    message: "Ace 任务超时（超过10分钟未完成）",
+                    provider: "ace",
+                    transient: true,
+                });
             }
 
             let data: any;
@@ -353,7 +377,13 @@ export class NanoAdapter implements AiProvider {
                         }
                         if (!data) {
                             const msg = this.formatAceErrorMessage(respData, error.message);
-                            throw new Error(`轮询 Ace 任务失败 (${status ?? "未知状态"}): ${msg}`);
+                            throw new ProviderError({
+                                code: "ACE_TASK_POLL_FAILED",
+                                status: status ?? 502,
+                                message: `轮询 Ace 任务失败 (${status ?? "未知状态"}): ${msg}`,
+                                provider: "ace",
+                                transient: typeof status === "number" && status >= 500,
+                            });
                         }
                     } else {
                         console.error("[NanoAdapter] 轮询 Ace 任务请求失败", {
@@ -363,7 +393,13 @@ export class NanoAdapter implements AiProvider {
                             message: error.message,
                         });
                         const msg = this.formatAceErrorMessage(respData, error.message);
-                        throw new Error(`轮询 Ace 任务失败 (${status ?? "未知状态"}): ${msg}`);
+                        throw new ProviderError({
+                            code: "ACE_TASK_POLL_FAILED",
+                            status: status ?? 502,
+                            message: `轮询 Ace 任务失败 (${status ?? "未知状态"}): ${msg}`,
+                            provider: "ace",
+                            transient: (status === 429) || (typeof status === "number" && status >= 500),
+                        });
                     }
                 }
                 throw error;
