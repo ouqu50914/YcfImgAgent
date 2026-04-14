@@ -5,6 +5,7 @@ import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
 import { AnyfastNanoAdapter } from "../adapters/anyfast-nano.adapter";
+import { MidjourneyAdapter } from "../adapters/midjourney.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
 import { CreditService, type CreditLogInfo } from "./credit.service";
 import { ProviderError } from "../adapters/provider-error";
@@ -34,7 +35,8 @@ export class ImageService {
 
     private adapters = {
         'dream': new DreamAdapter(),
-        'nano': new NanoAdapter()
+        'nano': new NanoAdapter(),
+        'midjourney': new MidjourneyAdapter(),
     };
     private nanoProviderAdapters = {
         ace: new NanoAdapter(),
@@ -59,7 +61,7 @@ export class ImageService {
         }
     }
 
-    async generate(userId: number, apiType: 'dream' | 'nano', params: GenerateParams) {
+    async generate(userId: number, apiType: 'dream' | 'nano' | 'midjourney', params: GenerateParams) {
         // 1. 获取API配置
         const config = await this.configRepo.findOneBy({ api_type: apiType });
         if (!config || config.status === 0) {
@@ -156,7 +158,7 @@ export class ImageService {
     }
 
     private async generateByPolicy(
-        apiType: "dream" | "nano",
+        apiType: "dream" | "nano" | "midjourney",
         params: GenerateParams,
         apiKey: string,
         apiUrl: string,
@@ -641,7 +643,7 @@ export class ImageService {
     /**
      * 生图功能也支持自动降级
      */
-    async generateWithFallback(userId: number, apiType: 'dream' | 'nano', params: GenerateParams, enableFallback: boolean = true): Promise<ImageResult> {
+    async generateWithFallback(userId: number, apiType: 'dream' | 'nano' | 'midjourney', params: GenerateParams, enableFallback: boolean = true): Promise<ImageResult> {
         const config = await this.configRepo.findOneBy({ api_type: apiType });
         if (!config || config.status === 0) {
             if (enableFallback) {

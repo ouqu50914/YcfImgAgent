@@ -14,6 +14,7 @@
                     <div class="param-label">模型</div>
                     <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
                         <el-option label="Seedream" value="dream" />
+                        <el-option label="Midjourney" value="midjourney" />
                         <el-option label="Nano Banana 2" value="nano:nano-banana-2" />
                         <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
                         <el-option
@@ -182,6 +183,29 @@ const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 
+const extractTextFromPromptDoc = (node: unknown): string => {
+    if (!node || typeof node !== 'object') return '';
+    const n = node as { type?: unknown; text?: unknown; content?: unknown };
+    if (typeof n.type === 'string' && n.type === 'text' && typeof n.text === 'string') {
+        return n.text;
+    }
+    if (!Array.isArray(n.content)) return '';
+    const parts: string[] = [];
+    for (const child of n.content) {
+        const t = extractTextFromPromptDoc(child);
+        if (t) parts.push(t);
+    }
+    return parts.join('\n');
+};
+
+const getPromptTextFromNodeData = (data: unknown): string => {
+    if (!data || typeof data !== 'object') return '';
+    const d = data as { text?: unknown; promptDoc?: unknown };
+    if (typeof d.text === 'string' && d.text.trim()) return d.text.trim();
+    const fromDoc = extractTextFromPromptDoc(d.promptDoc).trim();
+    return fromDoc;
+};
+
 // 积分：普通用户需要校验
 const executeCost = computed(() => {
     const q = apiType.value === 'nano' && !quality.value ? '2K' : quality.value;
@@ -198,6 +222,9 @@ const executeButtonText = computed(() => {
 
 // 统一的模型选择：dream 或 nano 子模型（nano-banana-2 / nano-banana-pro）
 const initialSelectedModel = (() => {
+    if (props.data?.apiType === 'midjourney') {
+        return 'midjourney';
+    }
     if (props.data?.apiType === 'nano') {
         const m = (props.data as any).model as string | undefined;
         if (m === 'gemini-2.5-flash-image') return 'anyfast:gemini-2.5-flash-image';
@@ -216,7 +243,8 @@ const aspectRatio = ref<string>((props.data as any)?.aspectRatio || '1:1'); // �
 const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number' ? (props.data as any).numImages : 1);
 
 // 计算属性：apiType 由 selectedModel 推导
-const apiType = computed<'dream' | 'nano'>(() => {
+const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
+    if (selectedModel.value === 'midjourney') return 'midjourney';
     return selectedModel.value.startsWith('nano:') || selectedModel.value.startsWith('anyfast:') ? 'nano' : 'dream';
 });
 
@@ -284,7 +312,12 @@ const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): 
 // 监听模型切换，重置不兼容的选项，并同步到节点数据
 watch(selectedModel, (newModel) => {
     const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:');
+    const isMidjourney = newModel === 'midjourney';
     if (isNano) {
+        if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
+            quality.value = '2K';
+        }
+    } else if (isMidjourney) {
         if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
             quality.value = '2K';
         }
@@ -294,9 +327,9 @@ watch(selectedModel, (newModel) => {
         }
     }
     // 同步 apiType / model 到节点数据，方便自动保存与恢复
-    const api: 'dream' | 'nano' = isNano ? 'nano' : 'dream';
+    const api: 'dream' | 'nano' | 'midjourney' = isMidjourney ? 'midjourney' : (isNano ? 'nano' : 'dream');
     (props.data as any).apiType = api;
-    (props.data as any).model = isNano ? newModel.split(':')[1] : undefined;
+    (props.data as any).model = isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined);
     (props.data as any).providerHint = isNano ? providerHint.value : undefined;
 }, { immediate: true });
 
@@ -349,7 +382,7 @@ const upstreamIntoDreamSig = computed(() => {
             continue;
         }
         if (n.type === 'prompt') {
-            parts.push(`p:${String((n.data as { text?: string })?.text ?? '')}`);
+            parts.push(`p:${getPromptTextFromNodeData(n.data)}`);
         } else if (n.type === 'image') {
             const d = n.data as { imageUrl?: string; isLoading?: boolean; status?: string };
             parts.push(`i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}`);
@@ -366,8 +399,8 @@ function readConnectedPromptFromEdges(): string {
     for (const e of getEdges.value) {
         if (e.target !== props.id) continue;
         const n = nodes.find((x) => x.id === e.source);
-        if (n?.type !== 'prompt' || typeof n.data?.text !== 'string') continue;
-        const t = n.data.text;
+        if (n?.type !== 'prompt') continue;
+        const t = getPromptTextFromNodeData(n.data);
         if (t.length > 0 && !prompt) prompt = t;
     }
     return prompt;
@@ -635,6 +668,14 @@ const handleGenerate = async () => {
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
             console.log(`[前端] Nano/AnyFast 模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+        } else if (apiType.value === 'midjourney') {
+            requestParams.mode = 'fast';
+            requestParams.translation = true;
+            requestParams.timeout = 120;
+            requestParams.splitImages = true;
+            requestParams.mjAction = 'generate';
+            requestParams.model = 'midjourney';
+            console.log('[前端] Midjourney 模式: mode=fast, translation=true, splitImages=true');
         }
         
         console.log('发送生图请求，参数:', requestParams);

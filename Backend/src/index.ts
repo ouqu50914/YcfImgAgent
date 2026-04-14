@@ -7,6 +7,7 @@ import { DataSource } from "typeorm";
 import path from "path";
 
 import { AppDataSource } from "./data-source";
+import { ApiConfig } from "./entities/ApiConfig";
 import { WorkflowService } from "./services/workflow.service";
 import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
@@ -136,10 +137,52 @@ function startExpiredTemplatesJob() {
     setInterval(run, 24 * 60 * 60 * 1000);
 }
 
+/**
+ * 运行时兜底：确保核心 API 配置记录存在。
+ * 仅在记录缺失时插入占位配置，不覆盖管理员已配置的真实值。
+ */
+async function ensureApiConfigRecords() {
+    const repo = AppDataSource.getRepository(ApiConfig);
+    const defaults: Array<Pick<ApiConfig, "api_type" | "api_url" | "api_key" | "status" | "user_daily_limit" | "used_quota">> = [
+        {
+            api_type: "dream",
+            api_url: process.env.DREAM_API_URL || "https://api.dream-ai.com/v1/generate",
+            api_key: process.env.DREAM_API_KEY || "sk-dream-placeholder",
+            status: 1,
+            user_daily_limit: 20,
+            used_quota: 0,
+        },
+        {
+            api_type: "nano",
+            api_url: process.env.NANO_API_URL || "https://api.nano-ai.com/v1/image",
+            api_key: process.env.NANO_API_KEY || "sk-nano-placeholder",
+            status: 1,
+            user_daily_limit: 20,
+            used_quota: 0,
+        },
+        {
+            api_type: "midjourney",
+            api_url: process.env.MIDJOURNEY_API_URL || "https://api.midjourney.com/v1",
+            api_key: process.env.MIDJOURNEY_API_KEY || "sk-midjourney-placeholder",
+            status: 1,
+            user_daily_limit: 20,
+            used_quota: 0,
+        },
+    ];
+
+    for (const item of defaults) {
+        const exists = await repo.findOneBy({ api_type: item.api_type });
+        if (exists) continue;
+        await repo.save(repo.create(item));
+        console.log(`[bootstrap] 已自动补齐 API 配置: ${item.api_type}`);
+    }
+}
+
 // 启动服务
 AppDataSource.initialize()
-    .then(() => {
+    .then(async () => {
         console.log("✅ Data Source has been initialized!");
+        await ensureApiConfigRecords();
         startExpiredTemplatesJob();
         const port = process.env.PORT || 3000;
         app.listen(port, () => {

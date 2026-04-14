@@ -1,7 +1,7 @@
 import request from '@/utils/request.ts';
 
 export interface GenerateParams {
-    apiType: 'dream' | 'nano';
+    apiType: 'dream' | 'nano' | 'midjourney';
     prompt: string;
     /** 工作流项目 ID */
     templateId?: number;
@@ -15,19 +15,27 @@ export interface GenerateParams {
     imageUrl?: string; // 单图生图时使用的参考图片URL
     imageUrls?: string[]; // 多图生图时使用的参考图片URL数组
     quality?: string; // 画质：1K、2K、4K（豆包API方式1）
-    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview' | 'midjourney';
     providerHint?: 'ace' | 'anyfast';
+    mode?: 'fast' | 'relax' | 'turbo';
+    timeout?: number;
+    translation?: boolean;
+    splitImages?: boolean;
+    mjAction?: string;
+    imageId?: string;
+    callbackUrl?: string;
+    taskId?: string;
 }
 
 export interface UpscaleParams {
-    apiType: 'dream' | 'nano';
+    apiType: 'dream' | 'nano' | 'midjourney';
     imageUrl: string;
     scale?: number; // 2 或 4
     templateId?: number;
 }
 
 export interface ExtendParams {
-    apiType: 'dream' | 'nano';
+    apiType: 'dream' | 'nano' | 'midjourney';
     imageUrl: string;
     templateId?: number;
     direction: 'top' | 'bottom' | 'left' | 'right' | 'all';
@@ -38,7 +46,7 @@ export interface ExtendParams {
 }
 
 export interface SplitParams {
-    apiType: 'dream' | 'nano';
+    apiType: 'dream' | 'nano' | 'midjourney';
     imageUrl: string;
     templateId?: number;
     splitCount: number;

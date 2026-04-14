@@ -6,7 +6,7 @@ export type CreditOperation = 'generate' | 'upscale' | 'extend' | 'split' | 'lay
 
 export interface CreditLogInfo {
     operationType: CreditOperation;
-    apiType: 'dream' | 'nano';
+    apiType: 'dream' | 'nano' | 'midjourney';
 }
 
 /**
@@ -21,13 +21,17 @@ export class CreditService {
      * 计算本次操作所需积分
      */
     calcCost(
-        apiType: 'dream' | 'nano',
+        apiType: 'dream' | 'nano' | 'midjourney',
         operation: CreditOperation,
         options?: { quality?: string; imageCount?: number }
     ): number {
         const count = options?.imageCount ?? 1;
 
         if (apiType === 'nano') {
+            return 6 * count;
+        }
+        if (apiType === 'midjourney') {
+            // 先与 Nano 保持同档成本，后续可按 mode/version 独立细分
             return 6 * count;
         }
 

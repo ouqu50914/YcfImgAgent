@@ -7,13 +7,16 @@
 export type CreditOperation = 'generate' | 'upscale' | 'extend' | 'split' | 'layer_split';
 
 export function getCreditCost(
-  apiType: 'dream' | 'nano',
+  apiType: 'dream' | 'nano' | 'midjourney',
   operation: CreditOperation,
   options?: { quality?: string; imageCount?: number }
 ): number {
   const count = options?.imageCount ?? 1;
 
   if (apiType === 'nano') {
+    return 6 * count;
+  }
+  if (apiType === 'midjourney') {
     return 6 * count;
   }
 
