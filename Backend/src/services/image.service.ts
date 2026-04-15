@@ -27,8 +27,8 @@ export class ImageService {
 
     private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "ace") as "ace" | "anyfast";
     private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "anyfast") as "ace" | "anyfast";
-    private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "2"));
-    private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY !== "false";
+    private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "1"));
+    private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY === "true";
     private readonly anyfastCircuitFailureThreshold = Math.max(1, Number(process.env.NANO_ANYFAST_CIRCUIT_FAILURE_THRESHOLD || "3"));
     private readonly anyfastCircuitOpenMs = Math.max(1000, Number(process.env.NANO_ANYFAST_CIRCUIT_OPEN_MS || "60000"));
 
@@ -183,8 +183,7 @@ export class ImageService {
         const requestSeq = ++ImageService.nanoPolicyRequestSeq;
         const requestedAnyfastDirect =
             params.providerHint === "anyfast" ||
-            params.model === "gemini-2.5-flash-image" ||
-            params.model === "gemini-3-pro-image-preview";
+            params.model === "gemini-3.1-flash-image-preview";
         const normalizedUserId = Number(userId);
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;

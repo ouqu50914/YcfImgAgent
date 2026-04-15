@@ -18,13 +18,8 @@
                         <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
                         <el-option
                             v-if="userStore.userInfo?.role === 1"
-                            label="AnyFast Gemini 2.5 Flash Image"
-                            value="anyfast:gemini-2.5-flash-image"
-                        />
-                        <el-option
-                            v-if="userStore.userInfo?.role === 1"
-                            label="AnyFast Gemini 3 Pro Image Preview"
-                            value="anyfast:gemini-3-pro-image-preview"
+                            label="AnyFast Gemini 3.1 Flash Image Preview"
+                            value="anyfast:gemini-3.1-flash-image-preview"
                         />
                     </el-select>
                 </div>
@@ -182,6 +177,31 @@ const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 
+const logFirstImageLoadTiming = (imageUrl: string, traceId: string, requestStartMs: number) => {
+    if (!imageUrl) return;
+    const loadStart = performance.now();
+    const img = new Image();
+    img.onload = () => {
+        const loadElapsed = performance.now() - loadStart;
+        const endToEndElapsed = performance.now() - requestStartMs;
+        console.log("[DreamNode][Timing] 首图加载完成", {
+            trace_id: traceId,
+            image_url: imageUrl,
+            image_load_ms: Number(loadElapsed.toFixed(1)),
+            end_to_end_ms: Number(endToEndElapsed.toFixed(1)),
+        });
+    };
+    img.onerror = () => {
+        const loadElapsed = performance.now() - loadStart;
+        console.warn("[DreamNode][Timing] 首图加载失败", {
+            trace_id: traceId,
+            image_url: imageUrl,
+            image_load_ms: Number(loadElapsed.toFixed(1)),
+        });
+    };
+    img.src = imageUrl;
+};
+
 // 积分：普通用户需要校验
 const executeCost = computed(() => {
     const q = apiType.value === 'nano' && !quality.value ? '2K' : quality.value;
@@ -200,8 +220,7 @@ const executeButtonText = computed(() => {
 const initialSelectedModel = (() => {
     if (props.data?.apiType === 'nano') {
         const m = (props.data as any).model as string | undefined;
-        if (m === 'gemini-2.5-flash-image') return 'anyfast:gemini-2.5-flash-image';
-        if (m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image-preview';
+        if (m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image-preview';
         if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
         if (m === 'nano-banana-2') return 'nano:nano-banana-2';
         // 默认使用 nano-banana-2
@@ -221,10 +240,10 @@ const apiType = computed<'dream' | 'nano'>(() => {
 });
 
 // 计算属性：从 selectedModel 中提取具体的 nano 模型
-const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview' | undefined>(() => {
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | undefined>(() => {
     if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
     const parts = selectedModel.value.split(':');
-    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview';
 });
 
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
@@ -550,6 +569,7 @@ const handleGenerate = async () => {
     }
     loading.value = true;
     let generationKey = '';
+    const requestStartMs = performance.now();
     try {
         // 1. 从连接读取数据（执行前再读一次，防止 watch 未触发的边界情况）
         const finalPrompt = readConnectedPromptFromEdges();
@@ -652,6 +672,11 @@ const handleGenerate = async () => {
         createPlaceholderImageNodes(expectedCount, generationKey);
 
         const res: any = await generateImage(requestParams);
+        console.log("[DreamNode][Timing] 接口返回", {
+            trace_id: generationKey || "unknown",
+            api_elapsed_ms: Number((performance.now() - requestStartMs).toFixed(1)),
+            has_data: !!res?.data,
+        });
         
         console.log('👉 后端原始返回:', res);
         // 后端返回格式: { message: "任务提交成功", data: { image_url: "...", all_images: [...] } }
@@ -665,6 +690,9 @@ const handleGenerate = async () => {
                 
                 imageUrls.value = fullUrls;
                 imageUrl.value = fullUrls[0]; // 第一张作为主图
+                if (fullUrls[0]) {
+                    logFirstImageLoadTiming(fullUrls[0], generationKey || "unknown", requestStartMs);
+                }
                 
                 // 更新节点数据，供下游节点使用
                 props.data.imageUrl = res.data.image_url || allImages[0];
@@ -706,6 +734,7 @@ const handleGenerate = async () => {
                     : getUploadUrl(res.data.image_url);
                 imageUrl.value = url;
                 imageUrls.value = [url];
+                logFirstImageLoadTiming(url, generationKey || "unknown", requestStartMs);
                 props.data.imageUrl = res.data.image_url;
                 console.log('👉 完整图片URL:', url);
                 ElMessage.success('图片生成成功！');

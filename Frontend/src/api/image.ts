@@ -15,7 +15,7 @@ export interface GenerateParams {
     imageUrl?: string; // 单图生图时使用的参考图片URL
     imageUrls?: string[]; // 多图生图时使用的参考图片URL数组
     quality?: string; // 画质：1K、2K、4K（豆包API方式1）
-    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-2.5-flash-image' | 'gemini-3-pro-image-preview';
+    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview';
     providerHint?: 'ace' | 'anyfast';
 }
 
