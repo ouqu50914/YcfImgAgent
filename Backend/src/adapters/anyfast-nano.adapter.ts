@@ -10,7 +10,7 @@ import { ProviderError } from "./provider-error";
 const axiosClient = axios.create({ proxy: false });
 const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || String(10 * 60 * 1000));
 const ANYFAST_BASE_URL = (process.env.ANYFAST_BASE_URL || "https://www.anyfast.ai").replace(/\/$/, "");
-const ANYFAST_DEFAULT_MODEL = process.env.ANYFAST_NANO_DEFAULT_MODEL || "gemini-2.5-flash-image";
+const ANYFAST_DEFAULT_MODEL = "gemini-3.1-flash-image-preview";
 const ANYFAST_MAX_RETRIES = Math.max(0, Number(process.env.ANYFAST_MAX_RETRIES || "2"));
 const ANYFAST_RETRY_BASE_DELAY_MS = Math.max(100, Number(process.env.ANYFAST_RETRY_BASE_DELAY_MS || "600"));
 
@@ -34,10 +34,8 @@ export class AnyfastNanoAdapter implements AiProvider {
         return false;
     }
 
-    private resolveModel(model?: string): string {
-        if (model === "gemini-2.5-flash-image" || model === "gemini-3-pro-image-preview") {
-            return model;
-        }
+    private resolveModel(_model?: string): string {
+        // 统一固定走 Gemini 3.1 Flash Image Preview，避免 2.5 / 3.0 路径混用。
         return ANYFAST_DEFAULT_MODEL;
     }
 
@@ -159,6 +157,7 @@ export class AnyfastNanoAdapter implements AiProvider {
         const key = this.getApiKey(apiKey);
 
         const requestOnce = async (): Promise<string> => {
+            const startedAt = Date.now();
             const parts: Array<Record<string, unknown>> = [{ text: params.prompt || "生成图片" }];
             const refs = params.imageUrls && params.imageUrls.length > 0
                 ? params.imageUrls
@@ -256,6 +255,7 @@ export class AnyfastNanoAdapter implements AiProvider {
                 console.log("[AnyfastNanoAdapter] 最终返回", {
                     image_count: 1,
                     first_image: savedPath,
+                    elapsed_ms: Date.now() - startedAt,
                 });
                 return savedPath;
             } catch (error: any) {

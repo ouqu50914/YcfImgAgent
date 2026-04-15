@@ -50,6 +50,22 @@ export class NanoAdapter implements AiProvider {
     private mapAceFailureToProviderError(rawMessage: string): ProviderError {
         const m = (rawMessage || "").trim();
         const lower = m.toLowerCase();
+        if (
+            lower.includes("queue being full") ||
+            lower.includes("task queue is full") ||
+            (lower.includes("queue") && lower.includes("full")) ||
+            lower.includes("try again later") ||
+            lower.includes("temporarily unavailable") ||
+            lower.includes("service unavailable")
+        ) {
+            return new ProviderError({
+                code: "ACE_UPSTREAM_BUSY",
+                status: 503,
+                message: `Ace 上游暂时不可用: ${m || "队列繁忙，请稍后重试"}`,
+                provider: "ace",
+                transient: true,
+            });
+        }
         if (lower.includes("failed to process image urls to base64")) {
             return new ProviderError({
                 code: "ACE_IMAGE_URL_TO_BASE64_FAILED",
