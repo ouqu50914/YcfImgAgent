@@ -531,9 +531,12 @@ const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'succ
             props.data.imageUrls = allImages;
             isExecuted.value = true;
 
+            const placeholderCountBeforeFill = pendingImageNodeIds.value.length;
             const filled = fillPlaceholderImageNodes(fullUrls, allImages);
             if (!filled && fullUrls.length > 0) {
                 createImageNodes(fullUrls, allImages);
+            } else {
+                appendExtraImageNodesIfNeeded(fullUrls, allImages, placeholderCountBeforeFill);
             }
             markPendingPlaceholdersAsError();
             saveWorkflowImmediately();
@@ -675,7 +678,9 @@ const handleGenerate = async () => {
             requestParams.splitImages = true;
             requestParams.mjAction = 'generate';
             requestParams.model = 'midjourney';
-            console.log('[前端] Midjourney 模式: mode=fast, translation=true, splitImages=true');
+            requestParams.aspectRatio = aspectRatio.value;
+            if (quality.value) requestParams.quality = quality.value;
+            console.log(`[前端] Midjourney 模式: mode=fast, translation=true, splitImages=true, 比例=${aspectRatio.value}, 分辨率=${quality.value}`);
         }
         
         console.log('发送生图请求，参数:', requestParams);
@@ -719,9 +724,12 @@ const handleGenerate = async () => {
                 // 标记节点为已执行（下次显示“再次执行”）
                 isExecuted.value = true;
                 
-                // 用真实图片填充占位节点；若不存在占位，则按老逻辑创建新节点
+                // 用真实图片填充占位节点；若返回数量超过占位数量，补建额外节点。
+                const placeholderCountBeforeFill = pendingImageNodeIds.value.length;
                 if (!fillPlaceholderImageNodes(fullUrls, allImages) && fullUrls.length > 0 && currentNode.value) {
                     createImageNodes(fullUrls, allImages);
+                } else {
+                    appendExtraImageNodesIfNeeded(fullUrls, allImages, placeholderCountBeforeFill);
                 }
                 // 若存在“部分成功”，将未回填占位落为失败态，避免节点一直显示生成中
                 const failedCount = markPendingPlaceholdersAsError();
@@ -1018,9 +1026,12 @@ const reconcilePendingImagePlaceholders = async () => {
                 isExecuted.value = true;
 
                 pendingImageNodeIds.value = ids;
+                const placeholderCountBeforeFill = pendingImageNodeIds.value.length;
                 const filled = fillPlaceholderImageNodes(fullUrls, allImages);
                 if (!filled && fullUrls.length > 0) {
                     createImageNodes(fullUrls, allImages);
+                } else {
+                    appendExtraImageNodesIfNeeded(fullUrls, allImages, placeholderCountBeforeFill);
                 }
 
                 markPendingPlaceholdersAsError();
@@ -1043,9 +1054,12 @@ const reconcilePendingImagePlaceholders = async () => {
                 isExecuted.value = true;
 
                 pendingImageNodeIds.value = ids;
+                const placeholderCountBeforeFill = pendingImageNodeIds.value.length;
                 const filled = fillPlaceholderImageNodes(fullUrls, allImages);
                 if (!filled && fullUrls.length > 0) {
                     createImageNodes(fullUrls, allImages);
+                } else {
+                    appendExtraImageNodesIfNeeded(fullUrls, allImages, placeholderCountBeforeFill);
                 }
 
                 markPendingPlaceholdersAsError();
@@ -1134,6 +1148,16 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
     pendingImageNodeIds.value = ids.filter(id => !filledIdSet.has(id));
     saveWorkflowImmediately();
     return fillCount > 0;
+};
+
+// 返回图片数量超过占位节点时，补建剩余图片节点，避免仅显示前几张。
+const appendExtraImageNodesIfNeeded = (fullUrls: string[], originalUrls: string[], filledPlaceholderCount: number) => {
+    if (!currentNode.value) return;
+    if (fullUrls.length <= filledPlaceholderCount) return;
+    const extraFullUrls = fullUrls.slice(filledPlaceholderCount);
+    const extraOriginalUrls = originalUrls.slice(filledPlaceholderCount);
+    if (!extraFullUrls.length) return;
+    createImageNodes(extraFullUrls, extraOriginalUrls);
 };
 
 const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);

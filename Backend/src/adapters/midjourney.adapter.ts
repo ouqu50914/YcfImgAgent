@@ -25,6 +25,70 @@ type MidjourneyResponse = {
 };
 
 export class MidjourneyAdapter implements AiProvider {
+    private logMidjourneyRequest(stage: string, payload: Record<string, unknown>) {
+        try {
+            console.info(`[MidjourneyAdapter] ${stage}`, payload);
+        } catch {
+            // ignore logging serialization issues
+        }
+    }
+
+    private resolvePromptAndReferences(
+        prompt: string,
+        imageInputs: string[],
+        imageAliases?: number[]
+    ): { prompt: string; imageUrls: string[]; aliasMapText: string } {
+        const basePrompt = (prompt || "A beautiful scene").trim();
+        if (imageInputs.length === 0) return { prompt: basePrompt, imageUrls: [], aliasMapText: "" };
+
+        // 以 imageAliases 为优先映射；缺失时按顺序映射为 图1、图2...
+        const aliasToUrl = new Map<number, string>();
+        const aliasPairs: Array<{ alias: number; url: string }> = [];
+        for (let i = 0; i < imageInputs.length; i++) {
+            const alias = Array.isArray(imageAliases) && typeof imageAliases[i] === "number" && imageAliases[i]! > 0
+                ? Number(imageAliases[i])
+                : i + 1;
+            const url = imageInputs[i]!;
+            aliasToUrl.set(alias, url);
+            // 同时注册顺序别名，避免前端未传 imageAliases 时 @图N 无法命中。
+            aliasToUrl.set(i + 1, url);
+            aliasPairs.push({ alias, url });
+        }
+
+        const aliasHits: string[] = [];
+        // Midjourney 不识别 @图N 语法，这里替换成真实 URL，并记录命中的别名顺序。
+        const promptResolved = basePrompt.replace(/@图(\d+)/g, (_m, n) => {
+            const aliasNum = Number(n);
+            const mapped = aliasToUrl.get(aliasNum) || (imageInputs.length === 1 ? imageInputs[0] : undefined);
+            if (mapped) {
+                aliasHits.push(mapped);
+                return `${mapped} `;
+            }
+            return "";
+        });
+        const hasAliasInPrompt = /@图\d+/.test(basePrompt);
+        const orderedImageUrls = hasAliasInPrompt
+            ? Array.from(new Set([...aliasHits, ...imageInputs]))
+            : Array.from(new Set(imageInputs));
+        const cleanedPrompt = promptResolved.replace(/\s+/g, " ").trim();
+        const aliasMapText = aliasPairs
+            .map((pair) => `图${pair.alias}=${pair.url}`)
+            .join(" ");
+        // 参考图 URL 统一放在前面，后面追加别名映射，便于排查与复现。
+        const finalPrompt = `${orderedImageUrls.join(" ")} ${cleanedPrompt || basePrompt} ${aliasMapText}`.trim();
+        return { prompt: finalPrompt, imageUrls: orderedImageUrls, aliasMapText };
+    }
+
+    private resolveMidjourneyQuality(raw?: string): string | undefined {
+        if (!raw || !raw.trim()) return undefined;
+        const v = raw.trim().toUpperCase();
+        if (v === "1K" || v === "1") return "1";
+        if (v === "2K" || v === "2") return "2";
+        if (v === "4K" || v === "4") return "4";
+        if (/^(?:0?\.25|0?\.5|1|2|4)$/.test(raw.trim())) return raw.trim().replace(/^0\./, ".");
+        return undefined;
+    }
+
     private getBaseUrl(apiUrl?: string): string {
         const fromEnv = process.env.ACE_API_URL?.trim();
         if (fromEnv) return fromEnv.replace(/\/$/, "");
@@ -56,36 +120,51 @@ export class MidjourneyAdapter implements AiProvider {
     }
 
     private extractImageUrls(data: any): string[] {
-        const urls: string[] = [];
-        const push = (u: unknown) => {
-            if (typeof u === "string" && u.trim()) urls.push(u.trim());
+        const splitUrls: string[] = [];
+        const normalUrls: string[] = [];
+        const pushSplit = (u: unknown) => {
+            if (typeof u === "string" && u.trim()) splitUrls.push(u.trim());
+        };
+        const pushNormal = (u: unknown) => {
+            if (typeof u === "string" && u.trim()) normalUrls.push(u.trim());
         };
 
-        push(data?.image_url);
-        push(data?.raw_image_url);
         if (Array.isArray(data?.sub_image_urls)) {
-            for (const u of data.sub_image_urls) push(u);
+            for (const u of data.sub_image_urls) pushSplit(u);
         }
-
         const response = data?.response;
-        push(response?.image_url);
-        push(response?.raw_image_url);
         if (Array.isArray(response?.sub_image_urls)) {
-            for (const u of response.sub_image_urls) push(u);
+            for (const u of response.sub_image_urls) pushSplit(u);
         }
-
         if (Array.isArray(data?.items)) {
             for (const item of data.items) {
                 const r = item?.response || item;
-                push(r?.image_url);
-                push(r?.raw_image_url);
                 if (Array.isArray(r?.sub_image_urls)) {
-                    for (const u of r.sub_image_urls) push(u);
+                    for (const u of r.sub_image_urls) pushSplit(u);
                 }
             }
         }
 
-        return Array.from(new Set(urls));
+        // 优先使用拆分子图，避免 image_url/raw_image_url 造成“同图重复”。
+        const uniqueSplit = Array.from(new Set(splitUrls));
+        if (uniqueSplit.length > 0) return uniqueSplit;
+
+        pushNormal(data?.image_url);
+        pushNormal(data?.raw_image_url);
+        pushNormal(response?.image_url);
+        pushNormal(response?.raw_image_url);
+        if (Array.isArray(data?.items)) {
+            for (const item of data.items) {
+                const r = item?.response || item;
+                // 每个对象最多取一个主图 URL，避免一张图被 image_url/raw_image_url 重复计入。
+                const primary = (typeof r?.image_url === "string" && r.image_url.trim())
+                    ? r.image_url.trim()
+                    : (typeof r?.raw_image_url === "string" ? r.raw_image_url.trim() : "");
+                if (primary) pushNormal(primary);
+            }
+        }
+
+        return Array.from(new Set(normalUrls));
     }
 
     private normalizeErrorMessage(data: any, fallback: string): string {
@@ -194,12 +273,25 @@ export class MidjourneyAdapter implements AiProvider {
         apiUrl: string
     ): Promise<{ imageUrls?: string[]; taskId?: string }> {
         const endpoint = `${this.getBaseUrl(apiUrl)}/midjourney/imagine`;
+        this.logMidjourneyRequest("submitImagine.request", {
+            endpoint,
+            body,
+        });
         try {
             const res = await axiosClient.post(endpoint, body, {
                 headers: this.getHeaders(apiKey),
                 timeout: MJ_REQUEST_TIMEOUT_MS,
             });
             const data = res.data as MidjourneyResponse;
+            this.logMidjourneyRequest("submitImagine.response", {
+                task_id: data?.task_id,
+                success: data?.success,
+                image_url: data?.image_url,
+                raw_image_url: data?.raw_image_url,
+                sub_image_count: Array.isArray(data?.sub_image_urls) ? data.sub_image_urls.length : 0,
+                error: data?.error,
+                message: data?.message,
+            });
             const imageUrls = this.extractImageUrls(data);
             if (imageUrls.length > 0) return { imageUrls };
             if (typeof data?.task_id === "string" && data.task_id.trim()) return { taskId: data.task_id.trim() };
@@ -237,6 +329,18 @@ export class MidjourneyAdapter implements AiProvider {
                     }
                 );
                 const data = res.data;
+                this.logMidjourneyRequest("retrieveTask.response", {
+                    task_id: taskId,
+                    elapsed_ms: Date.now() - startedAt,
+                    success: data?.success,
+                    status: data?.status,
+                    image_url: data?.image_url,
+                    raw_image_url: data?.raw_image_url,
+                    sub_image_count: Array.isArray(data?.sub_image_urls) ? data.sub_image_urls.length : 0,
+                    items_count: Array.isArray(data?.items) ? data.items.length : 0,
+                    message: data?.message,
+                    error: data?.error,
+                });
                 const failedMessage = this.extractTaskFailureMessage(data);
                 if (failedMessage) {
                     throw new ProviderError({
@@ -312,40 +416,82 @@ export class MidjourneyAdapter implements AiProvider {
             : params.imageUrl
                 ? [params.imageUrl]
                 : [];
-
-        // Midjourney 参考图能力通过“在 prompt 前拼接 URL”触发。
-        const promptPrefix = imageInputs.length > 0 ? `${imageInputs.join(" ")} ` : "";
-        const body: Record<string, unknown> = {
-            prompt: `${promptPrefix}${params.prompt || "A beautiful scene"}`.trim(),
+        const count = Math.max(1, Math.min(params.num_images || (params as any).numImages || 1, 4));
+        const referenceResolved = this.resolvePromptAndReferences(
+            params.prompt || "A beautiful scene",
+            imageInputs,
+            params.imageAliases
+        );
+        const qualityToken = this.resolveMidjourneyQuality(params.quality);
+        const bodyBase: Record<string, unknown> = {
+            prompt: referenceResolved.prompt,
             action: params.mjAction || "generate",
             mode: params.mode || "fast",
+            version: "8",
         };
         if (typeof params.timeout === "number" && Number.isFinite(params.timeout) && params.timeout > 0) {
-            body.timeout = params.timeout;
+            bodyBase.timeout = params.timeout;
         }
-        if (typeof params.translation === "boolean") body.translation = params.translation;
-        if (typeof params.splitImages === "boolean") body.split_images = params.splitImages;
-        if (typeof params.imageId === "string" && params.imageId.trim()) body.image_id = params.imageId.trim();
-        if (typeof params.callbackUrl === "string" && params.callbackUrl.trim()) body.callback_url = params.callbackUrl.trim();
-
-        const submitResult = await this.submitImagine(body, apiKey, apiUrl);
-        let urls = submitResult.imageUrls || [];
-        if (urls.length === 0) {
-            const taskId = submitResult.taskId || params.taskId;
-            if (!taskId) {
-                throw new ProviderError({
-                    code: "ACE_MJ_TASK_ID_MISSING",
-                    status: 502,
-                    message: "Midjourney 返回无任务 ID，无法进入任务查询兜底。",
-                    provider: "ace",
-                    transient: true,
-                });
+        if (typeof params.translation === "boolean") bodyBase.translation = params.translation;
+        const splitEnabled = typeof params.splitImages === "boolean" ? params.splitImages : true;
+        // 兼容不同网关参数命名：split_images / split_image
+        bodyBase.split_images = splitEnabled;
+        bodyBase.split_image = splitEnabled;
+        if (referenceResolved.imageUrls.length > 0) {
+            // 兼容部分 Midjourney 网关：参考图走 image_urls 字段。
+            bodyBase.image_urls = referenceResolved.imageUrls;
+        }
+        if (typeof params.aspectRatio === "string" && params.aspectRatio.trim()) {
+            const ar = params.aspectRatio.trim();
+            // 兼容网关字段 + Midjourney prompt 参数 --ar。
+            bodyBase.aspect_ratio = ar;
+            bodyBase.ar = ar;
+            if (typeof bodyBase.prompt === "string" && !/\s--(?:ar|aspect)\s+\d+:\d+/i.test(bodyBase.prompt)) {
+                bodyBase.prompt = `${bodyBase.prompt} --ar ${ar}`.trim();
             }
-            urls = await this.retrieveTask(taskId, apiKey, apiUrl);
+        }
+        if (typeof bodyBase.prompt === "string" && !/\s--version\s+\S+/i.test(bodyBase.prompt)) {
+            bodyBase.prompt = `${bodyBase.prompt} --version 7`.trim();
+        }
+        if (qualityToken) {
+            bodyBase.quality = qualityToken;
+            // 同时将 --quality 写入 prompt，便于和官方机器人展示一致。
+            if (typeof bodyBase.prompt === "string" && !/\s--quality\s+\S+/i.test(bodyBase.prompt)) {
+                bodyBase.prompt = `${bodyBase.prompt} --quality ${qualityToken}`.trim();
+            }
+        }
+        if (typeof params.imageId === "string" && params.imageId.trim()) bodyBase.image_id = params.imageId.trim();
+        if (typeof params.callbackUrl === "string" && params.callbackUrl.trim()) bodyBase.callback_url = params.callbackUrl.trim();
+
+        const generatedUrls: string[] = [];
+        let lastTaskId = "";
+        for (let i = 0; i < count; i++) {
+            const submitResult = await this.submitImagine({ ...bodyBase }, apiKey, apiUrl);
+            let urls = submitResult.imageUrls || [];
+            if (urls.length === 0) {
+                const taskId = submitResult.taskId || params.taskId;
+                if (!taskId) {
+                    throw new ProviderError({
+                        code: "ACE_MJ_TASK_ID_MISSING",
+                        status: 502,
+                        message: "Midjourney 返回无任务 ID，无法进入任务查询兜底。",
+                        provider: "ace",
+                        transient: true,
+                    });
+                }
+                lastTaskId = taskId;
+                urls = await this.retrieveTask(taskId, apiKey, apiUrl);
+            } else if (submitResult.taskId) {
+                lastTaskId = submitResult.taskId;
+            }
+
+            // count > 1 时每次只取 1 张，确保“生成数量 N”得到 N 张而不是 N * 4 张。
+            const picked = count > 1 ? urls.slice(0, 1) : urls;
+            generatedUrls.push(...picked);
         }
 
         const images: string[] = [];
-        for (const url of urls) {
+        for (const url of generatedUrls) {
             if (!url.startsWith("http") || ACE_RETURN_REMOTE_URL) {
                 images.push(url);
             } else {
@@ -353,7 +499,6 @@ export class MidjourneyAdapter implements AiProvider {
                     images.push(await this.downloadAndSaveImage(url));
                 } catch (error: any) {
                     const status = error?.response?.status;
-                    // Midjourney CDN 常被 Cloudflare challenge 拦截（403），此时保留远程 URL，避免整单失败。
                     if (status === 403) {
                         console.warn("[MidjourneyAdapter] 下载图片被上游拒绝，回退为远程 URL", {
                             status,
@@ -368,7 +513,7 @@ export class MidjourneyAdapter implements AiProvider {
         }
 
         return {
-            original_id: submitResult.taskId || `midjourney_${Date.now()}`,
+            original_id: lastTaskId || `midjourney_${Date.now()}`,
             images,
         };
     }
