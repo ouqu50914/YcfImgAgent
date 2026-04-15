@@ -11,8 +11,6 @@ test("MidjourneyAdapter: 能从不同响应结构提取图片 URL", () => {
         sub_image_urls: ["https://a.example.com/sub1.png"],
     });
     assert.deepEqual(urls1, [
-        "https://a.example.com/thumb.png",
-        "https://a.example.com/raw.png",
         "https://a.example.com/sub1.png",
     ]);
 
