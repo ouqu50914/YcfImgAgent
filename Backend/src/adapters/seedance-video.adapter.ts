@@ -29,7 +29,7 @@ export interface SeedanceCreateVideoPayload {
     generate_audio?: boolean;
     ratio?: "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "21:9" | "adaptive" | string;
     duration?: number; // 4-15 或 -1
-    resolution?: "480p" | "720p" | string;
+    resolution?: "480p" | "720p" | "1080p" | string;
     watermark?: boolean;
     tools?: Array<{ type: "web_search" | string }>;
 }

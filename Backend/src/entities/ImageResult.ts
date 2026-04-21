@@ -29,6 +29,15 @@ export class ImageResult {
     @Column({ type: 'longtext', nullable: true, comment: '多图生成结果（JSON 数组）' })
     all_images!: string;
 
+    @Column({ type: 'longtext', nullable: true, comment: '上游原始结果（JSON 数组），用于首屏快速回显' })
+    upstream_images!: string | null;
+
+    @Column({ type: 'varchar', length: 20, default: 'pending', comment: '图片转存同步状态：pending/syncing/synced/failed' })
+    sync_status!: string;
+
+    @Column({ type: 'text', nullable: true, comment: '图片转存失败原因' })
+    sync_error!: string | null;
+
     @Column({ type: 'tinyint', default: 0, comment: '0-进行中 1-成功 2-失败' })
     status!: number;
 

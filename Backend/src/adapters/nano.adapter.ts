@@ -8,11 +8,19 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
+import http from "http";
+import https from "https";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
 import { detectImageFormat } from "../utils/image-format";
 import { ProviderError } from "./provider-error";
 
-const axiosClient = axios.create({ proxy: false });
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+const axiosClient = axios.create({
+    proxy: false,
+    httpAgent: keepAliveHttpAgent,
+    httpsAgent: keepAliveHttpsAgent,
+});
 
 // 轮询间隔与最大等待时间（可通过环境变量覆盖）
 const NANO_POLL_INTERVAL_MS = Number(process.env.ACE_NANO_POLL_INTERVAL_MS || "5000"); // 默认 5 秒
@@ -146,10 +154,13 @@ export class NanoAdapter implements AiProvider {
     }
 
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
+        const startedAt = Date.now();
+        const downloadStartedAt = Date.now();
         const res = await axiosClient.get(remoteUrl, {
             responseType: "arraybuffer",
             timeout: NANO_REQUEST_TIMEOUT_MS,
         });
+        const downloadMs = Date.now() - downloadStartedAt;
         const buffer = Buffer.from(res.data);
         const ct = (res.headers as any)?.["content-type"];
         const pathname = (() => {
@@ -163,13 +174,30 @@ export class NanoAdapter implements AiProvider {
         const detected = detectImageFormat(detectParams);
         const fileName = `nano_${uuidv4()}${detected.ext}`;
 
+        const uploadStartedAt = Date.now();
         if (isCosEnabled()) {
             await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
+            console.log("[NanoAdapter][Timing] download_and_save_done", {
+                target: "cos",
+                bytes: buffer.length,
+                download_ms: downloadMs,
+                upload_ms: Date.now() - uploadStartedAt,
+                total_ms: Date.now() - startedAt,
+                path: `/uploads/${fileName}`,
+            });
             return `/uploads/${fileName}`;
         }
         const uploadDir = path.join(process.cwd(), "uploads");
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
         await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
+        console.log("[NanoAdapter][Timing] download_and_save_done", {
+            target: "local",
+            bytes: buffer.length,
+            download_ms: downloadMs,
+            upload_ms: Date.now() - uploadStartedAt,
+            total_ms: Date.now() - startedAt,
+            path: `/uploads/${fileName}`,
+        });
         return `/uploads/${fileName}`;
     }
 
@@ -756,18 +784,13 @@ export class NanoAdapter implements AiProvider {
             throw new Error("Ace 生图失败：既没有 image_url 也没有 task_id");
         }
 
-        const localPaths: string[] = [];
-        for (const u of remoteUrls) {
-            if (u.startsWith("http") && !ACE_RETURN_REMOTE_URL) {
-                localPaths.push(await this.downloadAndSaveImage(u));
-            } else {
-                localPaths.push(u);
-            }
-        }
-
         return {
             original_id: `nano_${Date.now()}`,
-            images: localPaths,
+            images: await Promise.all(
+                remoteUrls.map((url) =>
+                    url.startsWith("http") ? this.downloadAndSaveImage(url) : url
+                )
+            ),
         };
     }
 

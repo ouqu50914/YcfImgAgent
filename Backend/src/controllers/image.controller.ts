@@ -9,6 +9,7 @@ export const generateImage = async (req: Request, res: Response) => {
     try {
         // 从 JWT 中解析出的 userId (在 middleware 中赋值，稍后补充)
         const userId = (req as any).user?.userId; 
+        const userRole = Number((req as any).user?.role);
         const {
             apiType,
             prompt,
@@ -34,6 +35,14 @@ export const generateImage = async (req: Request, res: Response) => {
             callbackUrl,
             taskId,
         } = req.body;
+        const isAdmin = userRole === 1;
+        const isAnyfastProRequest = model === 'gemini-3-pro-image-preview';
+        if (!isAdmin && isAnyfastProRequest) {
+            return res.status(403).json({
+                code: 'ANYFAST_PRO_FORBIDDEN',
+                message: '普通用户暂不支持使用 AnyFast Nano Pro',
+            });
+        }
 
         // 图生图时提示词可以为空，但必须有参考图片
         const hasImage = !!imageUrl || (imageUrls && imageUrls.length > 0);

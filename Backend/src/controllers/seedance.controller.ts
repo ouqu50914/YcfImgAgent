@@ -95,12 +95,27 @@ const startSeedanceWorkerIfNeeded = (userId: number, providerTaskId: string) => 
     workerPromise.finally(() => seedancePollingWorkers.delete(providerTaskId));
 };
 
-function getSeedanceCreditsPerSecond(): number {
+function getSeedanceBaseCreditsPerSecond(): number {
     const raw = process.env.SEEDANCE_CREDITS_PER_SECOND;
-    // 与前端默认保持一致：28 积分/秒
+    // 默认按 720p 基础单价（与前端默认保持一致）：28 积分/秒
     const n = raw ? Number(raw) : 28;
     if (Number.isNaN(n) || n <= 0) return 28;
     return n;
+}
+
+function getSeedance1080Multiplier(): number {
+    const raw = process.env.SEEDANCE_1080P_CREDITS_MULTIPLIER;
+    const n = raw ? Number(raw) : 2.5;
+    if (Number.isNaN(n) || n <= 0) return 2.5;
+    return n;
+}
+
+function getSeedanceCreditsPerSecondByResolution(resolution?: string): number {
+    const base = getSeedanceBaseCreditsPerSecond();
+    const r = String(resolution || "720p").trim().toLowerCase();
+    if (r === "1080p") return base * getSeedance1080Multiplier();
+    // 当前计费口径：480p 与 720p 统一按基础单价计费
+    return base;
 }
 
 /** Seedance 文档：duration 为 4~15 或 -1；计费必须与实际上传一致并限制在合法区间 */
@@ -115,6 +130,14 @@ function getSeedanceDefaultDuration(): number {
     const n = raw ? Number(raw) : 5;
     if (Number.isNaN(n)) return 5;
     return clampSeedanceDurationSeconds(n);
+}
+
+function normalizeSeedanceResolutionInput(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value !== "string") return "__INVALID__";
+    const v = value.trim().toLowerCase();
+    if (v === "480p" || v === "720p" || v === "1080p") return v;
+    return "__INVALID__";
 }
 
 function buildSeedanceUpstreamUnauthorizedResponse(err: any) {
@@ -205,13 +228,20 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
         if (durationNum !== undefined) {
             payload.duration = durationNum;
         }
+        const normalizedResolution = normalizeSeedanceResolutionInput(resolution);
+        if (normalizedResolution === "__INVALID__") {
+            return res.status(400).json({ message: "resolution 仅支持 480p / 720p / 1080p" });
+        }
+        if (normalizedResolution !== undefined) {
+            payload.resolution = normalizedResolution;
+        }
 
-        // 20 积分 / 秒（可通过 SEEDANCE_CREDITS_PER_SECOND 覆盖）；duration = -1 或未指定时按默认时长计算
+        // 按分辨率计费；1080p = 720p 的 2.5 倍（可通过环境变量覆盖）
         const defaultDuration = getSeedanceDefaultDuration();
-        const creditsPerSecond = getSeedanceCreditsPerSecond();
+        const creditsPerSecond = getSeedanceCreditsPerSecondByResolution(normalizedResolution);
         const rawSeconds = durationNum === undefined || durationNum === -1 ? defaultDuration : durationNum;
         const seconds = clampSeedanceDurationSeconds(rawSeconds);
-        const cost = seconds * creditsPerSecond;
+        const cost = Math.round(seconds * creditsPerSecond);
         const templateId = parseTemplateIdFromBody(req.body);
 
         await creditService.deductCredits(userId, cost);
@@ -433,6 +463,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
             referenceAudioUrls,
             ratio,
             duration,
+            resolution,
             generateAudio,
             enableWebSearch,
         } = req.body || {};
@@ -464,6 +495,10 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
             }
             durationNum = n;
         }
+        const normalizedResolution = normalizeSeedanceResolutionInput(resolution);
+        if (normalizedResolution === "__INVALID__") {
+            return res.status(400).json({ message: "resolution 仅支持 480p / 720p / 1080p" });
+        }
 
         // 按动作类型进行必要校验
         if (action === "image_first_frame") {
@@ -491,8 +526,8 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
 
         const rawResultDuration = durationNum === undefined || durationNum === -1 ? getSeedanceDefaultDuration() : durationNum;
         const resultDuration = clampSeedanceDurationSeconds(rawResultDuration);
-        const creditsPerSecond = getSeedanceCreditsPerSecond();
-        const advCost = resultDuration * creditsPerSecond;
+        const creditsPerSecond = getSeedanceCreditsPerSecondByResolution(normalizedResolution);
+        const advCost = Math.round(resultDuration * creditsPerSecond);
         const templateId = parseTemplateIdFromBody(req.body);
 
         await creditService.deductCredits(userId, advCost);
@@ -509,7 +544,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
             referenceAudioUrls,
             ratio,
             ...(durationNum !== undefined ? { duration: durationNum } : {}),
-            ...(req.body?.resolution ? { resolution: req.body.resolution } : {}),
+            ...(normalizedResolution ? { resolution: normalizedResolution } : {}),
             generateAudio,
             enableWebSearch,
         } as any);
@@ -530,7 +565,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                     action,
                     ratio,
                     duration: durationNum,
-                    resolution: req.body?.resolution,
+                    resolution: normalizedResolution,
                     generateAudio,
                     enableWebSearch,
                 };
@@ -590,7 +625,12 @@ export const getSeedanceBillingConfig = async (req: Request, res: Response) => {
             message: "ok",
             data: {
                 defaultDurationSeconds: getSeedanceDefaultDuration(),
-                creditsPerSecond: getSeedanceCreditsPerSecond(),
+                creditsPerSecond: getSeedanceBaseCreditsPerSecond(),
+                creditsPerSecondByResolution: {
+                    "480p": getSeedanceCreditsPerSecondByResolution("480p"),
+                    "720p": getSeedanceCreditsPerSecondByResolution("720p"),
+                    "1080p": getSeedanceCreditsPerSecondByResolution("1080p"),
+                },
             },
         });
     } catch (error: any) {

@@ -320,6 +320,11 @@
               {{ row.credits_spent != null ? row.credits_spent : '—' }}
             </template>
           </el-table-column>
+          <el-table-column prop="generation_duration_ms" label="生成耗时" width="110">
+            <template #default="{ row }">
+              {{ formatGenerationDuration(row.generation_duration_ms) }}
+            </template>
+          </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
           <el-table-column prop="prompt" label="提示词摘要" min-width="160" show-overflow-tooltip />
           <el-table-column label="结果" min-width="220" align="center">
@@ -522,6 +527,9 @@
         <el-select v-model="statsApiType" placeholder="模型筛选" style="width: 120px; margin-left: 10px" clearable>
           <el-option label="即梦" value="dream" />
           <el-option label="Nano" value="nano" />
+          <el-option label="Kling" value="kling" />
+          <el-option label="Seedance" value="seedance" />
+          <el-option label="PixVerse" value="pixverse" />
         </el-select>
         <el-button type="primary" @click="loadUserStatsData" style="margin-left: 10px">查询</el-button>
       </div>
@@ -544,9 +552,16 @@
           <div class="stats-section-title">按模型统计（积分消耗）</div>
           <el-table :data="userStatsData.creditsByApiType" size="small" border>
             <el-table-column prop="apiType" label="模型" width="120">
-              <template #default="{ row }">{{ row.apiType === 'dream' ? '即梦' : row.apiType === 'nano' ? 'Nano' : row.apiType }}</template>
+              <template #default="{ row }">{{ getStatsApiTypeLabel(row.apiType) }}</template>
             </el-table-column>
             <el-table-column prop="total" label="消耗积分" />
+          </el-table>
+        </div>
+        <div class="stats-section" v-if="userStatsData.projectCountByCategory?.length">
+          <div class="stats-section-title">按项目分类统计（项目数）</div>
+          <el-table :data="userStatsData.projectCountByCategory" size="small" border>
+            <el-table-column prop="categoryName" label="分类" width="180" />
+            <el-table-column prop="count" label="项目数" />
           </el-table>
         </div>
         <div class="stats-meta">
@@ -777,6 +792,14 @@ const statsUserId = ref<number | null>(null);
 const statsDateRange = ref<[string, string] | null>(null);
 const statsApiType = ref('');
 const userStatsData = ref<any>(null);
+const getStatsApiTypeLabel = (apiType: string) => {
+  if (apiType === 'dream') return '即梦';
+  if (apiType === 'nano') return 'Nano';
+  if (apiType === 'kling') return 'Kling';
+  if (apiType === 'seedance') return 'Seedance';
+  if (apiType === 'pixverse') return 'PixVerse';
+  return apiType;
+};
 
 const viewUserStats = (userId: number) => {
   statsUserId.value = userId;
@@ -1090,6 +1113,16 @@ const loadGenerationRecords = async () => {
 const copyGenUrls = (urls: string[]) => {
   const text = urls.join('\n');
   void navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制'));
+};
+
+const formatGenerationDuration = (durationMs: unknown) => {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return '—';
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+  const seconds = durationMs / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainSeconds}s`;
 };
 
 const genPreviewVisible = ref(false);

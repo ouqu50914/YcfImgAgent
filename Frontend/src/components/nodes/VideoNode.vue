@@ -175,6 +175,7 @@
             <template v-if="provider === 'seedance'">
               <el-option label="480p" value="480p" />
               <el-option label="720p" value="720p" />
+              <el-option label="1080p" value="1080p" />
             </template>
             <template v-else-if="provider === 'pixverse'">
               <el-option label="540p" value="540p" />
@@ -333,7 +334,11 @@ type CreditTrackerStore = {
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 
 /** 与服务器 SEEDANCE_* 对齐，用于「消耗 N 积分」展示；拉取失败时回退本地 env */
-const seedanceBilling = ref<{ defaultDurationSeconds: number; creditsPerSecond: number } | null>(null);
+const seedanceBilling = ref<{
+  defaultDurationSeconds: number;
+  creditsPerSecond: number;
+  creditsPerSecondByResolution?: Record<string, number>;
+} | null>(null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 
 function withTemplateId<T extends object>(obj: T): T {
@@ -874,7 +879,7 @@ watch(
 // - PixVerse：仅手动 1-15 秒（隐藏“自动/自定义”开关），默认 1 秒
 const durationAuto = ref(false);
 const durationManual = ref<number>(4);
-const resolution = ref<'540p' | '720p' | '1080p' | '4k'>('720p');
+const resolution = ref<'480p' | '540p' | '720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
 
 const providerLabel = computed(() =>
@@ -989,11 +994,29 @@ const clearPollTimer = () => {
 };
 
 function getSeedanceCreditsPerSecond(): number {
-  // 与后端默认保持一致：20 积分 / 秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
+  // 与后端默认保持一致：720p 基础单价 28 积分/秒；如前端配置了 VITE_SEEDANCE_CREDITS_PER_SECOND 则优先使用
   const raw = import.meta.env.VITE_SEEDANCE_CREDITS_PER_SECOND;
   const n = raw != null ? Number(raw) : 28;
   if (Number.isNaN(n) || n <= 0) return 28;
   return n;
+}
+
+function getSeedance1080Multiplier(): number {
+  const raw = (import.meta as any)?.env?.VITE_SEEDANCE_1080P_CREDITS_MULTIPLIER;
+  const n = raw != null ? Number(raw) : 2.5;
+  if (Number.isNaN(n) || n <= 0) return 2.5;
+  return n;
+}
+
+function getSeedanceCreditsPerSecondByResolution(): number {
+  const map = seedanceBilling.value?.creditsPerSecondByResolution;
+  const r = String(resolution.value || '720p').toLowerCase();
+  const fromMap = map?.[r];
+  if (typeof fromMap === 'number' && Number.isFinite(fromMap) && fromMap > 0) {
+    return fromMap;
+  }
+  const base = seedanceBilling.value?.creditsPerSecond ?? getSeedanceCreditsPerSecond();
+  return r === '1080p' ? base * getSeedance1080Multiplier() : base;
 }
 
 function getSeedanceDefaultDurationSeconds(): number {
@@ -1047,13 +1070,13 @@ function getPixverseEffectiveDurationSeconds(): number {
 
 const executeCost = computed(() => {
   if (provider.value === 'seedance') {
-    const cps = seedanceBilling.value?.creditsPerSecond ?? getSeedanceCreditsPerSecond();
+    const cps = getSeedanceCreditsPerSecondByResolution();
     const rawSec = durationAuto.value
       ? (seedanceBilling.value?.defaultDurationSeconds ?? getSeedanceDefaultDurationSeconds())
       : Number(durationManual.value);
     const seconds = clampSeedanceDurationSecondsClient(rawSec);
     if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-    return Math.round(seconds) * cps;
+    return Math.round(Math.round(seconds) * cps);
   }
 
   if (provider.value === 'pixverse') {
@@ -1082,6 +1105,10 @@ watch(
         seedanceBilling.value = {
           defaultDurationSeconds: payload.defaultDurationSeconds,
           creditsPerSecond: payload.creditsPerSecond,
+          creditsPerSecondByResolution:
+            payload.creditsPerSecondByResolution && typeof payload.creditsPerSecondByResolution === 'object'
+              ? payload.creditsPerSecondByResolution
+              : undefined,
         };
       }
     } catch {
@@ -1299,7 +1326,7 @@ watch(
       return;
     }
     if (p === 'seedance') {
-      if (!['480p', '720p'].includes(resolution.value)) resolution.value = '720p';
+      if (!['480p', '720p', '1080p'].includes(resolution.value)) resolution.value = '720p';
       durationManual.value = Math.min(15, Math.max(4, Number(durationManual.value) || 4));
 
       // 切换到 Seedance 时，根据连线自动识别模式（无 toast，避免切换时打扰）

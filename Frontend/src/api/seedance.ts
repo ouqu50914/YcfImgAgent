@@ -81,6 +81,7 @@ export function createSeedanceAdvanced(params: CreateSeedanceAdvancedParams) {
 export interface SeedanceBillingConfig {
   defaultDurationSeconds: number;
   creditsPerSecond: number;
+  creditsPerSecondByResolution?: Record<string, number>;
 }
 
 export function getSeedanceBillingConfig() {

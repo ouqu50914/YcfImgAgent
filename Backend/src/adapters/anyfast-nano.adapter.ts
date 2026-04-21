@@ -1,17 +1,32 @@
 import { AiProvider, AiResponse, GenerateParams } from "./ai-provider.interface";
 import axios from "axios";
+import http from "http";
+import https from "https";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
+import { getFileContent } from "../services/cos.service";
+import { isCosEnabled, upload as cosUpload, pathToKey } from "../services/cos.service";
 import { detectImageFormat } from "../utils/image-format";
 import { ProviderError } from "./provider-error";
 
-const axiosClient = axios.create({ proxy: false });
-const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || String(10 * 60 * 1000));
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+const axiosClient = axios.create({
+    proxy: false,
+    httpAgent: keepAliveHttpAgent,
+    httpsAgent: keepAliveHttpsAgent,
+});
+// 默认 90 秒超时，避免 AnyFast 长时间无响应拖慢整体回显；可通过环境变量覆盖
+const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || "300000");
 const ANYFAST_BASE_URL = (process.env.ANYFAST_BASE_URL || "https://www.anyfast.ai").replace(/\/$/, "");
 const ANYFAST_DEFAULT_MODEL = "gemini-3.1-flash-image-preview";
-const ANYFAST_MAX_RETRIES = Math.max(0, Number(process.env.ANYFAST_MAX_RETRIES || "2"));
+const ANYFAST_ALLOWED_MODELS = new Set([
+    "gemini-3.1-flash-image-preview",
+    "gemini-3-pro-image-preview",
+]);
+// 默认重试 1 次（总尝试 2 次），失败后尽快走 Ace 兜底
+const ANYFAST_MAX_RETRIES = Math.max(0, Number(process.env.ANYFAST_MAX_RETRIES || "1"));
 const ANYFAST_RETRY_BASE_DELAY_MS = Math.max(100, Number(process.env.ANYFAST_RETRY_BASE_DELAY_MS || "600"));
 
 export class AnyfastNanoAdapter implements AiProvider {
@@ -24,18 +39,21 @@ export class AnyfastNanoAdapter implements AiProvider {
         if (status === 429 || (typeof status === "number" && status >= 500)) return true;
         const msg = String(error?.message || "").toLowerCase();
         const code = String(error?.code || "").toLowerCase();
+        if (msg.includes("timeout")) return true;
         if (msg.includes("stream has been aborted")) return true;
         if (msg.includes("aborted")) return true;
         if (msg.includes("socket hang up")) return true;
         if (msg.includes("econnreset")) return true;
         if (msg.includes("etimedout")) return true;
         if (msg.includes("network error")) return true;
-        if (code === "econnreset" || code === "etimedout" || code === "ecconnaborted" || code === "eai_again") return true;
+        if (code === "econnreset" || code === "etimedout" || code === "econnaborted" || code === "eai_again") return true;
         return false;
     }
 
-    private resolveModel(_model?: string): string {
-        // 统一固定走 Gemini 3.1 Flash Image Preview，避免 2.5 / 3.0 路径混用。
+    private resolveModel(model?: string): string {
+        if (model && ANYFAST_ALLOWED_MODELS.has(model)) {
+            return model;
+        }
         return ANYFAST_DEFAULT_MODEL;
     }
 
@@ -139,16 +157,33 @@ export class AnyfastNanoAdapter implements AiProvider {
     }
 
     private async saveImageBuffer(buffer: Buffer): Promise<string> {
+        const startedAt = Date.now();
         const detected = detectImageFormat({ firstBytes: buffer.subarray(0, 32) });
         const fileName = `anyfast_${uuidv4()}${detected.ext}`;
+        const savedPath = `/uploads/${fileName}`;
+        const uploadStartedAt = Date.now();
         if (isCosEnabled()) {
-            await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
-            return `/uploads/${fileName}`;
+            await cosUpload(pathToKey(savedPath), buffer, detected.mime);
+            console.log("[AnyfastNanoAdapter][Timing] save_buffer_done", {
+                target: "cos",
+                bytes: buffer.length,
+                upload_ms: Date.now() - uploadStartedAt,
+                total_ms: Date.now() - startedAt,
+                path: savedPath,
+            });
+            return savedPath;
         }
         const uploadDir = path.join(process.cwd(), "uploads");
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
         await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
-        return `/uploads/${fileName}`;
+        console.log("[AnyfastNanoAdapter][Timing] save_buffer_done", {
+            target: "local",
+            bytes: buffer.length,
+            upload_ms: Date.now() - uploadStartedAt,
+            total_ms: Date.now() - startedAt,
+            path: savedPath,
+        });
+        return savedPath;
     }
 
     async generateImage(params: GenerateParams, apiKey: string, _apiUrl: string): Promise<AiResponse> {

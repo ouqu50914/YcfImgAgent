@@ -2,6 +2,10 @@ import { AppDataSource } from "../data-source";
 import { ImageResult } from "../entities/ImageResult";
 import { ApiConfig } from "../entities/ApiConfig";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
+import axios from "axios";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
 import { AnyfastNanoAdapter } from "../adapters/anyfast-nano.adapter";
@@ -10,6 +14,10 @@ import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../ada
 import { CreditService, type CreditLogInfo } from "./credit.service";
 import { ProviderError } from "../adapters/provider-error";
 import { calculateNanoPolicyRates, isFallbackEligible } from "./nano-policy.util";
+import { detectImageFormat } from "../utils/image-format";
+import { isCosEnabled, upload as cosUpload, pathToKey } from "./cos.service";
+
+const axiosClient = axios.create({ proxy: false });
 
 export class ImageService {
     private imageRepo = AppDataSource.getRepository(ImageResult);
@@ -25,9 +33,10 @@ export class ImageService {
         finalAnyfast: 0,
     };
     private static nanoPolicyRequestSeq = 0;
+    private static imageSyncInFlight = new Set<number>();
 
-    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "ace") as "ace" | "anyfast";
-    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "anyfast") as "ace" | "anyfast";
+    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "anyfast") as "ace" | "anyfast";
+    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "ace") as "ace" | "anyfast";
     private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "1"));
     private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY === "true";
     private readonly anyfastCircuitFailureThreshold = Math.max(1, Number(process.env.NANO_ANYFAST_CIRCUIT_FAILURE_THRESHOLD || "3"));
@@ -61,6 +70,126 @@ export class ImageService {
         }
     }
 
+    private parseJsonImageArray(raw?: string | null): string[] {
+        if (!raw) return [];
+        try {
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter((x) => typeof x === "string" && x.trim().length > 0);
+        } catch {
+            return [];
+        }
+    }
+
+    private toPersistableImageUrl(url?: string): string | undefined {
+        if (!url) return undefined;
+        // image_url 列是 varchar(255)，data URL（base64）会超长导致写库失败
+        if (url.startsWith("data:")) return undefined;
+        if (url.length > 255) return undefined;
+        return url;
+    }
+
+    private summarizeImageRef(url?: string): string | undefined {
+        if (!url) return undefined;
+        if (url.startsWith("data:")) {
+            const prefix = url.slice(0, 48);
+            return `${prefix}... [data-url ${url.length} chars]`;
+        }
+        if (url.length > 180) return `${url.slice(0, 180)}...`;
+        return url;
+    }
+
+    private toDataUrlBuffer(imageInput: string): { mimeType: string; buffer: Buffer } | null {
+        const m = imageInput.match(/^data:([^;]+);base64,(.+)$/);
+        if (!m || !m[1] || !m[2]) return null;
+        return {
+            mimeType: m[1],
+            buffer: Buffer.from(m[2], "base64"),
+        };
+    }
+
+    private async storeImageBuffer(buffer: Buffer, preferredMime?: string): Promise<string> {
+        const detected = detectImageFormat({ firstBytes: buffer.subarray(0, 32) });
+        const mime = preferredMime || detected.mime;
+        const ext = detected.ext || ".png";
+        const fileName = `imgsync_${uuidv4()}${ext}`;
+        const storagePath = `/uploads/${fileName}`;
+        if (isCosEnabled()) {
+            await cosUpload(pathToKey(storagePath), buffer, mime);
+            return storagePath;
+        }
+        const uploadDir = path.join(process.cwd(), "uploads");
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
+        return storagePath;
+    }
+
+    private async syncOneImageToStorage(imageInput: string): Promise<string> {
+        if (!imageInput) throw new Error("空图片地址");
+        if (imageInput.startsWith("/uploads/")) return imageInput;
+
+        const dataUrl = this.toDataUrlBuffer(imageInput);
+        if (dataUrl) {
+            return this.storeImageBuffer(dataUrl.buffer, dataUrl.mimeType);
+        }
+
+        if (imageInput.startsWith("http://") || imageInput.startsWith("https://")) {
+            const res = await axiosClient.get(imageInput, {
+                responseType: "arraybuffer",
+                timeout: 120000,
+            });
+            const contentType = typeof res.headers?.["content-type"] === "string"
+                ? res.headers["content-type"]
+                : undefined;
+            return this.storeImageBuffer(Buffer.from(res.data), contentType);
+        }
+
+        // 兜底：未知格式不改写，避免丢失可用结果
+        return imageInput;
+    }
+
+    private startAsyncImageSync(recordId: number) {
+        if (ImageService.imageSyncInFlight.has(recordId)) return;
+        ImageService.imageSyncInFlight.add(recordId);
+
+        void (async () => {
+            try {
+                const rec = await this.imageRepo.findOneBy({ id: recordId } as any);
+                if (!rec) return;
+                const sourceImages = this.parseJsonImageArray(rec.upstream_images || rec.all_images);
+                if (!sourceImages.length) {
+                    rec.sync_status = "failed";
+                    rec.sync_error = "无可同步图片";
+                    await this.imageRepo.save(rec);
+                    return;
+                }
+
+                rec.sync_status = "syncing";
+                rec.sync_error = null;
+                await this.imageRepo.save(rec);
+
+                const syncedImages = await Promise.all(sourceImages.map((u) => this.syncOneImageToStorage(u)));
+                rec.all_images = JSON.stringify(syncedImages);
+                const persistableSyncedFirst = this.toPersistableImageUrl(syncedImages[0]);
+                if (persistableSyncedFirst !== undefined) {
+                    rec.image_url = persistableSyncedFirst;
+                }
+                rec.sync_status = "synced";
+                rec.sync_error = null;
+                await this.imageRepo.save(rec);
+            } catch (error) {
+                const rec = await this.imageRepo.findOneBy({ id: recordId } as any);
+                if (rec) {
+                    rec.sync_status = "failed";
+                    rec.sync_error = error instanceof Error ? error.message : String(error);
+                    await this.imageRepo.save(rec);
+                }
+            } finally {
+                ImageService.imageSyncInFlight.delete(recordId);
+            }
+        })();
+    }
+
     async generate(userId: number, apiType: 'dream' | 'nano' | 'midjourney', params: GenerateParams) {
         // 1. 获取API配置
         const config = await this.configRepo.findOneBy({ api_type: apiType });
@@ -73,7 +202,9 @@ export class ImageService {
         const quality = params.quality || (params as any).quality || '2K';
         const cost = this.creditService.calcCost(apiType, 'generate', {
             quality,
-            imageCount
+            imageCount,
+            ...(params.model ? { model: params.model } : {}),
+            ...(params.providerHint ? { providerHint: params.providerHint } : {}),
         });
 
         const generationKey = params.generationKey;
@@ -88,6 +219,8 @@ export class ImageService {
             imageRecord.generation_key = generationKey ?? '';
             // 0 = pending（未完成）
             imageRecord.status = 0;
+            imageRecord.sync_status = "pending";
+            imageRecord.sync_error = null;
             imageRecord.template_id = params.templateId != null ? params.templateId : null;
             imageRecord.credits_spent = cost;
             imageRecord.operation_type = "generate";
@@ -98,17 +231,21 @@ export class ImageService {
                 const providerResult = await this.generateByPolicy(apiType, params, config.api_key, config.api_url, userId);
                 const apiResult = providerResult.apiResult;
 
-                // 3) 保存结果到数据库
+                // 3) 保存结果到数据库（已在适配器中完成转存，直接返回可访问短路径）
                 const allImageUrls = apiResult.images || [];
                 const actualGeneratedCount = allImageUrls.length;
 
                 const firstImageUrl = allImageUrls[0];
-                if (firstImageUrl !== undefined) {
-                    imageRecord.image_url = firstImageUrl;
+                const persistableFirstUrl = this.toPersistableImageUrl(firstImageUrl);
+                if (persistableFirstUrl !== undefined) {
+                    imageRecord.image_url = persistableFirstUrl;
                 }
 
                 imageRecord.status = 1;
                 imageRecord.all_images = JSON.stringify(allImageUrls);
+                imageRecord.upstream_images = null;
+                imageRecord.sync_status = "synced";
+                imageRecord.sync_error = null;
                 await this.imageRepo.save(imageRecord);
 
                 config.used_quota += actualGeneratedCount;
@@ -123,6 +260,8 @@ export class ImageService {
                 // 生成失败：标记失败态（status=2），避免前端靠等待时间“猜测”失败。
                 imageRecord.status = 2;
                 imageRecord.all_images = imageRecord.all_images ?? null;
+                imageRecord.sync_status = "failed";
+                imageRecord.sync_error = error instanceof Error ? error.message : String(error);
                 await this.imageRepo.save(imageRecord);
                 throw error;
             }
@@ -157,6 +296,18 @@ export class ImageService {
         return isFallbackEligible(error, this.nanoFallbackOnTransientOnly);
     }
 
+    /**
+     * AnyFast 模型在回退到 Ace 时需要映射到 Ace 可识别的模型名。
+     * - gemini-3-pro-image-preview -> nano-banana-2
+     * - gemini-3.1-flash-image-preview -> nano-banana-pro
+     */
+    private mapModelForProvider(provider: "ace" | "anyfast", model?: GenerateParams["model"]): GenerateParams["model"] {
+        if (provider !== "ace" || !model) return model;
+        if (model === "gemini-3-pro-image-preview") return "nano-banana-2";
+        if (model === "gemini-3.1-flash-image-preview") return "nano-banana-pro";
+        return model;
+    }
+
     private async generateByPolicy(
         apiType: "dream" | "nano" | "midjourney",
         params: GenerateParams,
@@ -183,18 +334,41 @@ export class ImageService {
         const startedAt = Date.now();
         const requestId = params.generationKey || `nano-${Date.now()}`;
         const requestSeq = ++ImageService.nanoPolicyRequestSeq;
-        const requestedAnyfastDirect =
-            params.providerHint === "anyfast" ||
-            params.model === "gemini-3.1-flash-image-preview";
         const normalizedUserId = Number(userId);
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
-        if (requestedAnyfastDirect && !isAdmin) {
-            throw Object.assign(new Error("仅超级管理员可直接选择 AnyFast 图片模型"), { status: 403 });
+        const isAnyfastProRequest = params.model === "gemini-3-pro-image-preview";
+        if (!isAdmin && isAnyfastProRequest) {
+            const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
+                status: 403,
+                code: "ANYFAST_PRO_FORBIDDEN",
+            });
+            console.warn("[ImageService][NanoPolicyRequest] blocked_forbidden_model", {
+                request_seq: requestSeq,
+                request_id: requestId,
+                user_id: hasValidUserId ? normalizedUserId : undefined,
+                is_admin: isAdmin,
+                provider_hint: params.providerHint,
+                model: params.model,
+                reason: "non_admin_forbidden_anyfast_pro",
+            });
+            throw deniedError;
         }
+        const requestedAnyfastDirect =
+            params.providerHint === "anyfast" ||
+            params.model === "gemini-3.1-flash-image-preview" ||
+            params.model === "gemini-3-pro-image-preview";
+        const requestedAceDirect = params.providerHint === "ace";
 
-        const primary = requestedAnyfastDirect ? "anyfast" : this.nanoPrimaryProvider;
-        const fallback = requestedAnyfastDirect ? "anyfast" : this.nanoFallbackProvider;
+        // 路由策略（普通用户/管理员统一）：
+        // - 用户显式选了 ace/anyfast：按所选为主路由，另一家为兜底
+        // - 未显式选择：沿用系统默认主路由，并固定另一家为兜底
+        const primary: "ace" | "anyfast" = requestedAceDirect
+            ? "ace"
+            : requestedAnyfastDirect
+                ? "anyfast"
+                : this.nanoPrimaryProvider;
+        const fallback: "ace" | "anyfast" = primary === "ace" ? "anyfast" : "ace";
         const refCount =
             (params.imageUrls && params.imageUrls.length > 0)
                 ? params.imageUrls.length
@@ -206,9 +380,11 @@ export class ImageService {
             request_seq: requestSeq,
             request_id: requestId,
             user_id: hasValidUserId ? normalizedUserId : undefined,
+            is_admin: isAdmin,
             primary_provider: primary,
             fallback_provider: fallback,
             direct_anyfast: requestedAnyfastDirect,
+            direct_ace: requestedAceDirect,
             prompt: params.prompt,
             model: params.model,
             quality: params.quality,
@@ -219,22 +395,31 @@ export class ImageService {
 
         const tryProvider = async (provider: "ace" | "anyfast", attempt: number) => {
             providerChain.push(provider);
+            const mappedModel = this.mapModelForProvider(provider, params.model);
+            const providerParams: GenerateParams = {
+                ...params,
+                providerHint: provider,
+                ...(mappedModel ? { model: mappedModel } : {}),
+            };
             console.log("[ImageService][NanoPolicyRequest] attempt_start", {
                 request_seq: requestSeq,
                 request_id: requestId,
                 attempt,
                 provider,
                 provider_chain: providerChain.join("->"),
+                input_model: params.model,
+                mapped_model: mappedModel,
             });
             const adapter = this.nanoProviderAdapters[provider];
-            const result = await adapter.generateImage({ ...params, providerHint: provider }, apiKey, apiUrl);
+            const result = await adapter.generateImage(providerParams, apiKey, apiUrl);
             console.log("[ImageService][NanoPolicyRequest] attempt_success", {
                 request_seq: requestSeq,
                 request_id: requestId,
                 attempt,
                 provider,
+                mapped_model: mappedModel,
                 image_count: result.images?.length || 0,
-                first_image: result.images?.[0],
+                first_image: this.summarizeImageRef(result.images?.[0]),
                 original_id: result.original_id,
             });
             return { result, attempt, provider };
@@ -255,7 +440,7 @@ export class ImageService {
                             switch_reason: switchReason || undefined,
                             latency_ms: Date.now() - startedAt,
                             image_count: ok.result.images?.length || 0,
-                            first_image: ok.result.images?.[0],
+                            first_image: this.summarizeImageRef(ok.result.images?.[0]),
                             original_id: ok.result.original_id,
                         });
                         return {
@@ -283,7 +468,11 @@ export class ImageService {
                     }
                 }
 
-                const canFallback = this.shouldFallback(lastError) && fallback === "anyfast" && !this.isAnyfastCircuitOpen();
+                const canFallbackToAnyfast = isAdmin;
+                const canFallback = canFallbackToAnyfast
+                    && this.shouldFallback(lastError)
+                    && fallback === "anyfast"
+                    && !this.isAnyfastCircuitOpen();
                 if (!canFallback) throw lastError;
                 switchReason = lastError instanceof ProviderError ? lastError.code : "ACE_FAILED";
                 try {
@@ -298,7 +487,7 @@ export class ImageService {
                         switch_reason: switchReason || undefined,
                         latency_ms: Date.now() - startedAt,
                         image_count: fallbackOk.result.images?.length || 0,
-                        first_image: fallbackOk.result.images?.[0],
+                        first_image: this.summarizeImageRef(fallbackOk.result.images?.[0]),
                         original_id: fallbackOk.result.original_id,
                     });
                     return {
@@ -339,7 +528,7 @@ export class ImageService {
                     switch_reason: switchReason || undefined,
                     latency_ms: Date.now() - startedAt,
                     image_count: first.result.images?.length || 0,
-                    first_image: first.result.images?.[0],
+                    first_image: this.summarizeImageRef(first.result.images?.[0]),
                     original_id: first.result.original_id,
                 });
                 return {
@@ -374,7 +563,7 @@ export class ImageService {
                     switch_reason: switchReason || undefined,
                     latency_ms: Date.now() - startedAt,
                     image_count: second.result.images?.length || 0,
-                    first_image: second.result.images?.[0],
+                    first_image: this.summarizeImageRef(second.result.images?.[0]),
                     original_id: second.result.original_id,
                 });
                 return {
@@ -431,6 +620,7 @@ export class ImageService {
         image_url?: string;
         all_images: string[];
         created_at?: Date;
+        sync_status?: string;
     } | null> {
         if (!generationKey) return null;
 
@@ -460,11 +650,13 @@ export class ImageService {
             image_url?: string;
             all_images: string[];
             created_at?: Date;
+            sync_status?: string;
         } = {
             id: Number(rec.id),
             status: rec.status,
             all_images: allImages,
             created_at: rec.created_at,
+            sync_status: rec.sync_status || "pending",
         };
 
         if (typeof rec.image_url === 'string') {
@@ -510,7 +702,7 @@ export class ImageService {
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
             imageRecord.prompt = `放大图片 ${params.scale || 2}x`;
-            const firstImageUrl = apiResult.images?.[0];
+            const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
             }
@@ -565,7 +757,7 @@ export class ImageService {
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
             imageRecord.prompt = `扩展图片 ${params.direction}`;
-            const firstImageUrl = apiResult.images?.[0];
+            const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
             }
@@ -620,7 +812,7 @@ export class ImageService {
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
             imageRecord.prompt = `拆分图片 ${params.splitDirection || 'horizontal'} ${params.splitCount || 2} 份`;
-            const firstImageUrl = apiResult.images?.[0];
+            const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
             }
@@ -674,7 +866,7 @@ export class ImageService {
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
             imageRecord.prompt = params.prompt;
-            const firstImageUrl = apiResult.images?.[0];
+            const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
             }

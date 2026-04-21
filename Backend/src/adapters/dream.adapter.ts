@@ -8,10 +8,18 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from '../services/cos.service';
 import { detectImageFormat } from '../utils/image-format';
 
-const axiosNoProxy = axios.create({ proxy: false });
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+const axiosNoProxy = axios.create({
+    proxy: false,
+    httpAgent: keepAliveHttpAgent,
+    httpsAgent: keepAliveHttpsAgent,
+});
 const ACE_REQUEST_TIMEOUT_MS = Number(process.env.ACE_SEEDREAM_TIMEOUT_MS || '1800000'); // 30 分钟
 const ACE_REQUEST_BODY_MAX_BYTES = 20 * 1024 * 1024; // 20MB
 
@@ -431,7 +439,10 @@ export class DreamAdapter implements AiProvider {
     }
 
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
+        const startedAt = Date.now();
+        const downloadStartedAt = Date.now();
         const response = await axiosNoProxy.get(remoteUrl, { responseType: 'arraybuffer' });
+        const downloadMs = Date.now() - downloadStartedAt;
         let buffer = Buffer.from(response.data);
         const originalContentType = (response.headers as any)?.['content-type'];
         if (process.env.ENABLE_WATERMARK === 'true') {
@@ -454,13 +465,30 @@ export class DreamAdapter implements AiProvider {
         if (typeof pathname === 'string' && pathname) detectParams.urlPathname = pathname;
         const detected = detectImageFormat(detectParams);
         const fileName = `dream_${uuidv4()}${detected.ext}`;
+        const uploadStartedAt = Date.now();
         if (isCosEnabled()) {
             await cosUpload(pathToKey(`/uploads/${fileName}`), buffer, detected.mime);
+            console.log('[DreamAPI][Timing] download_and_save_done', {
+                target: 'cos',
+                bytes: buffer.length,
+                download_ms: downloadMs,
+                upload_ms: Date.now() - uploadStartedAt,
+                total_ms: Date.now() - startedAt,
+                path: `/uploads/${fileName}`,
+            });
             return `/uploads/${fileName}`;
         }
         const uploadDir = path.join(process.cwd(), 'uploads');
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
         await fs.promises.writeFile(path.join(uploadDir, fileName), buffer);
+        console.log('[DreamAPI][Timing] download_and_save_done', {
+            target: 'local',
+            bytes: buffer.length,
+            download_ms: downloadMs,
+            upload_ms: Date.now() - uploadStartedAt,
+            total_ms: Date.now() - startedAt,
+            path: `/uploads/${fileName}`,
+        });
         return `/uploads/${fileName}`;
     }
 

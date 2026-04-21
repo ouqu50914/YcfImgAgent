@@ -7,7 +7,9 @@ import { UserDailyQuota } from "../entities/UserDailyQuota";
 import { UserCreditApplication } from "../entities/UserCreditApplication";
 import { CreditUsageLog } from "../entities/CreditUsageLog";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
+import { WorkflowCategory } from "../entities/WorkflowCategory";
 import { SystemConfig } from "../entities/SystemConfig";
+import { VideoTask } from "../entities/VideoTask";
 import bcrypt from "bcrypt";
 import redis from "../utils/redis";
 import { LogService } from "./log.service";
@@ -20,7 +22,9 @@ export class AdminService {
     private quotaRepo = AppDataSource.getRepository(UserDailyQuota);
     private appRepo = AppDataSource.getRepository(UserCreditApplication);
     private usageLogRepo = AppDataSource.getRepository(CreditUsageLog);
+    private videoTaskRepo = AppDataSource.getRepository(VideoTask);
     private templateRepo = AppDataSource.getRepository(WorkflowTemplate);
+    private categoryRepo = AppDataSource.getRepository(WorkflowCategory);
     private systemConfigRepo = AppDataSource.getRepository(SystemConfig);
     private logService = new LogService();
     private creditService = new CreditService();
@@ -332,7 +336,18 @@ export class AdminService {
             .where('log.user_id = :userId', { userId });
         if (apiType) usageQb.andWhere('log.api_type = :apiType', { apiType });
         applyDateFilter(usageQb, 'log');
-        const totalCreditsUsed = (await usageQb.getRawOne())?.total ?? 0;
+        const imageCreditsUsed = Number((await usageQb.getRawOne())?.total ?? 0);
+
+        const videoUsageQb = this.videoTaskRepo
+            .createQueryBuilder("v")
+            .select("COALESCE(SUM(v.credits_spent), 0)", "total")
+            .where("v.user_id = :userId", { userId })
+            .andWhere("v.credits_spent IS NOT NULL")
+            .andWhere("v.credits_spent > 0");
+        if (apiType) videoUsageQb.andWhere("v.provider = :apiType", { apiType });
+        applyDateFilter(videoUsageQb, "v");
+        const videoCreditsUsed = Number((await videoUsageQb.getRawOne())?.total ?? 0);
+        const totalCreditsUsed = imageCreditsUsed + videoCreditsUsed;
 
         // 按模型维度统计积分使用
         const usageByApiQb = this.usageLogRepo
@@ -341,8 +356,29 @@ export class AdminService {
             .addSelect('SUM(log.amount)', 'total')
             .where('log.user_id = :userId', { userId })
             .groupBy('log.api_type');
+        if (apiType) usageByApiQb.andWhere('log.api_type = :apiType', { apiType });
         applyDateFilter(usageByApiQb, 'log');
-        const creditsByApiType = await usageByApiQb.getRawMany();
+        const imageCreditsByApiType = await usageByApiQb.getRawMany();
+
+        const videoByProviderQb = this.videoTaskRepo
+            .createQueryBuilder("v")
+            .select("v.provider", "apiType")
+            .addSelect("SUM(v.credits_spent)", "total")
+            .where("v.user_id = :userId", { userId })
+            .andWhere("v.credits_spent IS NOT NULL")
+            .andWhere("v.credits_spent > 0")
+            .groupBy("v.provider");
+        if (apiType) videoByProviderQb.andWhere("v.provider = :apiType", { apiType });
+        applyDateFilter(videoByProviderQb, "v");
+        const videoCreditsByApiType = await videoByProviderQb.getRawMany();
+
+        const mergedCreditsByApiType = new Map<string, number>();
+        for (const row of [...imageCreditsByApiType, ...videoCreditsByApiType]) {
+            const key = String(row.apiType || "").trim();
+            if (!key) continue;
+            const value = Number(row.total ?? 0);
+            mergedCreditsByApiType.set(key, (mergedCreditsByApiType.get(key) ?? 0) + value);
+        }
 
         // 项目数（工作流模板）
         const projectQb = this.templateRepo
@@ -351,15 +387,59 @@ export class AdminService {
         applyDateFilter(projectQb, 't');
         const projectCount = await projectQb.getCount();
 
+        // 项目分类统计（按 workflow_template.category 分组）
+        const projectCategoryQb = this.templateRepo
+            .createQueryBuilder("t")
+            .select("t.category", "categoryCode")
+            .addSelect("COUNT(1)", "count")
+            .where("t.user_id = :userId", { userId })
+            .groupBy("t.category");
+        applyDateFilter(projectCategoryQb, "t");
+        const projectCategoryRows = await projectCategoryQb.getRawMany();
+
+        const allCategories = await this.categoryRepo.find({
+            select: ["code", "name", "sort_order"],
+            order: { sort_order: "ASC" },
+        });
+        const countByCode = new Map<string, number>();
+        let uncategorizedCount = 0;
+        for (const r of projectCategoryRows) {
+            const codeRaw = typeof r.categoryCode === "string" ? r.categoryCode.trim() : "";
+            const count = Number(r.count ?? 0);
+            if (!codeRaw) {
+                uncategorizedCount += count;
+                continue;
+            }
+            countByCode.set(codeRaw, (countByCode.get(codeRaw) ?? 0) + count);
+        }
+
+        const projectCountByCategory: Array<{ categoryCode: string; categoryName: string; count: number }> = allCategories.map((c) => ({
+            categoryCode: c.code,
+            categoryName: c.name,
+            count: countByCode.get(c.code) ?? 0,
+        }));
+
+        // 有历史项目未设置分类时，附加“未分类”
+        if (uncategorizedCount > 0) {
+            projectCountByCategory.push({
+                categoryCode: "__uncategorized__",
+                categoryName: "未分类",
+                count: uncategorizedCount,
+            });
+        }
+
         return {
             user,
             lastLoginTime: lastLogin?.created_at || null,
-            totalCreditsUsed: Number(totalCreditsUsed),
+            totalCreditsUsed,
             projectCount,
-            creditsByApiType: creditsByApiType.map((r: any) => ({
-                apiType: r.apiType,
-                total: Number(r.total)
-            })),
+            projectCountByCategory,
+            creditsByApiType: Array.from(mergedCreditsByApiType.entries())
+                .map(([type, total]) => ({
+                    apiType: type,
+                    total,
+                }))
+                .sort((a, b) => b.total - a.total),
             filters: { startDate: filters?.startDate, endDate: filters?.endDate, apiType: filters?.apiType }
         };
     }

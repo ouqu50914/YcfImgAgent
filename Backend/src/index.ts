@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import { DataSource } from "typeorm";
 import path from "path";
+import { URL } from "url";
 
 import { AppDataSource } from "./data-source";
 import { ApiConfig } from "./entities/ApiConfig";
@@ -46,11 +47,28 @@ app.use(
   );
 // CORS 配置
 // ALLOWED_ORIGINS 环境变量格式：用逗号分隔的域名列表，例如：https://ouqu.top,http://localhost:5173
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'];
+const allowedOrigins = (process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'])
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+const isDev = process.env.NODE_ENV !== "production";
+
+function isAllowedDevOrigin(origin: string): boolean {
+    if (!isDev) return false;
+    try {
+        const { protocol, hostname } = new URL(origin);
+        if (protocol !== "http:" && protocol !== "https:") return false;
+        if (hostname === "localhost" || hostname === "127.0.0.1") return true;
+        // 支持常见局域网访问（例如手机或同网段设备调试）
+        return /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname);
+    } catch {
+        return false;
+    }
+}
+
 app.use(cors({
     origin: (origin, callback) => {
         // 允许没有origin的请求（如移动应用、Postman等）
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        if (!origin || allowedOrigins.includes(origin) || isAllowedDevOrigin(origin)) {
             callback(null, true);
         } else {
             callback(new Error('不允许的CORS源'));

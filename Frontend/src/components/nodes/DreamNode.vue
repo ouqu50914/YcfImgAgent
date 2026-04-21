@@ -13,14 +13,11 @@
                 <div class="param-item">
                     <div class="param-label">模型</div>
                     <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
-                        <el-option label="Seedream" value="dream" />
-                        <el-option label="Midjourney" value="midjourney" />
-                        <el-option label="Nano Banana 2" value="nano:nano-banana-2" />
-                        <el-option label="Nano Banana Pro" value="nano:nano-banana-pro" />
                         <el-option
-                            v-if="userStore.userInfo?.role === 1"
-                            label="AnyFast Gemini 3.1 Flash Image Preview"
-                            value="anyfast:gemini-3.1-flash-image-preview"
+                            v-for="option in availableModelOptions"
+                            :key="option.value"
+                            :label="option.label"
+                            :value="option.value"
                         />
                     </el-select>
                 </div>
@@ -44,7 +41,7 @@
                         placeholder="画质" 
                         size="small" 
                         class="param-select" 
-                        :disabled="!availableResolutions.length"
+                        :disabled="!availableResolutions.length || isGemini3ProModel"
                     >
                         <el-option 
                             v-for="res in availableResolutions" 
@@ -177,6 +174,21 @@ const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlo
 const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
+const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
+const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image-preview';
+const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image-preview';
+const ALL_MODEL_OPTIONS = [
+    { label: 'Seedream', value: 'dream' },
+    { label: 'Midjourney', value: 'midjourney' },
+    { label: 'NanoBanana2(ace)（6/张）', value: 'nano:nano-banana-2' },
+    { label: 'NanoBanana Pro(ace)（6/张）', value: 'nano:nano-banana-pro' },
+    { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image-preview' },
+    { label: 'NanoBanana Pro(anyfast)（2K:15/张，4K:20/张）', value: ANYFAST_PRO_MODEL },
+] as const;
+const availableModelOptions = computed(() => {
+    if (isSuperAdmin.value) return ALL_MODEL_OPTIONS;
+    return ALL_MODEL_OPTIONS.filter(option => option.value !== ANYFAST_PRO_MODEL);
+});
 
 const extractTextFromPromptDoc = (node: unknown): string => {
     if (!node || typeof node !== 'object') return '';
@@ -201,6 +213,22 @@ const getPromptTextFromNodeData = (data: unknown): string => {
     return fromDoc;
 };
 
+const logFrontendE2ETiming = (
+    stage: 'request_started' | 'response_received' | 'ui_data_bound' | 'first_image_rendered' | 'first_image_render_failed',
+    traceId: string,
+    requestStartMs: number,
+    extra?: Record<string, unknown>
+) => {
+    const totalMs = performance.now() - requestStartMs;
+    console.log("[DreamNode][Timing][E2E]", {
+        trace_id: traceId,
+        stage,
+        total_ms: Number(totalMs.toFixed(1)),
+        total_seconds: Number((totalMs / 1000).toFixed(3)),
+        ...(extra || {}),
+    });
+};
+
 const logFirstImageLoadTiming = (imageUrl: string, traceId: string, requestStartMs: number) => {
     if (!imageUrl) return;
     const loadStart = performance.now();
@@ -208,8 +236,7 @@ const logFirstImageLoadTiming = (imageUrl: string, traceId: string, requestStart
     img.onload = () => {
         const loadElapsed = performance.now() - loadStart;
         const endToEndElapsed = performance.now() - requestStartMs;
-        console.log("[DreamNode][Timing] 首图加载完成", {
-            trace_id: traceId,
+        logFrontendE2ETiming('first_image_rendered', traceId, requestStartMs, {
             image_url: imageUrl,
             image_load_ms: Number(loadElapsed.toFixed(1)),
             end_to_end_ms: Number(endToEndElapsed.toFixed(1)),
@@ -217,6 +244,10 @@ const logFirstImageLoadTiming = (imageUrl: string, traceId: string, requestStart
     };
     img.onerror = () => {
         const loadElapsed = performance.now() - loadStart;
+        logFrontendE2ETiming('first_image_render_failed', traceId, requestStartMs, {
+            image_url: imageUrl,
+            image_load_ms: Number(loadElapsed.toFixed(1)),
+        });
         console.warn("[DreamNode][Timing] 首图加载失败", {
             trace_id: traceId,
             image_url: imageUrl,
@@ -229,7 +260,12 @@ const logFirstImageLoadTiming = (imageUrl: string, traceId: string, requestStart
 // 积分：普通用户需要校验
 const executeCost = computed(() => {
     const q = apiType.value === 'nano' && !quality.value ? '2K' : quality.value;
-    return getCreditCost(apiType.value, 'generate', { quality: q || '2K', imageCount: numImages.value });
+    return getCreditCost(apiType.value, 'generate', {
+        quality: q || '2K',
+        imageCount: numImages.value,
+        model: nanoModel.value,
+        providerHint: providerHint.value,
+    });
 });
 const canExecuteCredits = computed(() => {
     return userStore.canAffordOperation(executeCost.value);
@@ -247,11 +283,12 @@ const initialSelectedModel = (() => {
     }
     if (props.data?.apiType === 'nano') {
         const m = (props.data as any).model as string | undefined;
+        if (m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image-preview';
         if (m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image-preview';
         if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
         if (m === 'nano-banana-2') return 'nano:nano-banana-2';
-        // 默认使用 nano-banana-2
-        return 'nano:nano-banana-2';
+        // 默认走 AnyFast（若用户未显式选择）
+        return 'anyfast:gemini-3.1-flash-image-preview';
     }
     return (props.data?.apiType || 'dream') as string;
 })();
@@ -268,10 +305,10 @@ const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
 });
 
 // 计算属性：从 selectedModel 中提取具体的 nano 模型
-const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | undefined>(() => {
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | undefined>(() => {
     if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
     const parts = selectedModel.value.split(':');
-    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview';
+    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview';
 });
 
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
@@ -279,6 +316,8 @@ const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
     if (selectedModel.value.startsWith('nano:')) return 'ace';
     return undefined;
 });
+
+const isGemini3ProModel = computed(() => selectedModel.value === ANYFAST_PRO_MODEL);
 
 // toast 去重，避免频繁提示
 const lastToastKey = ref<string>('');
@@ -288,8 +327,19 @@ const toastOnce = (key: string, message: string) => {
     ElMessage.info(message);
 };
 
+watch(
+    [isSuperAdmin, selectedModel],
+    ([admin, model]) => {
+        if (admin || model !== ANYFAST_PRO_MODEL) return;
+        selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
+        toastOnce('anyfast-pro-forbidden', '普通用户不支持 NanoBanana Pro(anyfast)，已自动切换到 NanoBanana2(anyfast)');
+    },
+    { immediate: true }
+);
+
 // 可用的分辨率选项：Dream 含 standard，Nano Banana 系列为 1K/2K/4K
 const availableResolutions = computed(() => {
+    if (isGemini3ProModel.value) return ['4K'];
     if (apiType.value === 'dream') return ['1K', '2K', '4K', 'standard'];
     return ['1K', '2K', '4K'];
 });
@@ -332,7 +382,9 @@ const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): 
 watch(selectedModel, (newModel) => {
     const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:');
     const isMidjourney = newModel === 'midjourney';
-    if (isNano) {
+    if (newModel === ANYFAST_PRO_MODEL) {
+        quality.value = '4K';
+    } else if (isNano) {
         if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
             quality.value = '2K';
         }
@@ -541,6 +593,7 @@ const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'succ
         const data = res?.data as any;
         const status = data?.status;
         const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
+        const syncStatus = typeof data?.sync_status === 'string' ? data.sync_status : 'pending';
 
         if (allImages.length > 0) {
             const fullUrls = allImages.map((url: string) => getUploadUrl(url));
@@ -559,6 +612,7 @@ const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'succ
             }
             markPendingPlaceholdersAsError();
             saveWorkflowImmediately();
+            startCosSyncWatcher(generationKey, allImages, syncStatus);
             return 'success';
         }
 
@@ -568,6 +622,92 @@ const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'succ
     } catch {
         return 'not_found';
     }
+};
+
+const sameStringArray = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((v, i) => v === b[i]);
+
+const applyLatestImagesToUi = (rawImages: string[]) => {
+    if (!rawImages.length) return;
+    const fullUrls = rawImages.map((url) => getUploadUrl(url));
+    imageUrls.value = fullUrls;
+    imageUrl.value = fullUrls[0] || '';
+    props.data.imageUrl = rawImages[0];
+    props.data.imageUrls = rawImages;
+
+    setNodes(nodes => {
+        const related = nodes
+            .filter((n: any) => n?.type === 'image' && (n?.data as any)?.fromNodeId === props.id && !(n?.data as any)?.isLoading)
+            .sort((a: any, b: any) => Number(a.position?.y ?? 0) - Number(b.position?.y ?? 0));
+        if (!related.length) return nodes;
+        const idToIndex = new Map<string, number>();
+        related.forEach((n: any, idx: number) => idToIndex.set(n.id, idx));
+        return nodes.map((node: any) => {
+            const idx = idToIndex.get(node.id);
+            if (idx == null) return node;
+            const raw = rawImages[idx] ?? rawImages[0] ?? '';
+            if (!raw) return node;
+            return {
+                ...node,
+                data: {
+                    ...node.data,
+                    imageUrl: getUploadUrl(raw),
+                    originalImageUrl: raw,
+                },
+            };
+        });
+    });
+    saveWorkflowImmediately();
+};
+
+const cosSyncWatcherMap = new Map<string, ReturnType<typeof setInterval>>();
+
+const stopCosSyncWatcher = (generationKey: string) => {
+    const timer = cosSyncWatcherMap.get(generationKey);
+    if (timer) {
+        clearInterval(timer);
+        cosSyncWatcherMap.delete(generationKey);
+    }
+};
+
+const startCosSyncWatcher = (generationKey: string, initialRawImages: string[], initialSyncStatus?: string) => {
+    if (!generationKey || !initialRawImages.length) return;
+    if (initialSyncStatus === 'synced') return;
+    if (cosSyncWatcherMap.has(generationKey)) return;
+
+    let lastRawImages = [...initialRawImages];
+    let attempts = 0;
+    const maxAttempts = 36; // 最长约 3 分钟（5 秒一次）
+    const timer = setInterval(async () => {
+        attempts += 1;
+        if (attempts > maxAttempts) {
+            stopCosSyncWatcher(generationKey);
+            return;
+        }
+        try {
+            const res: any = await getImageGenerateResultByGenerationKey(generationKey);
+            const data = res?.data as any;
+            const latestRawImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
+            if (!latestRawImages.length) return;
+
+            const syncStatus = typeof data?.sync_status === 'string' ? data.sync_status : 'pending';
+            if (!sameStringArray(lastRawImages, latestRawImages)) {
+                applyLatestImagesToUi(latestRawImages);
+                console.log('[DreamNode][Timing] url_switched_to_cos', {
+                    trace_id: generationKey,
+                    sync_status: syncStatus,
+                });
+                lastRawImages = [...latestRawImages];
+            }
+            if (syncStatus === 'synced' || syncStatus === 'failed') {
+                stopCosSyncWatcher(generationKey);
+            }
+        } catch {
+            // 忽略本轮错误，继续下一轮
+        }
+    }, 5000);
+
+    cosSyncWatcherMap.set(generationKey, timer);
 };
 
 
@@ -687,6 +827,7 @@ const handleGenerate = async () => {
         } else if (apiType.value === 'nano') {
             // Nano Banana 2 / Nano Banana Pro (Ace Data Cloud)
             requestParams.aspectRatio = aspectRatio.value;
+            if (isGemini3ProModel.value) quality.value = '4K';
             if (quality.value) requestParams.quality = quality.value;
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
@@ -709,6 +850,11 @@ const handleGenerate = async () => {
         // 并为本次生成生成一个幂等 generationKey，刷新/历史恢复后可用该 key 查询最终结果。
         generationKey = `imggen_${String(props.id)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         requestParams.generationKey = generationKey;
+        logFrontendE2ETiming('request_started', generationKey, requestStartMs, {
+            node_id: String(props.id),
+            api_type: apiType.value,
+            expected_images: numImages.value || 1,
+        });
         const tid = workflowTemplateId?.value;
         if (tid != null && tid > 0) {
             requestParams.templateId = tid;
@@ -723,12 +869,16 @@ const handleGenerate = async () => {
             api_elapsed_ms: Number((performance.now() - requestStartMs).toFixed(1)),
             has_data: !!res?.data,
         });
+        logFrontendE2ETiming('response_received', generationKey || "unknown", requestStartMs, {
+            has_data: !!res?.data,
+        });
         
         console.log('👉 后端原始返回:', res);
         // 后端返回格式: { message: "任务提交成功", data: { image_url: "...", all_images: [...] } }
         if (res.data) {
             // 处理多图结果
             const allImages = res.data.all_images || (res.data.image_url ? [res.data.image_url] : []);
+            const syncStatus = typeof res.data.sync_status === 'string' ? res.data.sync_status : 'pending';
             
             if (allImages.length > 0) {
                 // 转换所有图片URL为完整URL
@@ -776,6 +926,11 @@ const handleGenerate = async () => {
                 });
 
                 saveWorkflowImmediately();
+                logFrontendE2ETiming('ui_data_bound', generationKey || "unknown", requestStartMs, {
+                    returned_images: fullUrls.length,
+                    failed_placeholders: failedCount,
+                });
+                startCosSyncWatcher(generationKey, allImages, syncStatus);
             } else if (res.data.image_url) {
                 // 兼容旧格式：只有 image_url
                 const url = res.data.image_url.startsWith('http')
@@ -813,6 +968,11 @@ const handleGenerate = async () => {
                 });
 
                 saveWorkflowImmediately();
+                logFrontendE2ETiming('ui_data_bound', generationKey || "unknown", requestStartMs, {
+                    returned_images: 1,
+                    failed_placeholders: failedCount,
+                });
+                startCosSyncWatcher(generationKey, [res.data.image_url], syncStatus);
             } else {
                 console.warn('后端返回数据:', res.data);
                 markPendingPlaceholdersAsError();
@@ -1043,6 +1203,7 @@ const reconcilePendingImagePlaceholders = async () => {
             const data = res?.data as any;
             const status = data?.status;
             const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
+            const syncStatus = typeof data?.sync_status === 'string' ? data.sync_status : 'pending';
 
             // 优先以“是否已经拿到图片URL”为准：只要有结果就回填成功，
             // 不必纠结 status=0/1 的语义（避免“猜测还没完成”的体验问题）。
@@ -1064,6 +1225,7 @@ const reconcilePendingImagePlaceholders = async () => {
                 }
 
                 markPendingPlaceholdersAsError();
+                startCosSyncWatcher(generationKey, allImages, syncStatus);
                 continue;
             }
 
@@ -1121,6 +1283,9 @@ onMounted(() => {
 onUnmounted(() => {
     if (reconcileInterval) clearInterval(reconcileInterval);
     reconcileInterval = null;
+    for (const key of cosSyncWatcherMap.keys()) {
+        stopCosSyncWatcher(key);
+    }
 });
 
 // 将仍处于 pending 的占位节点统一落为失败态，避免长期“生成中”
@@ -1190,7 +1355,25 @@ const appendExtraImageNodesIfNeeded = (fullUrls: string[], originalUrls: string[
 };
 
 const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
+const hasInlineDataUrl = (val: unknown): boolean => typeof val === 'string' && val.startsWith('data:image/');
+const shouldSkipWorkflowSaveForLargePayload = (): boolean => {
+    if (hasInlineDataUrl((props.data as any)?.imageUrl)) return true;
+    if (Array.isArray((props.data as any)?.imageUrls) && (props.data as any).imageUrls.some((x: unknown) => hasInlineDataUrl(x))) {
+        return true;
+    }
+    // 仅检查当前生图节点产出的图片节点，避免被其它节点（如上传预览）误伤导致一直无法保存
+    return getNodes.value.some((n: any) => {
+        if (n?.type !== 'image') return false;
+        const nodeData = (n?.data as any) || {};
+        if (nodeData?.fromNodeId !== props.id) return false;
+        return hasInlineDataUrl(nodeData?.imageUrl) || hasInlineDataUrl(nodeData?.originalImageUrl);
+    });
+};
 const saveWorkflowImmediately = () => {
+    if (shouldSkipWorkflowSaveForLargePayload()) {
+        console.warn('[DreamNode] 跳过自动保存：检测到 data URL，等待同步为短链接后再保存');
+        return;
+    }
     if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
         try {
             workflowPersistence.saveImmediately();

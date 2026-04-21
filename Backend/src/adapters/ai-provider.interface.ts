@@ -14,7 +14,7 @@ export interface GenerateParams {
     /** 与 imageUrls 同顺序的图片别名数字（例如 4 表示“图4”），用于构建 @图N 与具体图片的映射说明 */
     imageAliases?: number[];
     quality?: string; // 画质：1K、2K、4K（Nano Banana Pro）或 standard（Seedream）
-    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview'; // 模型选择
+    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview'; // 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）
     providerHint?: 'ace' | 'anyfast'; // 可选的供应商提示
     mode?: 'fast' | 'relax' | 'turbo'; // Midjourney 生成模式
