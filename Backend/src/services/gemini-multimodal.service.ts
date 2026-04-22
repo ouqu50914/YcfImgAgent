@@ -478,6 +478,8 @@ export async function callGeminiChatCompletionsWithVision(
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${API_KEY}`,
             },
+            // 强制直连，不使用系统代理（如 HTTPS_PROXY）
+            proxy: false,
             timeout: 300000,
         });
 
@@ -555,6 +557,8 @@ export async function requestGeminiChatVisionStream(
             "Content-Type": "application/json",
             Authorization: `Bearer ${API_KEY}`,
         },
+        // 强制直连，不使用系统代理（如 HTTPS_PROXY）
+        proxy: false,
         responseType: "stream",
         timeout: 300000,
     });
@@ -701,6 +705,8 @@ export async function callGeminiGenerateContent(params: GeminiGenerateContentPar
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${API_KEY}`,
             },
+            // 强制直连，不使用系统代理（如 HTTPS_PROXY）
+            proxy: false,
             timeout: GEMINI_GENERATE_CONTENT_TIMEOUT_MS,
         });
 

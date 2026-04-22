@@ -10,6 +10,7 @@ interface ChatMessage {
 interface GeminiChatOptions {
     temperature?: number;
     maxTokens?: number;
+    debugTag?: string;
 }
 
 export class PromptService {
@@ -112,6 +113,18 @@ export class PromptService {
             payload.max_tokens = options.maxTokens;
         }
 
+        const debugTag = options?.debugTag || "default";
+        const previewMessage = messages[messages.length - 1]?.content || "";
+        console.log("[PromptService] Gemini chat 请求", {
+            debug_tag: debugTag,
+            url: API_URL,
+            model: MODEL,
+            message_count: messages.length,
+            preview: previewMessage.slice(0, 220),
+            temperature: payload.temperature,
+            max_tokens: payload.max_tokens,
+        });
+
         try {
             const response = await axios.post(
                 API_URL,
@@ -121,9 +134,17 @@ export class PromptService {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${API_KEY}`,
                     },
+                    // 强制直连，不使用系统代理（如 HTTPS_PROXY）
+                    proxy: false,
                     timeout: 180000,
                 }
             );
+            console.log("[PromptService] Gemini chat 响应", {
+                debug_tag: debugTag,
+                status: response.status,
+                has_choices: Array.isArray(response.data?.choices),
+                top_level_keys: response.data && typeof response.data === "object" ? Object.keys(response.data) : [],
+            });
 
             const data = response.data;
 
@@ -148,9 +169,18 @@ export class PromptService {
                 throw new Error('Gemini 返回数据格式异常');
             }
 
+            console.log("[PromptService] Gemini chat 解析成功", {
+                debug_tag: debugTag,
+                reply_preview: reply.trim().slice(0, 220),
+            });
             return reply.trim();
         } catch (error: any) {
-            console.error('[PromptService] Gemini chat-completions 调用失败:', error?.message || error);
+            console.error('[PromptService] Gemini chat-completions 调用失败:', {
+                debug_tag: debugTag,
+                message: error?.message || error,
+                status: error?.response?.status,
+                response_data: error?.response?.data,
+            });
             throw new Error('Gemini 聊天服务调用失败，请稍后重试');
         }
     }

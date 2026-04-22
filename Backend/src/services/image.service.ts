@@ -99,6 +99,27 @@ export class ImageService {
         return url;
     }
 
+    private getErrorMessage(error: unknown): string {
+        if (error instanceof Error) return error.message;
+        if (typeof error === "string") return error;
+        if (error && typeof error === "object") {
+            const e = error as any;
+            const candidate =
+                e?.message ||
+                e?.error?.message ||
+                e?.response?.data?.message ||
+                e?.response?.data?.error?.message ||
+                e?.msg;
+            if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+            try {
+                return JSON.stringify(error);
+            } catch {
+                return String(error);
+            }
+        }
+        return String(error);
+    }
+
     private toDataUrlBuffer(imageInput: string): { mimeType: string; buffer: Buffer } | null {
         const m = imageInput.match(/^data:([^;]+);base64,(.+)$/);
         if (!m || !m[1] || !m[2]) return null;
@@ -461,7 +482,7 @@ export class ImageService {
                             request_id: requestId,
                             attempt: i,
                             provider: "ace",
-                            message: error instanceof Error ? error.message : String(error),
+                            message: this.getErrorMessage(error),
                         });
                         const canRetryAce = this.shouldFallback(error) && i < this.nanoAceMaxAttemptsPerRequest;
                         if (!canRetryAce) break;
@@ -509,7 +530,7 @@ export class ImageService {
                         request_id: requestId,
                         attempt: providerChain.length,
                         provider: "anyfast",
-                        message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                        message: this.getErrorMessage(fallbackError),
                     });
                     throw fallbackError;
                 }
@@ -549,7 +570,7 @@ export class ImageService {
                     request_id: requestId,
                     attempt: 1,
                     provider: primary,
-                    message: primaryError instanceof Error ? primaryError.message : String(primaryError),
+                    message: this.getErrorMessage(primaryError),
                 });
                 if (!this.shouldFallback(primaryError) || fallback === primary) throw primaryError;
                 switchReason = primaryError instanceof ProviderError ? primaryError.code : "PRIMARY_FAILED";
@@ -580,7 +601,7 @@ export class ImageService {
                 };
             }
         } catch (error) {
-            const msg = error instanceof Error ? error.message : "未知错误";
+            const msg = this.getErrorMessage(error) || "未知错误";
             console.error("[ImageService][NanoPolicyRequest] failed", {
                 request_seq: requestSeq,
                 request_id: requestId,

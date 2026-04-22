@@ -28,6 +28,10 @@ export interface UpdateTemplateParams {
     description?: string;
 }
 
+export interface TranslateErrorMessageParams {
+    message: string;
+}
+
 // 调用提示词优化接口
 export const optimizePrompt = (data: OptimizeParams) => {
     return request.post('/prompt/optimize', data);
@@ -56,4 +60,8 @@ export const deletePromptTemplate = (id: number) => {
 
 export const searchPromptTemplates = (keyword: string) => {
     return request.get('/prompt/templates/search', { params: { keyword } });
+};
+
+export const translateErrorMessage = (data: TranslateErrorMessageParams) => {
+    return request.post('/prompt/translate-error', data);
 };

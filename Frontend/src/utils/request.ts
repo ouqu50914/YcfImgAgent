@@ -2,6 +2,7 @@ import axios, { AxiosError, type AxiosRequestConfig } from 'axios';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import router from '@/router';
+import { showTranslatedErrorToast } from '@/utils/error-toast';
 
 // 创建 axios 实例
 const service = axios.create({
@@ -37,7 +38,7 @@ const redirectToLoginOnce = (userStore: ReturnType<typeof useUserStore>, message
   authRedirectInProgress = true;
   lastAuthExpiredToken = tokenNow;
 
-  ElMessage.error(message || '登录已过期，请重新登录');
+  void showTranslatedErrorToast(message || '登录已过期，请重新登录');
   userStore.logout();
 
   const p = router.push('/login') as unknown as Promise<void>;
@@ -254,7 +255,7 @@ service.interceptors.response.use(
           backendMsg?.includes('KLING_SECRET_KEY');
 
         if (isUpstreamUnauthorized) {
-          ElMessage.error(backendMsg || fallbackMsg);
+          void showTranslatedErrorToast(backendMsg || fallbackMsg);
           return Promise.reject(error);
         }
 
@@ -276,9 +277,9 @@ service.interceptors.response.use(
             retryAfter,
           });
           if (guessed) {
-            ElMessage.error(guessed);
+            void showTranslatedErrorToast(guessed);
           } else {
-            ElMessage.error(backendMsg || fallbackMsg);
+            void showTranslatedErrorToast(backendMsg || fallbackMsg);
           }
         }
       }
@@ -295,16 +296,16 @@ service.interceptors.response.use(
         retryAfter,
       });
       if (guessed) {
-        ElMessage.error(guessed);
+        void showTranslatedErrorToast(guessed);
       } else if (isUpload && backendMsg) {
         // 上传接口：后端 message 已是中文时可直接展示
-        ElMessage.error(backendMsg);
+        void showTranslatedErrorToast(backendMsg);
       } else if (backendMsg && /[\u4e00-\u9fa5]/.test(backendMsg)) {
         // 仅当后端 message 含中文时直接展示，避免英文直出
-        ElMessage.error(backendMsg);
+        void showTranslatedErrorToast(backendMsg);
       } else {
         // 兜底：统一中文文案
-        ElMessage.error(fallbackMsg);
+        void showTranslatedErrorToast(fallbackMsg);
       }
     }
 

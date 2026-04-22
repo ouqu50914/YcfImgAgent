@@ -33,6 +33,16 @@ if (process.env.NODE_ENV !== "production") {
     dotenv.config({ path: ".env.local", override: true });
 }
 
+// 本地开发默认禁用全局代理，避免 SDK/HTTP 客户端被 127.0.0.1:7890 等代理劫持。
+if (process.env.NODE_ENV !== "production") {
+    delete process.env.HTTP_PROXY;
+    delete process.env.HTTPS_PROXY;
+    delete process.env.ALL_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.https_proxy;
+    delete process.env.all_proxy;
+}
+
 const app = express();
 const enableHsts = process.env.ENABLE_HSTS === "true";
 

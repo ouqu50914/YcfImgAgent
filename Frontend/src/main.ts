@@ -9,8 +9,10 @@ import './styles/theme.css';
 import App from './App.vue'
 import router from './router'
 import { createPinia } from 'pinia'
+import { installErrorToastInterceptor } from '@/utils/error-toast'
 
 const app = createApp(App)
+installErrorToastInterceptor()
 app.use(createPinia())
 app.use(ElementPlus, { locale: zhCn })
 app.use(router)

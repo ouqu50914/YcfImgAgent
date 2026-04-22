@@ -77,9 +77,19 @@ export class AnyfastNanoAdapter implements AiProvider {
             if (m && m[1] && m[2]) return { mimeType: m[1], data: m[2] };
         }
 
-        const pathPart = imageInput.startsWith("http") && imageInput.includes("/uploads/")
-            ? new URL(imageInput).pathname
-            : imageInput;
+        // 对公网 URL（包括 /uploads/ 开头的静态域名）优先走 HTTP 拉取，
+        // 避免本地/COS SDK 读对象失败导致回退链路提前中断。
+        if (imageInput.startsWith("http://") || imageInput.startsWith("https://")) {
+            const res = await axiosClient.get(imageInput, {
+                responseType: "arraybuffer",
+                timeout: ANYFAST_REQUEST_TIMEOUT_MS,
+            });
+            const buffer = Buffer.from(res.data);
+            const detected = detectImageFormat({ firstBytes: buffer.subarray(0, 32) });
+            return { mimeType: detected.mime, data: buffer.toString("base64") };
+        }
+
+        const pathPart = imageInput;
 
         let buffer: Buffer | null = null;
         if (pathPart.startsWith("/uploads/") || pathPart.includes("/uploads/")) {
@@ -90,12 +100,6 @@ export class AnyfastNanoAdapter implements AiProvider {
             if (fs.existsSync(localPath)) {
                 buffer = await fs.promises.readFile(localPath);
             }
-        } else {
-            const res = await axiosClient.get(imageInput, {
-                responseType: "arraybuffer",
-                timeout: ANYFAST_REQUEST_TIMEOUT_MS,
-            });
-            buffer = Buffer.from(res.data);
         }
 
         if (!buffer) {

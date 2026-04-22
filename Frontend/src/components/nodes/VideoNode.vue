@@ -309,6 +309,7 @@ import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
+import { translateErrorText } from '@/utils/error-toast';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -319,12 +320,28 @@ const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } 
 const userStore = useUserStore();
 
 function notifyVideoGen(success: boolean, message: string) {
-  void notifyMediaGeneration({
-    kind: 'video',
-    success,
-    nodeId: String(props.id),
-    message
-  });
+  if (success) {
+    void notifyMediaGeneration({
+      kind: 'video',
+      success: true,
+      nodeId: String(props.id),
+      message
+    });
+    return;
+  }
+
+  void (async () => {
+    const translated = await translateErrorText(message, '视频生成失败，请稍后重试');
+    errorMessage.value = translated;
+    syncResultVideoNode();
+    void notifyMediaGeneration({
+      kind: 'video',
+      success: false,
+      nodeId: String(props.id),
+      message: translated
+    });
+    ElMessage.error(translated);
+  })();
 }
 
 type CreditTrackerStore = {

@@ -151,6 +151,7 @@ import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
 import { getUploadUrl } from '@/utils/image-loader';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
+import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 
 // 声明 emits 以消除 Vue Flow 的警告
@@ -1015,6 +1016,7 @@ const handleGenerate = async () => {
         }
 
         const errMsg =
+            (error as any)?.response?.data?.message ||
             (error as Error)?.message ||
             (typeof error === 'string' ? error : '') ||
             '图片生成失败，请稍后重试';
@@ -1023,13 +1025,14 @@ const handleGenerate = async () => {
             saveWorkflowImmediately();
             return;
         }
+        const translatedErrMsg = await translateErrorText(errMsg, '图片生成失败，请稍后重试');
         void notifyMediaGeneration({
             kind: 'image',
             success: false,
             nodeId: String(props.id),
-            message: errMsg
+            message: translatedErrMsg
         });
-        ElMessage.error(errMsg || '图片生成失败，请稍后重试');
+        ElMessage.error(translatedErrMsg || '图片生成失败，请稍后重试');
         saveWorkflowImmediately();
     } finally {
         loading.value = false;

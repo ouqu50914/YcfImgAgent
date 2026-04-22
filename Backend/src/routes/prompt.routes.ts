@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { optimizePrompt, geminiChat, geminiChatStream } from "../controllers/prompt.controller";
+import {
+    optimizePrompt,
+    geminiChat,
+    geminiChatStream,
+    translateErrorMessage
+} from "../controllers/prompt.controller";
 import {
     createTemplate,
     getUserTemplates,
@@ -20,6 +25,9 @@ router.post("/gemini-chat", authenticateToken, geminiChat);
 
 // Gemini 聊天接口（流式，SSE，需要登录）
 router.post("/gemini-chat/stream", authenticateToken, geminiChatStream);
+
+// Gemini 错误文案翻译接口（需要登录）
+router.post("/translate-error", authenticateToken, translateErrorMessage);
 
 // 提示词模板接口（需要登录）
 router.post("/templates", authenticateToken, createTemplate);
