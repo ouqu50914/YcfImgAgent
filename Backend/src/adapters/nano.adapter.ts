@@ -27,9 +27,9 @@ const NANO_POLL_INTERVAL_MS = Number(process.env.ACE_NANO_POLL_INTERVAL_MS || "5
 const NANO_MAX_WAIT_MS = Number(
     process.env.ACE_NANO_MAX_WAIT_MS || String(10 * 60 * 1000)
 ); // 默认 10 分钟
-// Ace HTTP 请求超时时间（可通过 ACE_NANO_REQUEST_TIMEOUT_MS 覆盖），默认 30 分钟
+// Ace HTTP 请求超时时间（可通过 ACE_NANO_REQUEST_TIMEOUT_MS 覆盖），默认 10 分钟
 const NANO_REQUEST_TIMEOUT_MS = Number(
-    process.env.ACE_NANO_REQUEST_TIMEOUT_MS || String(30 * 60 * 1000)
+    process.env.ACE_NANO_REQUEST_TIMEOUT_MS || String(10 * 60 * 1000)
 );
 // 调试开关：只打印请求，不真正调用 Ace，避免消耗 token
 const NANO_DRY_RUN = process.env.ACE_NANO_DRY_RUN === "true";

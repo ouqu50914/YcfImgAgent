@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
 import { AnyfastNanoAdapter } from "../adapters/anyfast-nano.adapter";
+import { AnyfastGptImage2Adapter } from "../adapters/anyfast-gpt-image2.adapter";
 import { MidjourneyAdapter } from "../adapters/midjourney.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
 import { CreditService, type CreditLogInfo } from "./credit.service";
@@ -51,6 +52,7 @@ export class ImageService {
         ace: new NanoAdapter(),
         anyfast: new AnyfastNanoAdapter(),
     };
+    private anyfastGptImage2Adapter = new AnyfastGptImage2Adapter();
 
     /**
      * 扣减积分并在失败时回滚，记录使用日志
@@ -359,6 +361,7 @@ export class ImageService {
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
         const isAnyfastProRequest = params.model === "gemini-3-pro-image-preview";
+        const isGptImage2Request = params.model === "gpt-image-2";
         if (!isAdmin && isAnyfastProRequest) {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
                 status: 403,
@@ -375,11 +378,28 @@ export class ImageService {
             });
             throw deniedError;
         }
+        if (!isAdmin && isGptImage2Request) {
+            const deniedError = Object.assign(new Error("普通用户暂不支持使用 GPT Image 2"), {
+                status: 403,
+                code: "GPT_IMAGE2_FORBIDDEN",
+            });
+            console.warn("[ImageService][NanoPolicyRequest] blocked_forbidden_model", {
+                request_seq: requestSeq,
+                request_id: requestId,
+                user_id: hasValidUserId ? normalizedUserId : undefined,
+                is_admin: isAdmin,
+                provider_hint: params.providerHint,
+                model: params.model,
+                reason: "non_admin_forbidden_gpt_image2",
+            });
+            throw deniedError;
+        }
         const requestedAnyfastDirect =
             params.providerHint === "anyfast" ||
             params.model === "gemini-3.1-flash-image-preview" ||
-            params.model === "gemini-3-pro-image-preview";
-        const requestedAceDirect = params.providerHint === "ace";
+            params.model === "gemini-3-pro-image-preview" ||
+            params.model === "gpt-image-2";
+        const requestedAceDirect = params.providerHint === "ace" && params.model !== "gpt-image-2";
 
         // 路由策略（普通用户/管理员统一）：
         // - 用户显式选了 ace/anyfast：按所选为主路由，另一家为兜底
@@ -432,7 +452,9 @@ export class ImageService {
                 mapped_model: mappedModel,
             });
             const adapter = this.nanoProviderAdapters[provider];
-            const result = await adapter.generateImage(providerParams, apiKey, apiUrl);
+            const result = (provider === "anyfast" && params.model === "gpt-image-2")
+                ? await this.anyfastGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl)
+                : await adapter.generateImage(providerParams, apiKey, apiUrl);
             console.log("[ImageService][NanoPolicyRequest] attempt_success", {
                 request_seq: requestSeq,
                 request_id: requestId,
@@ -572,7 +594,9 @@ export class ImageService {
                     provider: primary,
                     message: this.getErrorMessage(primaryError),
                 });
-                if (!this.shouldFallback(primaryError) || fallback === primary) throw primaryError;
+                if (!this.shouldFallback(primaryError) || fallback === primary || params.model === "gpt-image-2") {
+                    throw primaryError;
+                }
                 switchReason = primaryError instanceof ProviderError ? primaryError.code : "PRIMARY_FAILED";
                 const second = await tryProvider(fallback, 2);
                 console.log("[ImageService][NanoPolicyRequest] completed", {

@@ -37,11 +37,17 @@ export class CreditService {
             const model = options?.model;
             const provider = options?.providerHint
                 || (model?.startsWith('gemini-') ? 'anyfast' : undefined)
+                || (model === 'gpt-image-2' ? 'anyfast' : undefined)
                 || (model?.startsWith('nano-banana-') ? 'ace' : undefined)
                 || 'ace';
 
             // AnyFast 按模型 + 分辨率计费
             if (provider === 'anyfast') {
+                if (model === 'gpt-image-2') {
+                    const q = options?.quality === 'high' ? 'high' : options?.quality === 'low' ? 'low' : 'medium';
+                    const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
+                    return perImage * count;
+                }
                 const perImage = model === 'gemini-3-pro-image-preview'
                     ? (quality === '4K' ? 20 : 15)
                     : (quality === '4K' ? 15 : 11);

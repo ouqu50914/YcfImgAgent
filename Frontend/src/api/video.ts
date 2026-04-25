@@ -1,5 +1,7 @@
 import request from '@/utils/request.ts';
 
+const VIDEO_API_TIMEOUT_MS = 30 * 60 * 1000;
+
 export type VideoMode = 'text_to_video' | 'image_to_video' | 'omni';
 
 /** 图生视频子类型：仅首帧 / 首尾帧（一镜到底）/ 多图多镜头 */
@@ -44,11 +46,11 @@ export interface VideoTask {
 }
 
 export const createVideoTask = (data: CreateVideoTaskParams) => {
-  return request.post('/video/tasks', data) as Promise<{ message: string; data: VideoTask }>;
+  return request.post('/video/tasks', data, { timeout: VIDEO_API_TIMEOUT_MS }) as Promise<{ message: string; data: VideoTask }>;
 };
 
 export const getVideoTask = (id: number) => {
-  return request.get(`/video/tasks/${id}`) as Promise<{ message: string; data: VideoTask }>;
+  return request.get(`/video/tasks/${id}`, { timeout: VIDEO_API_TIMEOUT_MS }) as Promise<{ message: string; data: VideoTask }>;
 };
 
 export const listVideoTasks = (params?: {

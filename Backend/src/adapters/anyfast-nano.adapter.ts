@@ -18,7 +18,7 @@ const axiosClient = axios.create({
     httpsAgent: keepAliveHttpsAgent,
 });
 // 默认 90 秒超时，避免 AnyFast 长时间无响应拖慢整体回显；可通过环境变量覆盖
-const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || "300000");
+const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || "600000");
 const ANYFAST_BASE_URL = (process.env.ANYFAST_BASE_URL || "https://www.anyfast.ai").replace(/\/$/, "");
 const ANYFAST_DEFAULT_MODEL = "gemini-3.1-flash-image-preview";
 const ANYFAST_ALLOWED_MODELS = new Set([

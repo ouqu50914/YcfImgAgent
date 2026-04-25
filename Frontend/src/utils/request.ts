@@ -7,7 +7,7 @@ import { showTranslatedErrorToast } from '@/utils/error-toast';
 // 创建 axios 实例
 const service = axios.create({
   baseURL: '/api', // 走 vite 代理，指向 http://localhost:3000/api
-  timeout: 1800000, // 统一超时时间为30分钟
+  timeout: 600000, // 统一超时时间为10分钟
 });
 
 // 存储待重试的请求

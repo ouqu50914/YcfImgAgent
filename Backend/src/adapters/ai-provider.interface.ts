@@ -13,10 +13,19 @@ export interface GenerateParams {
     imageUrls?: string[]; // 多图生图时使用的参考图片URL数组
     /** 与 imageUrls 同顺序的图片别名数字（例如 4 表示“图4”），用于构建 @图N 与具体图片的映射说明 */
     imageAliases?: number[];
-    quality?: string; // 画质：1K、2K、4K（Nano Banana Pro）或 standard（Seedream）
-    model?: 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview'; // 模型选择
+    quality?: string; // 画质：1K、2K、4K（Nano）/ standard（Seedream）/ low|medium|high（GPT Image 2）
+    model?:
+        | 'nano-banana-2'
+        | 'nano-banana-pro'
+        | 'gemini-3.1-flash-image-preview'
+        | 'gemini-3-pro-image-preview'
+        | 'gpt-image-2'; // 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）
     providerHint?: 'ace' | 'anyfast'; // 可选的供应商提示
+    size?: string; // GPT Image 2 尺寸，格式如 "1536x1024"
+    outputFormat?: 'png' | 'webp' | 'jpeg'; // GPT Image 2 输出格式
+    moderation?: 'auto' | 'low'; // GPT Image 2 审核级别
+    outputCompression?: number; // GPT Image 2 压缩级别（仅 jpeg/webp 生效）
     mode?: 'fast' | 'relax' | 'turbo'; // Midjourney 生成模式
     timeout?: number; // Midjourney 超时（秒）
     translation?: boolean; // Midjourney 非英文提示词自动翻译

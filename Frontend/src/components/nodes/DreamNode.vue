@@ -178,9 +178,12 @@ const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId
 const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
 const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image-preview';
 const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image-preview';
+const GPT_IMAGE2_MODEL = 'gpt-image-2';
 const ALL_MODEL_OPTIONS = [
     { label: 'Seedream', value: 'dream' },
     { label: 'Midjourney', value: 'midjourney' },
+    // （low:10/张，medium:14/张，high:18/张）
+    { label: 'GPT Image 2(anyfast）', value: GPT_IMAGE2_MODEL },
     { label: 'NanoBanana2(ace)（6/张）', value: 'nano:nano-banana-2' },
     { label: 'NanoBanana Pro(ace)（6/张）', value: 'nano:nano-banana-pro' },
     { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image-preview' },
@@ -188,7 +191,9 @@ const ALL_MODEL_OPTIONS = [
 ] as const;
 const availableModelOptions = computed(() => {
     if (isSuperAdmin.value) return ALL_MODEL_OPTIONS;
-    return ALL_MODEL_OPTIONS.filter(option => option.value !== ANYFAST_PRO_MODEL);
+    return ALL_MODEL_OPTIONS.filter(
+        option => option.value !== ANYFAST_PRO_MODEL && option.value !== GPT_IMAGE2_MODEL
+    );
 });
 
 const extractTextFromPromptDoc = (node: unknown): string => {
@@ -284,6 +289,7 @@ const initialSelectedModel = (() => {
     }
     if (props.data?.apiType === 'nano') {
         const m = (props.data as any).model as string | undefined;
+        if (m === 'gpt-image-2') return GPT_IMAGE2_MODEL;
         if (m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image-preview';
         if (m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image-preview';
         if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
@@ -302,23 +308,26 @@ const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number'
 // 计算属性：apiType 由 selectedModel 推导
 const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
     if (selectedModel.value === 'midjourney') return 'midjourney';
-    return selectedModel.value.startsWith('nano:') || selectedModel.value.startsWith('anyfast:') ? 'nano' : 'dream';
+    return selectedModel.value === GPT_IMAGE2_MODEL || selectedModel.value.startsWith('nano:') || selectedModel.value.startsWith('anyfast:') ? 'nano' : 'dream';
 });
 
 // 计算属性：从 selectedModel 中提取具体的 nano 模型
-const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | undefined>(() => {
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | 'gpt-image-2' | undefined>(() => {
+    if (selectedModel.value === GPT_IMAGE2_MODEL) return 'gpt-image-2';
     if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
     const parts = selectedModel.value.split(':');
-    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview';
+    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | 'gpt-image-2';
 });
 
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
+    if (selectedModel.value === GPT_IMAGE2_MODEL) return 'anyfast';
     if (selectedModel.value.startsWith('anyfast:')) return 'anyfast';
     if (selectedModel.value.startsWith('nano:')) return 'ace';
     return undefined;
 });
 
 const isGemini3ProModel = computed(() => selectedModel.value === ANYFAST_PRO_MODEL);
+const isGptImage2Model = computed(() => selectedModel.value === GPT_IMAGE2_MODEL);
 
 // toast 去重，避免频繁提示
 const lastToastKey = ref<string>('');
@@ -331,15 +340,23 @@ const toastOnce = (key: string, message: string) => {
 watch(
     [isSuperAdmin, selectedModel],
     ([admin, model]) => {
-        if (admin || model !== ANYFAST_PRO_MODEL) return;
-        selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
-        toastOnce('anyfast-pro-forbidden', '普通用户不支持 NanoBanana Pro(anyfast)，已自动切换到 NanoBanana2(anyfast)');
+        if (admin) return;
+        if (model === ANYFAST_PRO_MODEL) {
+            selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
+            toastOnce('anyfast-pro-forbidden', '普通用户不支持 NanoBanana Pro(anyfast)，已自动切换到 NanoBanana2(anyfast)');
+            return;
+        }
+        if (model === GPT_IMAGE2_MODEL) {
+            selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
+            toastOnce('gpt-image2-forbidden', '普通用户暂不支持 GPT Image 2，已自动切换到 NanoBanana2(anyfast)');
+        }
     },
     { immediate: true }
 );
 
 // 可用的分辨率选项：Dream 含 standard，Nano Banana 系列为 1K/2K/4K
 const availableResolutions = computed(() => {
+    if (isGptImage2Model.value) return ['low', 'medium', 'high'];
     if (isGemini3ProModel.value) return ['4K'];
     if (apiType.value === 'dream') return ['1K', '2K', '4K', 'standard'];
     return ['1K', '2K', '4K'];
@@ -379,11 +396,49 @@ const calculatePixelSize = (aspectRatioValue: string, resolutionValue: string): 
     return ratioMap[aspectRatioValue] || { width: baseSize, height: baseSize };
 };
 
+const roundTo16 = (n: number): number => Math.max(16, Math.round(n / 16) * 16);
+const clamp = (n: number, min: number, max: number): number => Math.max(min, Math.min(max, n));
+const ratioToNumber = (ratioText: string): number => {
+    const m = ratioText.match(/^(\d+):(\d+)$/);
+    if (!m) return 1;
+    const w = Number(m[1]);
+    const h = Number(m[2]);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || h <= 0) return 1;
+    return w / h;
+};
+
+const calculateGptImage2Size = (aspectRatioValue: string, qualityValue: string): string => {
+    const targetPixels = qualityValue === 'high' ? 4194304 : qualityValue === 'low' ? 1048576 : 3145728;
+    const ratio = clamp(ratioToNumber(aspectRatioValue), 1 / 3, 3);
+    let width = roundTo16(Math.sqrt(targetPixels * ratio));
+    let height = roundTo16(width / ratio);
+
+    width = clamp(width, 16, 3840);
+    height = clamp(height, 16, 3840);
+
+    if ((width * height) < 655360) {
+        const scale = Math.sqrt(655360 / Math.max(1, width * height));
+        width = clamp(roundTo16(width * scale), 16, 3840);
+        height = clamp(roundTo16(height * scale), 16, 3840);
+    }
+    if ((width * height) > 8294400) {
+        const scale = Math.sqrt(8294400 / Math.max(1, width * height));
+        width = clamp(roundTo16(width * scale), 16, 3840);
+        height = clamp(roundTo16(height * scale), 16, 3840);
+    }
+    return `${width}x${height}`;
+};
+
 // 监听模型切换，重置不兼容的选项，并同步到节点数据
 watch(selectedModel, (newModel) => {
     const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:');
+    const isGptImage2 = newModel === GPT_IMAGE2_MODEL;
     const isMidjourney = newModel === 'midjourney';
-    if (newModel === ANYFAST_PRO_MODEL) {
+    if (isGptImage2) {
+        if (!quality.value || !['low', 'medium', 'high'].includes(quality.value)) {
+            quality.value = 'medium';
+        }
+    } else if (newModel === ANYFAST_PRO_MODEL) {
         quality.value = '4K';
     } else if (isNano) {
         if (!quality.value || !['1K', '2K', '4K'].includes(quality.value)) {
@@ -399,10 +454,10 @@ watch(selectedModel, (newModel) => {
         }
     }
     // 同步 apiType / model 到节点数据，方便自动保存与恢复
-    const api: 'dream' | 'nano' | 'midjourney' = isMidjourney ? 'midjourney' : (isNano ? 'nano' : 'dream');
+    const api: 'dream' | 'nano' | 'midjourney' = isMidjourney ? 'midjourney' : (isNano || isGptImage2 ? 'nano' : 'dream');
     (props.data as any).apiType = api;
-    (props.data as any).model = isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined);
-    (props.data as any).providerHint = isNano ? providerHint.value : undefined;
+    (props.data as any).model = isGptImage2 ? 'gpt-image-2' : (isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined));
+    (props.data as any).providerHint = (isNano || isGptImage2) ? providerHint.value : undefined;
 }, { immediate: true });
 
 // 将本地参数同步到节点数据，确保自动保存能带上这些配置
@@ -829,10 +884,28 @@ const handleGenerate = async () => {
             // Nano Banana 2 / Nano Banana Pro (Ace Data Cloud)
             requestParams.aspectRatio = aspectRatio.value;
             if (isGemini3ProModel.value) quality.value = '4K';
-            if (quality.value) requestParams.quality = quality.value;
+            if (isGptImage2Model.value) {
+                const normalizedQ = ['low', 'medium', 'high'].includes(quality.value) ? quality.value : 'medium';
+                const computedSize = calculateGptImage2Size(aspectRatio.value, normalizedQ);
+                requestParams.quality = normalizedQ;
+                requestParams.size = computedSize;
+                requestParams.outputFormat = 'png';
+                requestParams.moderation = 'auto';
+                console.log('[DreamNode][GPT-Image2] 请求参数', {
+                    model: 'gpt-image-2',
+                    quality: normalizedQ,
+                    aspectRatio: aspectRatio.value,
+                    size: computedSize,
+                });
+            } else if (quality.value) {
+                requestParams.quality = quality.value;
+            }
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
             console.log(`[前端] Nano/AnyFast 模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+            if (isGptImage2Model.value && processedImageUrls.length > 0) {
+                console.log('[前端] GPT Image 2 图生图：已携带参考图数量', processedImageUrls.length);
+            }
         } else if (apiType.value === 'midjourney') {
             requestParams.mode = 'fast';
             requestParams.translation = true;
