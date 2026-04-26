@@ -10,6 +10,7 @@ import { DreamAdapter } from "../adapters/dream.adapter";
 import { NanoAdapter } from "../adapters/nano.adapter";
 import { AnyfastNanoAdapter } from "../adapters/anyfast-nano.adapter";
 import { AnyfastGptImage2Adapter } from "../adapters/anyfast-gpt-image2.adapter";
+import { AceGptImage2Adapter } from "../adapters/ace-gpt-image2.adapter";
 import { MidjourneyAdapter } from "../adapters/midjourney.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
 import { CreditService, type CreditLogInfo } from "./credit.service";
@@ -53,6 +54,7 @@ export class ImageService {
         anyfast: new AnyfastNanoAdapter(),
     };
     private anyfastGptImage2Adapter = new AnyfastGptImage2Adapter();
+    private aceGptImage2Adapter = new AceGptImage2Adapter();
 
     /**
      * 扣减积分并在失败时回滚，记录使用日志
@@ -394,11 +396,13 @@ export class ImageService {
             });
             throw deniedError;
         }
+        const isGptImage2AceDirect = isGptImage2Request && params.providerHint === "ace";
+        const isGptImage2AnyfastDirect = isGptImage2Request && params.providerHint === "anyfast";
         const requestedAnyfastDirect =
             params.providerHint === "anyfast" ||
             params.model === "gemini-3.1-flash-image-preview" ||
             params.model === "gemini-3-pro-image-preview" ||
-            params.model === "gpt-image-2";
+            isGptImage2AnyfastDirect;
         const requestedAceDirect = params.providerHint === "ace" && params.model !== "gpt-image-2";
 
         // 路由策略（普通用户/管理员统一）：
@@ -408,7 +412,9 @@ export class ImageService {
             ? "ace"
             : requestedAnyfastDirect
                 ? "anyfast"
-                : this.nanoPrimaryProvider;
+                : (isGptImage2AceDirect || isGptImage2Request)
+                    ? "ace"
+                    : this.nanoPrimaryProvider;
         const fallback: "ace" | "anyfast" = primary === "ace" ? "anyfast" : "ace";
         const refCount =
             (params.imageUrls && params.imageUrls.length > 0)
@@ -452,8 +458,10 @@ export class ImageService {
                 mapped_model: mappedModel,
             });
             const adapter = this.nanoProviderAdapters[provider];
-            const result = (provider === "anyfast" && params.model === "gpt-image-2")
-                ? await this.anyfastGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl)
+            const result = params.model === "gpt-image-2"
+                ? (provider === "anyfast"
+                    ? await this.anyfastGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl)
+                    : await this.aceGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl))
                 : await adapter.generateImage(providerParams, apiKey, apiUrl);
             console.log("[ImageService][NanoPolicyRequest] attempt_success", {
                 request_seq: requestSeq,
@@ -511,7 +519,7 @@ export class ImageService {
                     }
                 }
 
-                const canFallbackToAnyfast = isAdmin;
+                const canFallbackToAnyfast = isAdmin && !isGptImage2Request;
                 const canFallback = canFallbackToAnyfast
                     && this.shouldFallback(lastError)
                     && fallback === "anyfast"

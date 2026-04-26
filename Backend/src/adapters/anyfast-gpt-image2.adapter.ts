@@ -48,6 +48,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
     }
 
     private targetPixelsByQuality(raw?: string): number {
+        // low / medium / high -> 1K / 2K / 4K
         if (raw === "high") return 4194304;
         if (raw === "low") return 1048576;
         return 3145728;

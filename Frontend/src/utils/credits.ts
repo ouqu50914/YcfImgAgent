@@ -24,7 +24,7 @@ export function getCreditCost(
     const provider =
       options?.providerHint ||
       (model?.startsWith('gemini-') ? 'anyfast' : undefined) ||
-      (model === 'gpt-image-2' ? 'anyfast' : undefined) ||
+      (model === 'gpt-image-2' ? 'ace' : undefined) ||
       (model?.startsWith('nano-banana-') ? 'ace' : undefined) ||
       'ace';
 
