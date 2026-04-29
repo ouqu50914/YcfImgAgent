@@ -31,7 +31,6 @@ export class AceGptImage2Adapter implements AiProvider {
     }
 
     private targetPixelsByQuality(raw?: string): number {
-        // low / medium / high -> 1K / 2K / 4K
         if (raw === "high") return 4194304;
         if (raw === "low") return 1048576;
         return 3145728;
@@ -131,6 +130,11 @@ export class AceGptImage2Adapter implements AiProvider {
             });
         }
         return `${width}x${height}`;
+    }
+
+    private enrichPromptWithComputedSize(prompt: string, size: string): string {
+        if (prompt.includes(size)) return prompt;
+        return `${prompt}。输出尺寸：${size}。`;
     }
 
     private getBaseUrl(): string {
@@ -309,7 +313,7 @@ export class AceGptImage2Adapter implements AiProvider {
 
         const body: Record<string, unknown> = {
             model: "gpt-image-2",
-            prompt: params.prompt || "生成图片",
+            prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
             size,
         };
 

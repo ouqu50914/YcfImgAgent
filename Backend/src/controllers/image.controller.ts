@@ -38,16 +38,17 @@ export const generateImage = async (req: Request, res: Response) => {
         const isAdmin = userRole === 1;
         const isAnyfastProRequest = model === 'gemini-3-pro-image-preview';
         const isGptImage2Request = model === 'gpt-image-2';
+        const isGptImage2AnyfastRequest = isGptImage2Request && providerHint === 'anyfast';
         if (!isAdmin && isAnyfastProRequest) {
             return res.status(403).json({
                 code: 'ANYFAST_PRO_FORBIDDEN',
                 message: '普通用户暂不支持使用 AnyFast Nano Pro',
             });
         }
-        if (!isAdmin && isGptImage2Request) {
+        if (!isAdmin && isGptImage2AnyfastRequest) {
             return res.status(403).json({
                 code: 'GPT_IMAGE2_FORBIDDEN',
-                message: '普通用户暂不支持使用 GPT Image 2',
+                message: '普通用户暂不支持使用 GPT Image 2(anyfast)',
             });
         }
 

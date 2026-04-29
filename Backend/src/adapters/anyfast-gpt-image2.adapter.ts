@@ -29,14 +29,6 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         };
     }
 
-    private clamp(n: number, min: number, max: number): number {
-        return Math.max(min, Math.min(max, n));
-    }
-
-    private roundTo16(n: number): number {
-        return Math.max(16, Math.round(n / 16) * 16);
-    }
-
     private ratioToNumber(ratioText?: string): number {
         if (!ratioText) return 1;
         const m = ratioText.match(/^(\d+):(\d+)$/);
@@ -47,8 +39,15 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return w / h;
     }
 
+    private clamp(n: number, min: number, max: number): number {
+        return Math.max(min, Math.min(max, n));
+    }
+
+    private roundTo16(n: number): number {
+        return Math.max(16, Math.round(n / 16) * 16);
+    }
+
     private targetPixelsByQuality(raw?: string): number {
-        // low / medium / high -> 1K / 2K / 4K
         if (raw === "high") return 4194304;
         if (raw === "low") return 1048576;
         return 3145728;
@@ -264,6 +263,11 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return `${width}x${height}`;
     }
 
+    private enrichPromptWithComputedSize(prompt: string, size: string): string {
+        if (prompt.includes(size)) return prompt;
+        return `${prompt}。输出尺寸：${size}。`;
+    }
+
     private async saveImageBuffer(buffer: Buffer): Promise<string> {
         const detected = detectImageFormat({ firstBytes: buffer.subarray(0, 32) });
         const fileName = `gptimg2_${uuidv4()}${detected.ext}`;
@@ -293,7 +297,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
 
         const body: Record<string, unknown> = {
             model: "gpt-image-2",
-            prompt: params.prompt || "生成图片",
+            prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
             n: count,
             size,
             quality,

@@ -364,6 +364,7 @@ export class ImageService {
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
         const isAnyfastProRequest = params.model === "gemini-3-pro-image-preview";
         const isGptImage2Request = params.model === "gpt-image-2";
+        const isGptImage2AnyfastRequest = isGptImage2Request && params.providerHint === "anyfast";
         if (!isAdmin && isAnyfastProRequest) {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
                 status: 403,
@@ -380,7 +381,7 @@ export class ImageService {
             });
             throw deniedError;
         }
-        if (!isAdmin && isGptImage2Request) {
+        if (!isAdmin && isGptImage2AnyfastRequest) {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 GPT Image 2"), {
                 status: 403,
                 code: "GPT_IMAGE2_FORBIDDEN",
@@ -392,7 +393,7 @@ export class ImageService {
                 is_admin: isAdmin,
                 provider_hint: params.providerHint,
                 model: params.model,
-                reason: "non_admin_forbidden_gpt_image2",
+                reason: "non_admin_forbidden_gpt_image2_anyfast",
             });
             throw deniedError;
         }
