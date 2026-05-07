@@ -39,6 +39,9 @@ export class VideoTask {
     @Column({ type: "int", nullable: true, comment: "本次生成消耗的积分（扣费成功时写入）" })
     credits_spent!: number | null;
 
+    @Column({ type: "tinyint", default: 0, comment: "失败终态积分是否已退回：0-未退 1-已退" })
+    credits_refunded!: number;
+
     @CreateDateColumn()
     created_at!: Date;
 

@@ -3,6 +3,7 @@ import { SeedanceVideoAdapter, type SeedanceActionType } from "../adapters/seeda
 import { CreditService } from "../services/credit.service";
 import { AppDataSource } from "../data-source";
 import { VideoTask } from "../entities/VideoTask";
+import { User } from "../entities/User";
 import { parseTemplateIdFromBody } from "../utils/template-id";
 
 const adapter = new SeedanceVideoAdapter();
@@ -68,6 +69,9 @@ const startSeedanceWorkerIfNeeded = (userId: number, providerTaskId: string) => 
                 }
 
                 await videoTaskRepo.save(task);
+                if (task.id) {
+                    await refundCreditsIfTerminalFailed(task.id);
+                }
 
                 if (normalizedStatus === "failed" || normalizedStatus === "canceled") return;
                 if (normalizedStatus === "succeeded" && hasVideoUrl) return;
@@ -182,6 +186,65 @@ function buildSeedanceResultFromTask(task: VideoTask) {
     };
 }
 
+async function refundCreditsIfTerminalFailed(taskId: number): Promise<boolean> {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    try {
+        await queryRunner.startTransaction();
+        const taskRepo = queryRunner.manager.getRepository(VideoTask);
+        const userRepo = queryRunner.manager.getRepository(User);
+
+        const task = await taskRepo.findOne({
+            where: { id: taskId },
+            lock: { mode: "pessimistic_write" },
+        });
+        if (!task) {
+            await queryRunner.rollbackTransaction();
+            return false;
+        }
+
+        const normalizedStatus = normalizeSeedanceStatusForUi(task.status);
+        const amount = Number(task.credits_spent ?? 0);
+        if (!["failed", "canceled"].includes(normalizedStatus) || amount <= 0 || Number(task.credits_refunded) === 1) {
+            await queryRunner.rollbackTransaction();
+            return false;
+        }
+
+        const user = await userRepo.findOne({
+            where: { id: task.user_id as any },
+            select: ["id", "credits", "role_id"],
+            lock: { mode: "pessimistic_write" },
+        });
+        if (!user) {
+            await queryRunner.rollbackTransaction();
+            return false;
+        }
+
+        if (Number(user.role_id) !== 1) {
+            user.credits = Number(user.credits || 0) + amount;
+            await userRepo.save(user);
+        }
+
+        task.credits_refunded = 1;
+        await taskRepo.save(task);
+        await queryRunner.commitTransaction();
+        return true;
+    } catch (error) {
+        try {
+            await queryRunner.rollbackTransaction();
+        } catch {
+            // ignore
+        }
+        throw error;
+    } finally {
+        try {
+            await queryRunner.release();
+        } catch {
+            // ignore
+        }
+    }
+}
+
 export const createSeedanceVideo = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
@@ -278,6 +341,7 @@ export const createSeedanceVideo = async (req: Request, res: Response) => {
                 task.finished_at = null;
                 task.template_id = templateId;
                 task.credits_spent = cost;
+                task.credits_refunded = 0;
                 await videoTaskRepo.save(task);
 
                 // 启动后台 worker：保证终态最终一定会落库
@@ -338,6 +402,13 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
         });
 
         if (existingTask && ["succeeded", "failed", "canceled"].includes(normalizeSeedanceStatusForUi(existingTask.status))) {
+            if (existingTask.id) {
+                try {
+                    await refundCreditsIfTerminalFailed(existingTask.id);
+                } catch (e) {
+                    console.error("[SeedanceController] 失败终态自动退款失败:", e);
+                }
+            }
             return res.status(200).json({
                 message: "获取 Seedance 视频任务成功",
                 data: buildSeedanceResultFromTask(existingTask),
@@ -408,6 +479,9 @@ export const getSeedanceVideo = async (req: Request, res: Response) => {
             }
 
             await videoTaskRepo.save(task);
+            if (task.id) {
+                await refundCreditsIfTerminalFailed(task.id);
+            }
         } catch (e) {
             console.error("[SeedanceController] 同步 seedance 任务状态失败:", e);
             // 状态同步失败时仍返回上游结果给前端，避免卡住
@@ -577,6 +651,7 @@ export const createSeedanceAdvancedVideo = async (req: Request, res: Response) =
                 task.finished_at = null;
                 task.template_id = templateId;
                 task.credits_spent = advCost;
+                task.credits_refunded = 0;
                 await videoTaskRepo.save(task);
 
                 // 启动后台 worker：保证终态最终一定会落库

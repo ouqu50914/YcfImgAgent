@@ -239,9 +239,12 @@ export class ImageService {
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
+            imageRecord.model_name = params.model ? String(params.model) : apiType;
+            imageRecord.model_provider = params.providerHint ? String(params.providerHint) : apiType;
             imageRecord.prompt = params.prompt;
             // generation_key 字段在实体里是 string（nullable=true），这里避免把 null 赋给 string 类型。
             imageRecord.generation_key = generationKey ?? '';
+            imageRecord.provider_task_id = null;
             // 0 = pending（未完成）
             imageRecord.status = 0;
             imageRecord.sync_status = "pending";
@@ -255,6 +258,10 @@ export class ImageService {
                 // 2) 调用适配器生成图片（nano 走 Ace 优先 + AnyFast 回退策略）
                 const providerResult = await this.generateByPolicy(apiType, params, config.api_key, config.api_url, userId);
                 const apiResult = providerResult.apiResult;
+                const finalProvider = typeof providerResult.policyTrace?.final_provider === "string"
+                    ? String(providerResult.policyTrace.final_provider).toLowerCase()
+                    : imageRecord.model_provider || apiType;
+                imageRecord.model_provider = finalProvider;
 
                 // 3) 保存结果到数据库（已在适配器中完成转存，直接返回可访问短路径）
                 const allImageUrls = apiResult.images || [];
@@ -265,6 +272,7 @@ export class ImageService {
                 if (persistableFirstUrl !== undefined) {
                     imageRecord.image_url = persistableFirstUrl;
                 }
+                imageRecord.provider_task_id = apiResult.original_id || null;
 
                 imageRecord.status = 1;
                 imageRecord.all_images = JSON.stringify(allImageUrls);
@@ -755,7 +763,10 @@ export class ImageService {
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
+            imageRecord.model_name = apiType;
+            imageRecord.model_provider = apiType;
             imageRecord.prompt = `放大图片 ${params.scale || 2}x`;
+            imageRecord.provider_task_id = apiResult.original_id || null;
             const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
@@ -810,7 +821,10 @@ export class ImageService {
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
+            imageRecord.model_name = apiType;
+            imageRecord.model_provider = apiType;
             imageRecord.prompt = `扩展图片 ${params.direction}`;
+            imageRecord.provider_task_id = apiResult.original_id || null;
             const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
@@ -865,7 +879,10 @@ export class ImageService {
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
+            imageRecord.model_name = apiType;
+            imageRecord.model_provider = apiType;
             imageRecord.prompt = `拆分图片 ${params.splitDirection || 'horizontal'} ${params.splitCount || 2} 份`;
+            imageRecord.provider_task_id = apiResult.original_id || null;
             const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;
@@ -919,7 +936,10 @@ export class ImageService {
             const imageRecord = new ImageResult();
             imageRecord.user_id = userId;
             imageRecord.api_type = apiType;
+            imageRecord.model_name = params.model ? String(params.model) : apiType;
+            imageRecord.model_provider = params.providerHint ? String(params.providerHint) : apiType;
             imageRecord.prompt = params.prompt;
+            imageRecord.provider_task_id = apiResult.original_id || null;
             const firstImageUrl = this.toPersistableImageUrl(apiResult.images?.[0]);
             if (firstImageUrl !== undefined) {
                 imageRecord.image_url = firstImageUrl;

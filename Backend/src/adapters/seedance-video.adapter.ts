@@ -296,6 +296,50 @@ export class SeedanceVideoAdapter {
     }
 
     /**
+     * 从任务查询响应中提取更完整的失败原因，优先读取结构化错误对象。
+     * 典型场景：fail_reason 只有 "task failed"，而 inner.error 里才有具体 code/message。
+     */
+    private extractTaskError(top: any, inner: any, outer: any): string | null {
+        const normalizeText = (v: unknown): string | null => {
+            if (typeof v !== "string") return null;
+            const t = v.trim();
+            return t ? t : null;
+        };
+        const extractErrorText = (obj: any): string | null => {
+            if (!obj) return null;
+            const code = normalizeText(obj?.code);
+            const message = normalizeText(obj?.message ?? obj?.msg ?? obj?.error_description);
+            if (code && message) return `${code}: ${message}`;
+            return message || code || null;
+        };
+        const genericFailTexts = new Set(["task failed", "failed", "fail", "error"]);
+
+        // 1) 优先结构化错误（通常在 inner.error 或 top.error）
+        const structuredError =
+            extractErrorText(inner?.error) ||
+            extractErrorText(top?.error) ||
+            extractErrorText(outer?.error);
+        if (structuredError) return structuredError;
+
+        // 2) 再回退到常见文本字段
+        const fallbackCandidates: Array<string | null> = [
+            normalizeText(inner?.message),
+            normalizeText(top?.message),
+            normalizeText(outer?.message),
+            normalizeText(inner?.fail_reason),
+            normalizeText(top?.fail_reason),
+        ];
+
+        for (const item of fallbackCandidates) {
+            if (!item) continue;
+            if (!genericFailTexts.has(item.toLowerCase())) return item;
+        }
+
+        // 3) 最后才接受泛化文案
+        return fallbackCandidates.find((item) => Boolean(item)) || null;
+    }
+
+    /**
      * 创建 Seedance 视频生成任务
      */
     async createVideoTask(input: {
@@ -654,18 +698,10 @@ export class SeedanceVideoAdapter {
                     ? (top as any).resolution
                     : null;
 
-            // errorMessage：仅在非成功状态下优先使用 fail_reason，其次 error/message
+            // errorMessage：仅在非成功状态下记录，优先结构化错误（code/message）
             let errorMessage: string | null = null;
             if (status !== "succeeded") {
-                errorMessage =
-                    (top as any)?.fail_reason ||
-                    (inner as any)?.fail_reason ||
-                    (inner as any)?.error ||
-                    (inner as any)?.message ||
-                    (top as any)?.error ||
-                    (top as any)?.message ||
-                    outer?.message ||
-                    null;
+                errorMessage = this.extractTaskError(top, inner, outer);
             }
 
             // 若成功拿到视频 URL，则优先下载并转存到本地/COS，返回稳定的 /uploads 路径

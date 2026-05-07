@@ -94,3 +94,17 @@ export const getGenerationRecords = (params?: {
 }) => {
   return request.get('/admin/generation-records', { params });
 };
+
+export const exportCreditUsage = (params: {
+  from: string;
+  to: string;
+  format: 'xlsx' | 'csv';
+  userId?: number;
+  roleId?: number;
+  provider?: string;
+}) => {
+  return request.get('/admin/credit-usage/export', {
+    params,
+    responseType: 'blob'
+  });
+};

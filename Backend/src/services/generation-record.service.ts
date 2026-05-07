@@ -50,6 +50,8 @@ export interface GenerationRecordRow {
     prompt: string | null;
     result_urls: string[];
     template_id: number | null;
+    provider_task_id: string | null;
+    error_reason: string | null;
 }
 
 export class GenerationRecordService {
@@ -260,7 +262,8 @@ export class GenerationRecordService {
           ) AS image_echo_at,
           NULL AS video_finished_at,
           ir.prompt AS prompt_text, ir.image_url AS image_url, ir.all_images AS all_images_json,
-          CAST(NULL AS CHAR) AS video_type, CAST(NULL AS CHAR) AS video_status_str, CAST(NULL AS CHAR) AS video_urls_json
+          CAST(NULL AS CHAR) AS video_type, CAST(NULL AS CHAR) AS video_status_str, CAST(NULL AS CHAR) AS video_urls_json,
+          ir.provider_task_id AS provider_task_id, ir.sync_error AS error_reason
         FROM image_result ir
         INNER JOIN sys_user u ON u.id = ir.user_id
         WHERE ${imgW.clause}
@@ -276,7 +279,8 @@ export class GenerationRecordService {
           NULL AS image_echo_at,
           vt.finished_at AS video_finished_at,
           CAST(vt.request_params AS CHAR) AS prompt_text, CAST(NULL AS CHAR) AS image_url, CAST(NULL AS CHAR) AS all_images_json,
-          vt.type AS video_type, vt.status AS video_status_str, CAST(vt.video_urls AS CHAR) AS video_urls_json
+          vt.type AS video_type, vt.status AS video_status_str, CAST(vt.video_urls AS CHAR) AS video_urls_json,
+          vt.provider_task_id AS provider_task_id, vt.error_message AS error_reason
         FROM video_task vt
         INNER JOIN sys_user u2 ON u2.id = vt.user_id
         WHERE ${vidW.clause}
@@ -301,7 +305,8 @@ export class GenerationRecordService {
             ) AS image_echo_at,
             NULL AS video_finished_at,
             ${sqlU8("ir.prompt")} AS prompt_text, ${sqlU8("ir.image_url")} AS image_url, ${sqlU8("ir.all_images")} AS all_images_json,
-            ${sqlU8("CAST(NULL AS CHAR)")} AS video_type, ${sqlU8("CAST(NULL AS CHAR)")} AS video_status_str, ${sqlU8("CAST(NULL AS CHAR)")} AS video_urls_json
+            ${sqlU8("CAST(NULL AS CHAR)")} AS video_type, ${sqlU8("CAST(NULL AS CHAR)")} AS video_status_str, ${sqlU8("CAST(NULL AS CHAR)")} AS video_urls_json,
+            ${sqlU8("ir.provider_task_id")} AS provider_task_id, ${sqlU8("ir.sync_error")} AS error_reason
           FROM image_result ir
           INNER JOIN sys_user u ON u.id = ir.user_id
           WHERE ${imgW.clause}
@@ -313,7 +318,8 @@ export class GenerationRecordService {
             NULL AS image_echo_at,
             vt.finished_at AS video_finished_at,
             ${sqlU8("CAST(vt.request_params AS CHAR)")} AS prompt_text, ${sqlU8("CAST(NULL AS CHAR)")} AS image_url, ${sqlU8("CAST(NULL AS CHAR)")} AS all_images_json,
-            ${sqlU8("vt.type")} AS video_type, ${sqlU8("vt.status")} AS video_status_str, ${sqlU8("CAST(vt.video_urls AS CHAR)")} AS video_urls_json
+            ${sqlU8("vt.type")} AS video_type, ${sqlU8("vt.status")} AS video_status_str, ${sqlU8("CAST(vt.video_urls AS CHAR)")} AS video_urls_json,
+            ${sqlU8("vt.provider_task_id")} AS provider_task_id, ${sqlU8("vt.error_message")} AS error_reason
           FROM video_task vt
           INNER JOIN sys_user u2 ON u2.id = vt.user_id
           WHERE ${vidW.clause}
@@ -377,6 +383,14 @@ export class GenerationRecordService {
                 prompt,
                 result_urls,
                 template_id: row.template_id != null ? Number(row.template_id) : null,
+                provider_task_id:
+                    row.provider_task_id != null && String(row.provider_task_id).trim()
+                        ? String(row.provider_task_id).trim()
+                        : null,
+                error_reason:
+                    row.error_reason != null && String(row.error_reason).trim()
+                        ? String(row.error_reason).trim()
+                        : null,
             };
         });
 

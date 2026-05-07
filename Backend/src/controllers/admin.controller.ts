@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import { AdminService } from "../services/admin.service";
 import { GenerationRecordService, type GenerationRecordQuery } from "../services/generation-record.service";
+import { ExportService } from "../services/export.service";
 
 const adminService = new AdminService();
 const generationRecordService = new GenerationRecordService();
+const exportService = new ExportService();
 
 /**
  * 获取用户列表
@@ -345,5 +347,78 @@ export const getGenerationRecords = async (req: Request, res: Response) => {
         return res.status(status).json({
             message: sqlMsg || error?.message || "获取生成记录失败",
         });
+    }
+};
+
+export const exportCreditUsage = async (req: Request, res: Response) => {
+    try {
+        const viewerUserId = (req as any).user?.userId as number | undefined;
+        const roleRaw = (req as any).user?.role;
+        if (!viewerUserId) {
+            return res.status(401).json({ message: "未登录或登录已失效" });
+        }
+        const isSuperAdmin = Number(roleRaw) === 1;
+        const format = String(req.query.format || "").trim().toLowerCase();
+        if (format !== "xlsx" && format !== "csv") {
+            return res.status(400).json({ message: "format 仅支持 xlsx 或 csv" });
+        }
+
+        const from = typeof req.query.from === "string" ? req.query.from.trim() : "";
+        const to = typeof req.query.to === "string" ? req.query.to.trim() : "";
+        if (!from || !to) {
+            return res.status(400).json({ message: "from 和 to 为必填参数" });
+        }
+        const fromDate = new Date(from);
+        const toDate = new Date(to);
+        if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+            return res.status(400).json({ message: "时间格式无效" });
+        }
+        if (fromDate.getTime() > toDate.getTime()) {
+            return res.status(400).json({ message: "开始时间不能晚于结束时间" });
+        }
+        const maxRangeMs = 366 * 24 * 60 * 60 * 1000;
+        if (toDate.getTime() - fromDate.getTime() > maxRangeMs) {
+            return res.status(400).json({ message: "时间范围不能超过366天" });
+        }
+
+        const query: {
+            from: string;
+            to: string;
+            userId?: number;
+            roleId?: number;
+            provider?: string;
+        } = { from, to };
+
+        if (isSuperAdmin && req.query.userId) {
+            const n = parseInt(String(req.query.userId), 10);
+            if (!Number.isNaN(n) && n > 0) query.userId = n;
+        }
+        if (isSuperAdmin && req.query.roleId !== undefined && req.query.roleId !== "") {
+            const r = parseInt(String(req.query.roleId), 10);
+            if (r === 1 || r === 2) query.roleId = r;
+        }
+        if (typeof req.query.provider === "string" && req.query.provider.trim()) {
+            query.provider = req.query.provider.trim();
+        }
+
+        const rows = await adminService.getCreditUsageSummary(viewerUserId, isSuperAdmin, query);
+        const safeFrom = from.replace(/[:T]/g, "-").replace(/\..+$/, "");
+        const safeTo = to.replace(/[:T]/g, "-").replace(/\..+$/, "");
+        const fileName = `credit-usage_${safeFrom}_${safeTo}.${format}`;
+        const encodedFileName = encodeURIComponent(fileName);
+        res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodedFileName}`);
+
+        if (format === "csv") {
+            const csvBuffer = exportService.buildCreditUsageCsv(rows);
+            res.setHeader("Content-Type", "text/csv; charset=utf-8");
+            return res.status(200).send(csvBuffer);
+        }
+
+        const xlsxBuffer = await exportService.buildCreditUsageXlsx(rows);
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        return res.status(200).send(xlsxBuffer);
+    } catch (error: any) {
+        console.error("[exportCreditUsage]", error?.message || error);
+        return res.status(500).json({ message: "导出失败，请稍后重试" });
     }
 };

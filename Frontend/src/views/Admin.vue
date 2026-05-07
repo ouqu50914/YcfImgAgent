@@ -34,11 +34,14 @@
             <el-option label="禁用" :value="0" />
           </el-select>
           <el-button @click="loadUserList" style="margin-left: 10px">刷新</el-button>
+          <el-button type="primary" class="toolbar-right-btn" :loading="allUserExportLoading" @click="openAllUserExportDialog">
+            导出所有人积分
+          </el-button>
         </div>
 
         <el-table :data="userList" border style="margin-top: 20px">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="username" label="用户名" />
+          <el-table-column prop="username" label="用户名" min-width="120" show-overflow-tooltip />
           <el-table-column prop="role_id" label="角色" width="120">
             <template #default="{ row }">
               <el-tag :type="row.role_id === 1 ? 'danger' : 'primary'">
@@ -60,20 +63,23 @@
             </template>
           </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="180" :formatter="formatTableDateTime" />
-          <el-table-column label="操作" width="420" fixed="right">
+          <el-table-column label="操作" width="520" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" @click="viewUserStats(row.id)">统计</el-button>
-              <el-button size="small" @click="editCreditsHandler(row)" v-if="row.role_id !== 1">积分</el-button>
-              <el-button size="small" @click="showResetPasswordDialogHandler(row)">重置密码</el-button>
-              <el-button size="small" @click="editUser(row)">编辑</el-button>
-              <el-button
-                size="small"
-                :type="row.status === 1 ? 'warning' : 'success'"
-                @click="toggleUserStatus(row)"
-              >
-                {{ row.status === 1 ? '停用' : '启用' }}
-              </el-button>
-              <el-button size="small" type="danger" @click="deleteUserHandler(row.id)">删除</el-button>
+              <div class="user-actions-wrap">
+                <el-button size="small" @click="viewUserStats(row.id)">统计</el-button>
+                <el-button size="small" type="primary" @click="openUserExportDialog(row)">导出积分</el-button>
+                <el-button size="small" @click="editCreditsHandler(row)" v-if="row.role_id !== 1">积分</el-button>
+                <el-button size="small" @click="showResetPasswordDialogHandler(row)">重置密码</el-button>
+                <el-button size="small" @click="editUser(row)">编辑</el-button>
+                <el-button
+                  size="small"
+                  :type="row.status === 1 ? 'warning' : 'success'"
+                  @click="toggleUserStatus(row)"
+                >
+                  {{ row.status === 1 ? '停用' : '启用' }}
+                </el-button>
+                <el-button size="small" type="danger" @click="deleteUserHandler(row.id)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -326,6 +332,16 @@
             </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column prop="provider_task_id" label="provider_task_id" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.provider_task_id || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="error_reason" label="报错原因" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.error_reason || '—' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="prompt" label="提示词摘要" min-width="160" show-overflow-tooltip />
           <el-table-column label="结果" min-width="220" align="center">
             <template #default="{ row }">
@@ -586,6 +602,49 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="showUserExportDialog" title="导出用户积分消耗" width="520px">
+      <el-form label-width="100px">
+        <el-form-item label="用户">
+          <span>{{ userExportForm.username }} (ID: {{ userExportForm.userId }})</span>
+        </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="userExportDateRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showUserExportDialog = false">取消</el-button>
+        <el-button :loading="userExportLoading" @click="confirmUserExport('csv')">导出 CSV</el-button>
+        <el-button type="primary" :loading="userExportLoading" @click="confirmUserExport('xlsx')">导出 Excel</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showAllUserExportDialog" title="导出所有用户积分消耗" width="520px">
+      <el-form label-width="100px">
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="allUserExportDateRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始时间"
+            end-placeholder="结束时间"
+            style="width: 100%"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAllUserExportDialog = false">取消</el-button>
+        <el-button :loading="allUserExportLoading" @click="confirmAllUserExport('csv')">导出 CSV</el-button>
+        <el-button type="primary" :loading="allUserExportLoading" @click="confirmAllUserExport('xlsx')">导出 Excel</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 生成记录：结果全屏预览 -->
     <el-dialog
       v-model="genPreviewVisible"
@@ -641,7 +700,8 @@ import {
   updateUserCredits,
   getHelpDocUrl,
   updateHelpDocUrl,
-  getGenerationRecords
+  getGenerationRecords,
+  exportCreditUsage
 } from '@/api/admin';
 import {
   getAllCategories,
@@ -772,6 +832,26 @@ const handleResetPassword = async () => {
       }
     }
   });
+};
+
+const showUserExportDialog = ref(false);
+const userExportLoading = ref(false);
+const userExportDateRange = ref<[Date, Date] | null>(null);
+const userExportForm = reactive<{ userId: number; username: string }>({ userId: 0, username: '' });
+const showAllUserExportDialog = ref(false);
+const allUserExportLoading = ref(false);
+const allUserExportDateRange = ref<[Date, Date] | null>(null);
+
+const openUserExportDialog = (user: any) => {
+  userExportForm.userId = user.id;
+  userExportForm.username = user.username;
+  userExportDateRange.value = null;
+  showUserExportDialog.value = true;
+};
+
+const openAllUserExportDialog = () => {
+  allUserExportDateRange.value = null;
+  showAllUserExportDialog.value = true;
 };
 
 const deleteUserHandler = async (userId: number) => {
@@ -1063,6 +1143,7 @@ const updateApiConfigLimit = async (apiType: string, limit: number) => {
 
 // 生成记录
 const genLoading = ref(false);
+const genExportLoading = ref(false);
 const genRecords = ref<any[]>([]);
 const genPagination = reactive({ page: 1, pageSize: 20, total: 0 });
 const genDateRange = ref<[Date, Date] | null>(null);
@@ -1107,6 +1188,110 @@ const loadGenerationRecords = async () => {
     ElMessage.error(error.message || '加载失败');
   } finally {
     genLoading.value = false;
+  }
+};
+
+const triggerBlobDownload = (blob: Blob, filename: string) => {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(objectUrl);
+};
+
+const formatDateForFilename = (date: Date) => {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+};
+
+const handleExportCreditUsage = async (format: 'xlsx' | 'csv') => {
+  if (!genDateRange.value || genDateRange.value.length !== 2) {
+    ElMessage.warning('请先选择导出时间范围');
+    return;
+  }
+  genExportLoading.value = true;
+  try {
+    const params: Record<string, unknown> = {
+      from: genDateRange.value[0].toISOString(),
+      to: genDateRange.value[1].toISOString(),
+      format
+    };
+    if (isSuperAdmin.value && genFilters.userId != null && genFilters.userId > 0) {
+      params.userId = genFilters.userId;
+    }
+    if (isSuperAdmin.value && (genFilters.roleId === 1 || genFilters.roleId === 2)) {
+      params.roleId = genFilters.roleId;
+    }
+    if (genFilters.provider) {
+      params.provider = genFilters.provider;
+    }
+
+    const blob = (await exportCreditUsage(params as any)) as unknown as Blob;
+    const filename = `credit-usage_${formatDateForFilename(genDateRange.value[0])}_${formatDateForFilename(genDateRange.value[1])}.${format}`;
+    triggerBlobDownload(blob, filename);
+    ElMessage.success('导出成功');
+  } catch (error: any) {
+    ElMessage.error(error.message || '导出失败');
+  } finally {
+    genExportLoading.value = false;
+  }
+};
+
+const confirmUserExport = async (format: 'xlsx' | 'csv') => {
+  if (!userExportForm.userId) {
+    ElMessage.error('用户信息无效');
+    return;
+  }
+  if (!userExportDateRange.value || userExportDateRange.value.length !== 2) {
+    ElMessage.warning('请选择时间范围');
+    return;
+  }
+  userExportLoading.value = true;
+  try {
+    const from = userExportDateRange.value[0];
+    const to = userExportDateRange.value[1];
+    const blob = (await exportCreditUsage({
+      userId: userExportForm.userId,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      format
+    })) as unknown as Blob;
+    const filename = `credit-usage_user-${userExportForm.userId}_${formatDateForFilename(from)}_${formatDateForFilename(to)}.${format}`;
+    triggerBlobDownload(blob, filename);
+    ElMessage.success('导出成功');
+    showUserExportDialog.value = false;
+  } catch (error: any) {
+    ElMessage.error(error.message || '导出失败');
+  } finally {
+    userExportLoading.value = false;
+  }
+};
+
+const confirmAllUserExport = async (format: 'xlsx' | 'csv') => {
+  if (!allUserExportDateRange.value || allUserExportDateRange.value.length !== 2) {
+    ElMessage.warning('请选择时间范围');
+    return;
+  }
+  allUserExportLoading.value = true;
+  try {
+    const from = allUserExportDateRange.value[0];
+    const to = allUserExportDateRange.value[1];
+    const blob = (await exportCreditUsage({
+      from: from.toISOString(),
+      to: to.toISOString(),
+      format
+    })) as unknown as Blob;
+    const filename = `credit-usage_all-users_${formatDateForFilename(from)}_${formatDateForFilename(to)}.${format}`;
+    triggerBlobDownload(blob, filename);
+    ElMessage.success('导出成功');
+    showAllUserExportDialog.value = false;
+  } catch (error: any) {
+    ElMessage.error(error.message || '导出失败');
+  } finally {
+    allUserExportLoading.value = false;
   }
 };
 
@@ -1229,6 +1414,17 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.toolbar-right-btn {
+  margin-left: auto;
+}
+
+.user-actions-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .stats-filters {

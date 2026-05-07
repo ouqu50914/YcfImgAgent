@@ -12,6 +12,12 @@ export class ImageResult {
     @Column({ length: 20 })
     api_type!: string;
 
+    @Column({ type: "varchar", length: 100, nullable: true, comment: "真实模型名，如 gpt-image-2 / gemini-3-pro-image-preview" })
+    model_name!: string | null;
+
+    @Column({ type: "varchar", length: 50, nullable: true, comment: "模型平台，如 ace/anyfast/dream/nano" })
+    model_provider!: string | null;
+
     @Column({ type: 'text', nullable: true })
     prompt!: string;
 
@@ -22,6 +28,14 @@ export class ImageResult {
         comment: '前端生成时传入的幂等 key，用于刷新/历史恢复后查询生成结果'
     })
     generation_key!: string;
+
+    @Column({
+        type: 'varchar',
+        length: 128,
+        nullable: true,
+        comment: '第三方模型返回的任务ID'
+    })
+    provider_task_id!: string | null;
 
     @Column({ length: 255, nullable: true, comment: '图片存储路径' })
     image_url!: string;

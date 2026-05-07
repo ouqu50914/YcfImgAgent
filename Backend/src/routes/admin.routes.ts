@@ -18,7 +18,8 @@ import {
     updateUserCredits,
     getHelpDocUrl,
     updateHelpDocUrl,
-    getGenerationRecords
+    getGenerationRecords,
+    exportCreditUsage
 } from "../controllers/admin.controller";
 import {
     getAllCategories,
@@ -32,6 +33,7 @@ const router = Router();
 router.use(authenticateToken);
 // 生成记录：已登录即可（普通用户仅本人数据由服务层强制）
 router.get("/generation-records", getGenerationRecords);
+router.get("/credit-usage/export", exportCreditUsage);
 
 // 以下需超级管理员
 router.use(requireAdmin);

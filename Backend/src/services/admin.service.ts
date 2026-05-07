@@ -15,6 +15,38 @@ import redis from "../utils/redis";
 import { LogService } from "./log.service";
 import { CreditService } from "./credit.service";
 
+export interface CreditUsageExportQuery {
+    from: string;
+    to: string;
+    userId?: number;
+    roleId?: number;
+    provider?: string;
+}
+
+export interface CreditUsageSummaryRow {
+    userId: number;
+    username: string;
+    model: string;
+    totalCredits: number;
+    recordCount: number;
+    from: string;
+    to: string;
+}
+
+const DEFAULT_EXPORT_MODELS = [
+    "dream (dream)",
+    "nano (ace)",
+    "nano (anyfast)",
+    "gpt-image-2 (ace)",
+    "gpt-image-2 (anyfast)",
+    "gemini-3.1-flash-image-preview (anyfast)",
+    "gemini-3-pro-image-preview (anyfast)",
+    "midjourney (midjourney)",
+    "kling (kling)",
+    "seedance (seedance)",
+    "pixverse (pixverse)",
+];
+
 export class AdminService {
     private userRepo = AppDataSource.getRepository(User);
     private configRepo = AppDataSource.getRepository(ApiConfig);
@@ -293,6 +325,176 @@ export class AdminService {
             record.value = trimmed;
         }
         await this.systemConfigRepo.save(record);
+    }
+
+    async getCreditUsageSummary(viewerUserId: number, isSuperAdmin: boolean, query: CreditUsageExportQuery): Promise<CreditUsageSummaryRow[]> {
+        const imageModelExpr = "LOWER(COALESCE(NULLIF(TRIM(ir.model_name), ''), ir.api_type))";
+        const imagePlatformExpr = "LOWER(COALESCE(NULLIF(TRIM(ir.model_provider), ''), ir.api_type))";
+        const imageModelPlatformExpr = `CONCAT(${imageModelExpr}, ' (', ${imagePlatformExpr}, ')')`;
+        const videoModelExpr = "LOWER(COALESCE(NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(vt.request_params, '$.model'))), ''), vt.provider))";
+        const videoPlatformExpr = "LOWER(COALESCE(NULLIF(TRIM(vt.provider), ''), 'video'))";
+        const videoModelPlatformExpr = `CONCAT(${videoModelExpr}, ' (', ${videoPlatformExpr}, ')')`;
+        const whereImageParts = ["ir.credits_spent IS NOT NULL", "ir.credits_spent > 0"];
+        const whereVideoParts = ["vt.credits_spent IS NOT NULL", "vt.credits_spent > 0"];
+        const imageParams: unknown[] = [query.from, query.to];
+        const videoParams: unknown[] = [query.from, query.to];
+
+        whereImageParts.push("ir.created_at >= ?");
+        whereImageParts.push("ir.created_at <= ?");
+        whereVideoParts.push("vt.created_at >= ?");
+        whereVideoParts.push("vt.created_at <= ?");
+
+        if (!isSuperAdmin) {
+            whereImageParts.push("ir.user_id = ?");
+            whereVideoParts.push("vt.user_id = ?");
+            imageParams.push(viewerUserId);
+            videoParams.push(viewerUserId);
+        } else if (query.userId != null && query.userId > 0) {
+            whereImageParts.push("ir.user_id = ?");
+            whereVideoParts.push("vt.user_id = ?");
+            imageParams.push(query.userId);
+            videoParams.push(query.userId);
+        }
+
+        if (isSuperAdmin && (query.roleId === 1 || query.roleId === 2)) {
+            whereImageParts.push("u.role_id = ?");
+            whereVideoParts.push("u2.role_id = ?");
+            imageParams.push(query.roleId);
+            videoParams.push(query.roleId);
+        }
+
+        if (query.provider && query.provider.trim()) {
+            const provider = query.provider.trim().toLowerCase();
+            const providerModelLabel = `${provider} (${provider})`;
+            whereImageParts.push(`(${imageModelExpr} = ? OR ${imagePlatformExpr} = ? OR ${imageModelPlatformExpr} = ?)`);
+            whereVideoParts.push(`(${videoModelExpr} = ? OR ${videoPlatformExpr} = ? OR ${videoModelPlatformExpr} = ?)`);
+            imageParams.push(provider, provider, providerModelLabel);
+            videoParams.push(provider, provider, providerModelLabel);
+        }
+
+        const sql = `
+            SELECT
+                merged.user_id AS userId,
+                u.username AS username,
+                merged.model AS model,
+                SUM(merged.credits_spent) AS totalCredits,
+                COUNT(1) AS recordCount
+            FROM (
+                SELECT ir.user_id AS user_id, ${imageModelPlatformExpr} AS model, ir.credits_spent AS credits_spent
+                FROM image_result ir
+                INNER JOIN sys_user u ON u.id = ir.user_id
+                WHERE ${whereImageParts.join(" AND ")}
+                UNION ALL
+                SELECT vt.user_id AS user_id, ${videoModelPlatformExpr} AS model, vt.credits_spent AS credits_spent
+                FROM video_task vt
+                INNER JOIN sys_user u2 ON u2.id = vt.user_id
+                WHERE ${whereVideoParts.join(" AND ")}
+            ) merged
+            INNER JOIN sys_user u ON u.id = merged.user_id
+            GROUP BY merged.user_id, u.username, merged.model
+            ORDER BY merged.user_id ASC, totalCredits DESC
+        `;
+
+        const rows = (await AppDataSource.query(sql, [...imageParams, ...videoParams])) as any[];
+
+        const userQb = this.userRepo
+            .createQueryBuilder("user")
+            .select(["user.id AS userId", "user.username AS username"]);
+        if (!isSuperAdmin) {
+            userQb.where("user.id = :viewerUserId", { viewerUserId });
+        } else if (query.userId != null && query.userId > 0) {
+            userQb.where("user.id = :queryUserId", { queryUserId: query.userId });
+        }
+        if (isSuperAdmin && (query.roleId === 1 || query.roleId === 2)) {
+            userQb.andWhere("user.role_id = :queryRoleId", { queryRoleId: query.roleId });
+        }
+        userQb.orderBy("user.id", "ASC");
+        const userRows = (await userQb.getRawMany()) as Array<{ userId: number | string; username: string }>;
+
+        const allModels = await this.getExportModels(query.provider);
+        const summaryMap = new Map<string, { totalCredits: number; recordCount: number }>();
+        for (const row of rows) {
+            const userId = Number(row.userId);
+            const model = String(row.model ?? "").trim().toLowerCase();
+            if (!userId || !model) continue;
+            summaryMap.set(`${userId}::${model}`, {
+                totalCredits: Number(row.totalCredits ?? 0),
+                recordCount: Number(row.recordCount ?? 0),
+            });
+        }
+
+        const finalRows: CreditUsageSummaryRow[] = [];
+        for (const user of userRows) {
+            const userId = Number(user.userId);
+            const username = String(user.username ?? "");
+            for (const model of allModels) {
+                const hit = summaryMap.get(`${userId}::${model}`);
+                finalRows.push({
+                    userId,
+                    username,
+                    model,
+                    totalCredits: hit?.totalCredits ?? 0,
+                    recordCount: hit?.recordCount ?? 0,
+                    from: query.from,
+                    to: query.to,
+                });
+            }
+        }
+        return finalRows;
+    }
+
+    private async getExportModels(provider?: string): Promise<string[]> {
+        const providerFilter = typeof provider === "string" ? provider.trim().toLowerCase() : "";
+        if (providerFilter) return [providerFilter];
+
+        const configTypes = await this.configRepo
+            .createQueryBuilder("cfg")
+            .select("cfg.api_type", "model")
+            .getRawMany();
+        const imageTypes = await AppDataSource.query(`
+            SELECT DISTINCT CONCAT(
+                LOWER(COALESCE(NULLIF(TRIM(ir.model_name), ''), ir.api_type)),
+                ' (',
+                LOWER(COALESCE(NULLIF(TRIM(ir.model_provider), ''), ir.api_type)),
+                ')'
+            ) AS model
+            FROM image_result ir
+            WHERE COALESCE(NULLIF(TRIM(ir.model_name), ''), ir.api_type) IS NOT NULL
+              AND COALESCE(NULLIF(TRIM(ir.model_name), ''), ir.api_type) <> ''
+        `);
+        const videoProviders = await AppDataSource.query(`
+            SELECT DISTINCT CONCAT(
+                LOWER(COALESCE(NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(vt.request_params, '$.model'))), ''), vt.provider)),
+                ' (',
+                LOWER(COALESCE(NULLIF(TRIM(vt.provider), ''), 'video')),
+                ')'
+            ) AS model
+            FROM video_task vt
+            WHERE COALESCE(NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(vt.request_params, '$.model'))), ''), vt.provider) IS NOT NULL
+              AND COALESCE(NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(vt.request_params, '$.model'))), ''), vt.provider) <> ''
+        `);
+
+        const ordered = [...DEFAULT_EXPORT_MODELS];
+        const orderMap = new Map<string, number>();
+        ordered.forEach((m, idx) => orderMap.set(m, idx));
+
+        const modelSet = new Set<string>(ordered);
+        for (const row of [...configTypes, ...imageTypes, ...videoProviders]) {
+            const raw = typeof row?.model === "string" ? row.model.trim().toLowerCase() : "";
+            if (!raw) continue;
+            if (raw.includes("(") && raw.includes(")")) {
+                modelSet.add(raw);
+            } else {
+                modelSet.add(`${raw} (${raw})`);
+            }
+        }
+
+        return Array.from(modelSet).sort((a, b) => {
+            const ai = orderMap.has(a) ? (orderMap.get(a) as number) : Number.MAX_SAFE_INTEGER;
+            const bi = orderMap.has(b) ? (orderMap.get(b) as number) : Number.MAX_SAFE_INTEGER;
+            if (ai !== bi) return ai - bi;
+            return a.localeCompare(b);
+        });
     }
 
     /**
