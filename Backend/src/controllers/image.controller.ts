@@ -37,8 +37,9 @@ export const generateImage = async (req: Request, res: Response) => {
         } = req.body;
         const isAdmin = userRole === 1;
         const isAnyfastProRequest = model === 'gemini-3-pro-image-preview';
-        const isGptImage2Request = model === 'gpt-image-2';
-        const isGptImage2AnyfastRequest = isGptImage2Request && providerHint === 'anyfast';
+        const isGptImage2AnyfastRequest =
+            (model === 'gpt-image-2' && providerHint === 'anyfast')
+            || model === 'gpt-image-2-c';
         if (!isAdmin && isAnyfastProRequest) {
             return res.status(403).json({
                 code: 'ANYFAST_PRO_FORBIDDEN',

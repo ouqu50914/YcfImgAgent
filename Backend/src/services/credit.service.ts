@@ -1,12 +1,32 @@
 import { AppDataSource } from "../data-source";
 import { User } from "../entities/User";
 import { CreditUsageLog } from "../entities/CreditUsageLog";
+import {
+    buildCreditUsageApiType,
+    calcNanoGenerateCredits,
+    type NanoProviderHint,
+} from "../utils/nano-credit.util";
 
 export type CreditOperation = 'generate' | 'upscale' | 'extend' | 'split' | 'layer_split';
 
 export interface CreditLogInfo {
     operationType: CreditOperation;
     apiType: 'dream' | 'nano' | 'midjourney';
+    model?: string;
+    providerHint?: NanoProviderHint;
+}
+
+export function buildCreditLogInfo(
+    operationType: CreditOperation,
+    apiType: 'dream' | 'nano' | 'midjourney',
+    options?: { model?: string; providerHint?: NanoProviderHint }
+): CreditLogInfo {
+    return {
+        operationType,
+        apiType,
+        ...(options?.model != null ? { model: options.model } : {}),
+        ...(options?.providerHint != null ? { providerHint: options.providerHint } : {}),
+    };
 }
 
 /**
@@ -33,29 +53,12 @@ export class CreditService {
         const count = options?.imageCount ?? 1;
 
         if (apiType === 'nano') {
-            const quality = options?.quality === '4K' ? '4K' : '2K';
-            const model = options?.model;
-            const provider = options?.providerHint
-                || (model?.startsWith('gemini-') ? 'anyfast' : undefined)
-                || (model === 'gpt-image-2' ? 'ace' : undefined)
-                || (model?.startsWith('nano-banana-') ? 'ace' : undefined)
-                || 'ace';
-
-            // AnyFast 按模型 + 分辨率计费
-            if (provider === 'anyfast') {
-                if (model === 'gpt-image-2') {
-                    const q = options?.quality === 'high' ? 'high' : options?.quality === 'low' ? 'low' : 'medium';
-                    const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
-                    return perImage * count;
-                }
-                const perImage = model === 'gemini-3-pro-image-preview'
-                    ? (quality === '4K' ? 20 : 15)
-                    : (quality === '4K' ? 15 : 11);
-                return perImage * count;
-            }
-
-            // Ace 维持现有规则
-            return 6 * count;
+            return calcNanoGenerateCredits({
+                imageCount: count,
+                ...(options?.model != null ? { model: options.model } : {}),
+                ...(options?.providerHint != null ? { providerHint: options.providerHint } : {}),
+                ...(options?.quality != null ? { quality: options.quality } : {}),
+            });
         }
         if (apiType === 'midjourney') {
             // 先与 Nano 保持同档成本，后续可按 mode/version 独立细分
@@ -109,7 +112,11 @@ export class CreditService {
             log.user_id = userId;
             log.amount = amount;
             log.operation_type = logInfo.operationType;
-            log.api_type = logInfo.apiType;
+            log.api_type = buildCreditUsageApiType(
+                logInfo.apiType,
+                logInfo.model,
+                logInfo.providerHint
+            );
             await this.usageLogRepo.save(log);
         }
     }

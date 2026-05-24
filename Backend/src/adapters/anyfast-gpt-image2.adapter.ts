@@ -81,13 +81,22 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return base.replace(/\/$/, "");
     }
 
-    private getApiKey(apiKeyFromConfig?: string): string {
-        const key = process.env.GPT_IMG2_API_KEY || process.env.ANYFAST_API_KEY || apiKeyFromConfig;
+    private resolveUpstreamModel(model?: GenerateParams["model"]): "gpt-image-2" | "gpt-image-2-c" {
+        return model === "gpt-image-2-c" ? "gpt-image-2-c" : "gpt-image-2";
+    }
+
+    private getApiKey(apiKeyFromConfig?: string, model?: GenerateParams["model"]): string {
+        const upstreamModel = this.resolveUpstreamModel(model);
+        const key = upstreamModel === "gpt-image-2-c"
+            ? (process.env.GPT_IMG2_API_KEY_C || apiKeyFromConfig)
+            : (process.env.GPT_IMG2_API_KEY || process.env.ANYFAST_API_KEY || apiKeyFromConfig);
         if (!key) {
             throw new ProviderError({
-                code: "GPT_IMAGE2_API_KEY_MISSING",
+                code: upstreamModel === "gpt-image-2-c" ? "GPT_IMAGE2_C_API_KEY_MISSING" : "GPT_IMAGE2_API_KEY_MISSING",
                 status: 500,
-                message: "GPT_IMG2_API_KEY 未配置，无法调用 GPT Image 2。",
+                message: upstreamModel === "gpt-image-2-c"
+                    ? "GPT_IMG2_API_KEY_C 未配置，无法调用 GPT Image 2-C。"
+                    : "GPT_IMG2_API_KEY 未配置，无法调用 GPT Image 2。",
                 provider: "anyfast",
                 transient: false,
             });
@@ -282,8 +291,120 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return savedPath;
     }
 
+    /** 打印上游响应结构（不输出完整 base64） */
+    private summarizeUpstreamResponse(data: unknown): Record<string, unknown> {
+        if (data == null) return { value: data };
+        if (typeof data !== "object") return { type: typeof data, value: data };
+
+        const root = data as Record<string, unknown>;
+        const summarizeItem = (it: unknown, idx: number) => {
+            if (it == null || typeof it !== "object") return { idx, type: typeof it };
+            const item = it as Record<string, unknown>;
+            const summary: Record<string, unknown> = {
+                idx,
+                keys: Object.keys(item),
+            };
+            if (typeof item.url === "string") summary.url_prefix = item.url.slice(0, 120);
+            if (typeof item.b64_json === "string") summary.b64_json_length = item.b64_json.length;
+            if (typeof item.image_url === "string") summary.image_url_prefix = item.image_url.slice(0, 120);
+            return summary;
+        };
+
+        const dataItems = Array.isArray(root.data) ? root.data : [];
+        const output = root.output;
+        const outputItems = output && typeof output === "object" && Array.isArray((output as { data?: unknown }).data)
+            ? (output as { data: unknown[] }).data
+            : [];
+
+        return {
+            top_level_keys: Object.keys(root),
+            data_array_length: dataItems.length,
+            data_items_preview: dataItems.slice(0, 4).map(summarizeItem),
+            output_type: output == null ? undefined : typeof output,
+            output_keys: output && typeof output === "object" ? Object.keys(output as object) : undefined,
+            output_data_length: outputItems.length,
+            output_data_preview: outputItems.slice(0, 4).map(summarizeItem),
+            task_id: root.task_id,
+            id: root.id,
+            status: root.status,
+            created: root.created,
+            error: root.error,
+            message: root.message,
+        };
+    }
+
+    private collectResponseItems(resData: Record<string, unknown>): unknown[] {
+        const items: unknown[] = [];
+        if (Array.isArray(resData.data)) items.push(...resData.data);
+        const output = resData.output;
+        if (output && typeof output === "object" && Array.isArray((output as { data?: unknown }).data)) {
+            items.push(...(output as { data: unknown[] }).data);
+        }
+        if (Array.isArray(resData.images)) items.push(...resData.images);
+        return items;
+    }
+
+    private async normalizeImagesFromUrls(urls: string[]): Promise<string[]> {
+        const out: string[] = [];
+        for (const url of urls) {
+            if (!url) continue;
+            try {
+                const res = await axiosClient.get(url, {
+                    responseType: "arraybuffer",
+                    timeout: GPT_IMAGE2_REQUEST_TIMEOUT_MS,
+                });
+                const saved = await this.saveImageBuffer(Buffer.from(res.data));
+                out.push(saved);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error("[AnyfastGptImage2Adapter] download_image_failed", { url: url.slice(0, 120), message });
+                throw new ProviderError({
+                    code: "GPT_IMAGE2_IMAGE_DOWNLOAD_FAILED",
+                    status: 502,
+                    message: `下载 GPT Image 2 结果图片失败: ${message}`,
+                    provider: "anyfast",
+                    transient: true,
+                });
+            }
+        }
+        return out;
+    }
+
+    private async parseImagesFromResponse(resData: unknown): Promise<string[]> {
+        if (!resData || typeof resData !== "object") return [];
+        const root = resData as Record<string, unknown>;
+        const items = this.collectResponseItems(root);
+
+        const imagesB64 = items
+            .map((it) => {
+                if (!it || typeof it !== "object") return "";
+                const row = it as Record<string, unknown>;
+                return typeof row.b64_json === "string" ? row.b64_json : "";
+            })
+            .filter((s) => s.length > 0);
+        if (imagesB64.length > 0) {
+            return Promise.all(imagesB64.map((b64) => this.saveImageBuffer(Buffer.from(b64, "base64"))));
+        }
+
+        const urls = items
+            .map((it) => {
+                if (!it || typeof it !== "object") return "";
+                const row = it as Record<string, unknown>;
+                if (typeof row.url === "string") return row.url;
+                if (typeof row.image_url === "string") return row.image_url;
+                return "";
+            })
+            .filter((url) => url.length > 0);
+        if (urls.length > 0) {
+            return this.normalizeImagesFromUrls(urls);
+        }
+
+        return [];
+    }
+
     async generateImage(params: GenerateParams, apiKeyFromConfig: string, _apiUrl: string): Promise<AiResponse> {
-        const key = this.getApiKey(apiKeyFromConfig);
+        const upstreamModel = this.resolveUpstreamModel(params.model);
+        const key = this.getApiKey(apiKeyFromConfig, params.model);
         const baseUrl = this.getBaseUrl();
         const endpointGenerate = `${baseUrl}/v1/images/generations`;
         const count = Math.max(1, Math.min(params.num_images || (params as any).numImages || 1, 4));
@@ -296,7 +417,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
             : undefined;
 
         const body: Record<string, unknown> = {
-            model: "gpt-image-2",
+            model: upstreamModel,
             prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
             n: count,
             size,
@@ -346,22 +467,46 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                     "Content-Type": "application/json",
                 },
             })).data;
-            const items = Array.isArray(resData?.data) ? resData.data : [];
-            const imagesB64 = items
-                .map((it: any) => (typeof it?.b64_json === "string" ? it.b64_json : ""))
-                .filter((s: string) => s.length > 0);
-            if (!imagesB64.length) {
+
+            const responseSummary = this.summarizeUpstreamResponse(resData);
+            console.log("[AnyfastGptImage2Adapter] response_summary", {
+                endpoint: endpointGenerate,
+                model: upstreamModel,
+                ...responseSummary,
+            });
+
+            const images = await this.parseImagesFromResponse(resData);
+            if (!images.length) {
+                console.warn("[AnyfastGptImage2Adapter] empty_image_response", {
+                    endpoint: endpointGenerate,
+                    model: upstreamModel,
+                    response_summary: responseSummary,
+                });
                 throw new ProviderError({
                     code: "GPT_IMAGE2_EMPTY_IMAGE",
                     status: 502,
-                    message: "GPT Image 2 返回成功但未包含图片数据",
+                    message: "GPT Image 2 返回成功但未包含图片数据（详见服务端日志 response_summary）",
                     provider: "anyfast",
                     transient: true,
                 });
             }
-            const images = await Promise.all(imagesB64.map((b64: string) => this.saveImageBuffer(Buffer.from(b64, "base64"))));
+
+            const originalId =
+                (resData && typeof resData === "object" && (resData as Record<string, unknown>).id != null)
+                    ? String((resData as Record<string, unknown>).id)
+                    : (resData && typeof resData === "object" && (resData as Record<string, unknown>).task_id != null)
+                        ? String((resData as Record<string, unknown>).task_id)
+                        : `gptimg2_${Date.now()}`;
+
+            console.log("[AnyfastGptImage2Adapter] response_parsed", {
+                endpoint: endpointGenerate,
+                model: upstreamModel,
+                image_count: images.length,
+                original_id: originalId,
+            });
+
             return {
-                original_id: `gptimg2_${Date.now()}`,
+                original_id: originalId,
                 images,
             };
         } catch (error: any) {
@@ -378,7 +523,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                 status,
                 message: msg,
                 request: this.summarizeRequestBody(body),
-                response_data: responseData,
+                response_summary: this.summarizeUpstreamResponse(responseData),
             });
             throw new ProviderError({
                 code: status === 429 ? "GPT_IMAGE2_RATE_LIMITED" : "GPT_IMAGE2_REQUEST_FAILED",

@@ -567,8 +567,8 @@
         <div class="stats-section" v-if="userStatsData.creditsByApiType?.length">
           <div class="stats-section-title">按模型统计（积分消耗）</div>
           <el-table :data="userStatsData.creditsByApiType" size="small" border>
-            <el-table-column prop="apiType" label="模型" width="120">
-              <template #default="{ row }">{{ getStatsApiTypeLabel(row.apiType) }}</template>
+            <el-table-column prop="apiType" label="模型" min-width="180">
+              <template #default="{ row }">{{ row.apiTypeLabel || getStatsApiTypeLabel(row.apiType) }}</template>
             </el-table-column>
             <el-table-column prop="total" label="消耗积分" />
           </el-table>
@@ -873,12 +873,20 @@ const statsDateRange = ref<[string, string] | null>(null);
 const statsApiType = ref('');
 const userStatsData = ref<any>(null);
 const getStatsApiTypeLabel = (apiType: string) => {
-  if (apiType === 'dream') return '即梦';
-  if (apiType === 'nano') return 'Nano';
-  if (apiType === 'kling') return 'Kling';
-  if (apiType === 'seedance') return 'Seedance';
-  if (apiType === 'pixverse') return 'PixVerse';
-  return apiType;
+  const labels: Record<string, string> = {
+    dream: '即梦',
+    nano: 'Nano(通用)',
+    midjourney: 'Midjourney',
+    'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
+    'gpt-image-2-af': 'GPT Image 2(AnyFast)',
+    'gemini-3-pro': 'NanoBanana Pro(AnyFast)',
+    'gemini-3.1-fl': 'NanoBanana2(AnyFast)',
+    'nano-ace': 'Nano(Ace)',
+    kling: 'Kling',
+    seedance: 'Seedance',
+    pixverse: 'PixVerse',
+  };
+  return labels[apiType] || apiType;
 };
 
 const viewUserStats = (userId: number) => {

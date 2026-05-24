@@ -165,12 +165,6 @@ function guessFriendlyMessage(params: {
   return '';
 }
 
-const isUploadRequest = (config?: AxiosRequestConfig) => {
-  if (!config || !config.url) return false;
-  const url = config.url;
-  return url.includes('/image/upload');
-};
-
 // 响应拦截器：统一处理错误和Token刷新
 service.interceptors.response.use(
   (response) => {
@@ -192,7 +186,6 @@ service.interceptors.response.use(
     const data = (error.response?.data || {}) as any;
     const backendCode: string | undefined = data.code;
     const backendMsg: string | undefined = data.message;
-    const isUpload = isUploadRequest(originalRequest);
     const retryAfter: number | undefined = typeof data.retryAfter === 'number' ? data.retryAfter : undefined;
     const fallbackMsg = '请求失败，请稍后重试';
 
@@ -297,14 +290,11 @@ service.interceptors.response.use(
       });
       if (guessed) {
         void showTranslatedErrorToast(guessed);
-      } else if (isUpload && backendMsg) {
-        // 上传接口：后端 message 已是中文时可直接展示
-        void showTranslatedErrorToast(backendMsg);
-      } else if (backendMsg && /[\u4e00-\u9fa5]/.test(backendMsg)) {
-        // 仅当后端 message 含中文时直接展示，避免英文直出
+      } else if (backendMsg && String(backendMsg).trim()) {
+        // 后端具体原因（含 Seedance/Kling 等英文报错）：交给 error-toast 走翻译或原文展示，
+        // 不再要求 message 含中文，否则会降级成「请求失败，请稍后重试」导致用户看不到真实原因。
         void showTranslatedErrorToast(backendMsg);
       } else {
-        // 兜底：统一中文文案
         void showTranslatedErrorToast(fallbackMsg);
       }
     }

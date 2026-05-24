@@ -14,6 +14,7 @@ import bcrypt from "bcrypt";
 import redis from "../utils/redis";
 import { LogService } from "./log.service";
 import { CreditService } from "./credit.service";
+import { getCreditUsageApiTypeLabel } from "../utils/nano-credit.util";
 
 export interface CreditUsageExportQuery {
     from: string;
@@ -39,6 +40,7 @@ const DEFAULT_EXPORT_MODELS = [
     "nano (anyfast)",
     "gpt-image-2 (ace)",
     "gpt-image-2 (anyfast)",
+    "gpt-image-2-c (anyfast)",
     "gemini-3.1-flash-image-preview (anyfast)",
     "gemini-3-pro-image-preview (anyfast)",
     "midjourney (midjourney)",
@@ -639,6 +641,7 @@ export class AdminService {
             creditsByApiType: Array.from(mergedCreditsByApiType.entries())
                 .map(([type, total]) => ({
                     apiType: type,
+                    apiTypeLabel: getCreditUsageApiTypeLabel(type),
                     total,
                 }))
                 .sort((a, b) => b.total - a.total),

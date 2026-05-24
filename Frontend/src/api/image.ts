@@ -20,7 +20,8 @@ export interface GenerateParams {
         | 'nano-banana-pro'
         | 'gemini-3.1-flash-image-preview'
         | 'gemini-3-pro-image-preview'
-        | 'gpt-image-2';
+        | 'gpt-image-2'
+        | 'gpt-image-2-c';
     providerHint?: 'ace' | 'anyfast';
     size?: string;
     outputFormat?: 'png' | 'webp' | 'jpeg';

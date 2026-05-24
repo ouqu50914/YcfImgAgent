@@ -13,7 +13,7 @@ import { AnyfastGptImage2Adapter } from "../adapters/anyfast-gpt-image2.adapter"
 import { AceGptImage2Adapter } from "../adapters/ace-gpt-image2.adapter";
 import { MidjourneyAdapter } from "../adapters/midjourney.adapter";
 import { GenerateParams, UpscaleParams, ExtendParams, SplitParams } from "../adapters/ai-provider.interface";
-import { CreditService, type CreditLogInfo } from "./credit.service";
+import { buildCreditLogInfo, CreditService, type CreditLogInfo } from "./credit.service";
 import { ProviderError } from "../adapters/provider-error";
 import { calculateNanoPolicyRates, isFallbackEligible } from "./nano-policy.util";
 import { detectImageFormat } from "../utils/image-format";
@@ -298,7 +298,10 @@ export class ImageService {
                 await this.imageRepo.save(imageRecord);
                 throw error;
             }
-        }, { operationType: 'generate', apiType });
+        }, buildCreditLogInfo('generate', apiType, {
+            ...(params.model != null ? { model: params.model } : {}),
+            ...(params.providerHint != null ? { providerHint: params.providerHint } : {}),
+        }));
 
         return result;
     }
@@ -371,8 +374,10 @@ export class ImageService {
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
         const isAnyfastProRequest = params.model === "gemini-3-pro-image-preview";
-        const isGptImage2Request = params.model === "gpt-image-2";
-        const isGptImage2AnyfastRequest = isGptImage2Request && params.providerHint === "anyfast";
+        const isGptImage2Request = params.model === "gpt-image-2" || params.model === "gpt-image-2-c";
+        const isGptImage2AnyfastRequest =
+            (params.model === "gpt-image-2" && params.providerHint === "anyfast")
+            || params.model === "gpt-image-2-c";
         if (!isAdmin && isAnyfastProRequest) {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
                 status: 403,
@@ -405,14 +410,16 @@ export class ImageService {
             });
             throw deniedError;
         }
-        const isGptImage2AceDirect = isGptImage2Request && params.providerHint === "ace";
-        const isGptImage2AnyfastDirect = isGptImage2Request && params.providerHint === "anyfast";
+        const isGptImage2AceDirect = params.model === "gpt-image-2" && params.providerHint === "ace";
+        const isGptImage2AnyfastDirect = isGptImage2AnyfastRequest;
         const requestedAnyfastDirect =
             params.providerHint === "anyfast" ||
             params.model === "gemini-3.1-flash-image-preview" ||
             params.model === "gemini-3-pro-image-preview" ||
             isGptImage2AnyfastDirect;
-        const requestedAceDirect = params.providerHint === "ace" && params.model !== "gpt-image-2";
+        const requestedAceDirect = params.providerHint === "ace"
+            && params.model !== "gpt-image-2"
+            && params.model !== "gpt-image-2-c";
 
         // 路由策略（普通用户/管理员统一）：
         // - 用户显式选了 ace/anyfast：按所选为主路由，另一家为兜底
@@ -467,8 +474,8 @@ export class ImageService {
                 mapped_model: mappedModel,
             });
             const adapter = this.nanoProviderAdapters[provider];
-            const result = params.model === "gpt-image-2"
-                ? (provider === "anyfast"
+            const result = isGptImage2Request
+                ? (provider === "anyfast" || params.model === "gpt-image-2-c"
                     ? await this.anyfastGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl)
                     : await this.aceGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl))
                 : await adapter.generateImage(providerParams, apiKey, apiUrl);
@@ -611,7 +618,7 @@ export class ImageService {
                     provider: primary,
                     message: this.getErrorMessage(primaryError),
                 });
-                if (!this.shouldFallback(primaryError) || fallback === primary || params.model === "gpt-image-2") {
+                if (!this.shouldFallback(primaryError) || fallback === primary || isGptImage2Request) {
                     throw primaryError;
                 }
                 switchReason = primaryError instanceof ProviderError ? primaryError.code : "PRIMARY_FAILED";
@@ -954,7 +961,10 @@ export class ImageService {
             await this.configRepo.save(config);
 
             return imageRecord;
-        }, { operationType: 'generate', apiType });
+        }, buildCreditLogInfo('generate', apiType, {
+            ...(params.model != null ? { model: params.model } : {}),
+            ...(params.providerHint != null ? { providerHint: params.providerHint } : {}),
+        }));
 
         return result;
     }

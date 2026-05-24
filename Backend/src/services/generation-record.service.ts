@@ -70,6 +70,25 @@ export class GenerationRecordService {
         }
     }
 
+    private formatImageModelLabel(modelName: string | null, modelProvider: string | null, apiType: string): string {
+        const name = (modelName || "").trim().toLowerCase();
+        const provider = (modelProvider || "").trim().toLowerCase();
+        if (name && provider && name !== provider) {
+            if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
+            if (name === "gpt-image-2" && provider === "anyfast") return "GPT Image 2(AnyFast)";
+            if (name === "gpt-image-2" && provider === "ace") return "GPT Image 2(Ace)";
+            if (name === "gemini-3-pro-image-preview") return "NanoBanana Pro(AnyFast)";
+            if (name === "gemini-3.1-flash-image-preview") return "NanoBanana2(AnyFast)";
+            if (name.startsWith("nano-banana-")) return `Nano(${provider})`;
+            return `${name}(${provider})`;
+        }
+        if (name) {
+            if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
+            return name;
+        }
+        return apiType || "nano";
+    }
+
     private imageStatusLabel(s: number): string {
         if (s === 0) return "进行中";
         if (s === 1) return "成功";
@@ -252,6 +271,7 @@ export class GenerationRecordService {
         SELECT ir.id AS eid, 'image' AS kind, ir.created_at AS sort_at,
           ir.user_id AS user_id, u.username AS username, u.role_id AS user_role_id,
           ir.api_type AS model_or_provider, COALESCE(ir.operation_type, 'generate') AS op_type,
+          ir.model_name AS model_name, ir.model_provider AS model_provider,
           ir.status AS image_status, ir.credits_spent AS credits_spent, ir.template_id AS template_id,
           (
             SELECT MAX(ol.created_at)
@@ -295,6 +315,7 @@ export class GenerationRecordService {
           SELECT ir.id AS eid, 'image' COLLATE utf8mb4_unicode_ci AS kind, ir.created_at AS sort_at,
             ir.user_id AS user_id, ${sqlU8("u.username")} AS username, u.role_id AS user_role_id,
             ${sqlU8("ir.api_type")} AS model_or_provider, ${sqlU8("COALESCE(ir.operation_type, 'generate')")} AS op_type,
+            ${sqlU8("ir.model_name")} AS model_name, ${sqlU8("ir.model_provider")} AS model_provider,
             ir.status AS image_status, ir.credits_spent AS credits_spent, ir.template_id AS template_id,
             (
               SELECT MAX(ol.created_at)
@@ -362,7 +383,12 @@ export class GenerationRecordService {
                 result_urls = this.parseImageUrls(row.image_url, row.all_images_json);
                 statusStr = this.imageStatusLabel(Number(row.image_status));
                 const op = String(row.op_type || "generate");
-                typeLabel = `图片 · ${op}`;
+                const modelLabel = this.formatImageModelLabel(
+                    row.model_name != null ? String(row.model_name) : null,
+                    row.model_provider != null ? String(row.model_provider) : null,
+                    String(row.model_or_provider || "")
+                );
+                typeLabel = `图片 · ${modelLabel} · ${op}`;
             } else {
                 result_urls = this.parseVideoUrls(row.video_urls_json);
                 statusStr = String(row.video_status_str || "pending");
@@ -375,7 +401,13 @@ export class GenerationRecordService {
                 user_id: Number(row.user_id),
                 username: String(row.username || ""),
                 user_role_id: Number(row.user_role_id),
-                model_or_provider: String(row.model_or_provider || ""),
+                model_or_provider: kindRow === "image"
+                    ? this.formatImageModelLabel(
+                        row.model_name != null ? String(row.model_name) : null,
+                        row.model_provider != null ? String(row.model_provider) : null,
+                        String(row.model_or_provider || "")
+                    )
+                    : String(row.model_or_provider || ""),
                 type_label: typeLabel,
                 credits_spent: row.credits_spent != null ? Number(row.credits_spent) : null,
                 generation_duration_ms: generationDurationMs,
