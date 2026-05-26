@@ -196,11 +196,7 @@ const ALL_MODEL_OPTIONS = [
 ] as const;
 const availableModelOptions = computed(() => {
     if (isSuperAdmin.value) return ALL_MODEL_OPTIONS;
-    return ALL_MODEL_OPTIONS.filter(
-        option => option.value !== ANYFAST_PRO_MODEL
-            && option.value !== GPT_IMAGE2_ANYFAST_MODEL
-            && option.value !== GPT_IMAGE2_ANYFAST_C_MODEL
-    );
+    return ALL_MODEL_OPTIONS.filter(option => option.value !== ANYFAST_PRO_MODEL);
 });
 
 const extractTextFromPromptDoc = (node: unknown): string => {
@@ -362,16 +358,6 @@ watch(
         if (model === ANYFAST_PRO_MODEL) {
             selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
             toastOnce('anyfast-pro-forbidden', '普通用户不支持 NanoBanana Pro(anyfast)，已自动切换到 NanoBanana2(anyfast)');
-            return;
-        }
-        if (model === GPT_IMAGE2_ANYFAST_MODEL) {
-            selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
-            toastOnce('gpt-image2-anyfast-forbidden', '普通用户暂不支持 GPT Image 2(anyfast)，已自动切换到 NanoBanana2(anyfast)');
-            return;
-        }
-        if (model === GPT_IMAGE2_ANYFAST_C_MODEL) {
-            selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
-            toastOnce('gpt-image2-c-anyfast-forbidden', '普通用户暂不支持 GPT Image 2-C(anyfast)，已自动切换到 NanoBanana2(anyfast)');
         }
     },
     { immediate: true }

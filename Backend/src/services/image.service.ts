@@ -394,22 +394,6 @@ export class ImageService {
             });
             throw deniedError;
         }
-        if (!isAdmin && isGptImage2AnyfastRequest) {
-            const deniedError = Object.assign(new Error("普通用户暂不支持使用 GPT Image 2"), {
-                status: 403,
-                code: "GPT_IMAGE2_FORBIDDEN",
-            });
-            console.warn("[ImageService][NanoPolicyRequest] blocked_forbidden_model", {
-                request_seq: requestSeq,
-                request_id: requestId,
-                user_id: hasValidUserId ? normalizedUserId : undefined,
-                is_admin: isAdmin,
-                provider_hint: params.providerHint,
-                model: params.model,
-                reason: "non_admin_forbidden_gpt_image2_anyfast",
-            });
-            throw deniedError;
-        }
         const isGptImage2AceDirect = params.model === "gpt-image-2" && params.providerHint === "ace";
         const isGptImage2AnyfastDirect = isGptImage2AnyfastRequest;
         const requestedAnyfastDirect =
