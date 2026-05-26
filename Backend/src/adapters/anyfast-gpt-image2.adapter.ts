@@ -1,4 +1,5 @@
 import axios from "axios";
+import FormData from "form-data";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -11,6 +12,10 @@ import { ProviderError } from "./provider-error";
 const axiosClient = axios.create({ proxy: false });
 const GPT_IMAGE2_DEFAULT_BASE_URL = "https://www.anyfast.ai";
 const GPT_IMAGE2_REQUEST_TIMEOUT_MS = Number(process.env.GPT_IMG2_REQUEST_TIMEOUT_MS || "600000");
+const GPT_IMAGE2_MAX_EDIT_REFS = 16;
+
+type UpstreamModel = "gpt-image-2" | "gpt-image-2-c";
+type RequestMode = "generate" | "edit";
 
 export class AnyfastGptImage2Adapter implements AiProvider {
     private summarizeRequestBody(body: Record<string, unknown>): Record<string, unknown> {
@@ -28,6 +33,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                 : undefined,
         };
     }
+
 
     private ratioToNumber(ratioText?: string): number {
         if (!ratioText) return 1;
@@ -81,7 +87,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return base.replace(/\/$/, "");
     }
 
-    private resolveUpstreamModel(model?: GenerateParams["model"]): "gpt-image-2" | "gpt-image-2-c" {
+    private resolveUpstreamModel(model?: GenerateParams["model"]): UpstreamModel {
         return model === "gpt-image-2-c" ? "gpt-image-2-c" : "gpt-image-2";
     }
 
@@ -114,9 +120,38 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return "png";
     }
 
+    private normalizeEditOutputFormat(raw?: string): "png" | "jpeg" {
+        if (raw === "jpeg") return "jpeg";
+        return "png";
+    }
+
     private normalizeModeration(raw?: string): "auto" | "low" {
         if (raw === "low") return "low";
         return "auto";
+    }
+
+    private collectReferenceUrls(params: GenerateParams): string[] {
+        return (params.imageUrls && params.imageUrls.length > 0)
+            ? params.imageUrls.filter((x) => typeof x === "string" && x.trim().length > 0)
+            : (params.imageUrl ? [params.imageUrl] : []);
+    }
+
+    private resolveImageCount(params: GenerateParams): number {
+        return Math.max(1, Math.min(params.num_images || (params as { numImages?: number }).numImages || 1, 4));
+    }
+
+    private assertEditInputMime(mimeType: string): void {
+        const normalized = mimeType.toLowerCase().split(";")[0]?.trim() || "";
+        if (normalized === "image/png" || normalized === "image/jpeg" || normalized === "image/jpg") {
+            return;
+        }
+        throw new ProviderError({
+            code: "GPT_IMAGE2_EDIT_INPUT_FORMAT_UNSUPPORTED",
+            status: 422,
+            message: "GPT Image 2 图片编辑仅支持 PNG/JPEG 格式的参考图",
+            provider: "anyfast",
+            transient: false,
+        });
     }
 
     private async resolveImageBuffer(
@@ -277,6 +312,91 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return `${prompt}。输出尺寸：${size}。`;
     }
 
+    private buildGenerationBody(
+        params: GenerateParams,
+        upstreamModel: UpstreamModel,
+        count: number,
+        size: string,
+        quality: "low" | "medium" | "high",
+        outputFormat: "png" | "webp" | "jpeg",
+        moderation: "auto" | "low",
+        outputCompression?: number
+    ): Record<string, unknown> {
+        const body: Record<string, unknown> = {
+            model: upstreamModel,
+            prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
+            n: count,
+            size,
+            quality,
+            output_format: outputFormat,
+            moderation,
+        };
+        if ((outputFormat === "jpeg" || outputFormat === "webp") && outputCompression != null) {
+            body.output_compression = outputCompression;
+        }
+        return body;
+    }
+
+    private async buildEditForm(
+        params: GenerateParams,
+        refs: string[],
+        upstreamModel: UpstreamModel,
+        count: number,
+        size: string,
+        outputFormat: "png" | "jpeg",
+        outputCompression?: number
+    ): Promise<{ form: FormData; summary: Record<string, unknown> }> {
+        const limitedRefs = refs.slice(0, GPT_IMAGE2_MAX_EDIT_REFS);
+        if (refs.length > GPT_IMAGE2_MAX_EDIT_REFS) {
+            console.warn("[AnyfastGptImage2Adapter] reference_images_truncated", {
+                requested: refs.length,
+                used: GPT_IMAGE2_MAX_EDIT_REFS,
+            });
+        }
+
+        const resolvedImages = await Promise.all(limitedRefs.map((ref) => this.resolveImageBuffer(ref)));
+        for (const img of resolvedImages) {
+            this.assertEditInputMime(img.mimeType);
+        }
+
+        const form = new FormData();
+        const imageField = resolvedImages.length === 1 ? "image" : "image[]";
+        for (const img of resolvedImages) {
+            form.append(imageField, img.buffer, {
+                filename: img.fileName,
+                contentType: img.mimeType,
+            });
+        }
+
+        form.append("model", upstreamModel);
+        const prompt = this.enrichPromptWithComputedSize(params.prompt || "编辑图片", size);
+        form.append("prompt", prompt);
+        form.append("n", String(count));
+        form.append("size", size);
+        form.append("output_format", outputFormat);
+        if (outputFormat === "jpeg" && outputCompression != null) {
+            form.append("output_compression", String(outputCompression));
+        }
+        if (upstreamModel === "gpt-image-2-c") {
+            form.append("response_format", "url");
+        }
+
+        return {
+            form,
+            summary: {
+                model: upstreamModel,
+                prompt_length: prompt.length,
+                n: count,
+                size,
+                output_format: outputFormat,
+                output_compression: outputFormat === "jpeg" ? outputCompression : undefined,
+                response_format: upstreamModel === "gpt-image-2-c" ? "url" : undefined,
+                reference_image_count: resolvedImages.length,
+                image_field: imageField,
+            },
+        };
+    }
+
     private async saveImageBuffer(buffer: Buffer): Promise<string> {
         const detected = detectImageFormat({ firstBytes: buffer.subarray(0, 32) });
         const fileName = `gptimg2_${uuidv4()}${detected.ext}`;
@@ -402,75 +522,57 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return [];
     }
 
-    async generateImage(params: GenerateParams, apiKeyFromConfig: string, _apiUrl: string): Promise<AiResponse> {
-        const upstreamModel = this.resolveUpstreamModel(params.model);
-        const key = this.getApiKey(apiKeyFromConfig, params.model);
-        const baseUrl = this.getBaseUrl();
-        const endpointGenerate = `${baseUrl}/v1/images/generations`;
-        const count = Math.max(1, Math.min(params.num_images || (params as any).numImages || 1, 4));
-        const quality = this.normalizeQuality(params.quality);
-        const size = this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
-        const outputFormat = this.normalizeOutputFormat(params.outputFormat);
-        const moderation = this.normalizeModeration(params.moderation);
-        const outputCompression = Number.isFinite(params.outputCompression)
-            ? Math.max(0, Math.min(100, Number(params.outputCompression)))
-            : undefined;
-
-        const body: Record<string, unknown> = {
-            model: upstreamModel,
-            prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
-            n: count,
-            size,
-            quality,
-            output_format: outputFormat,
-            moderation,
-        };
-
-        if ((outputFormat === "jpeg" || outputFormat === "webp") && outputCompression != null) {
-            body.output_compression = outputCompression;
+    private extractOriginalId(resData: unknown): string {
+        if (resData && typeof resData === "object") {
+            const root = resData as Record<string, unknown>;
+            if (root.id != null) return String(root.id);
+            if (root.task_id != null) return String(root.task_id);
         }
-        const refs = (params.imageUrls && params.imageUrls.length > 0)
-            ? params.imageUrls.filter((x) => typeof x === "string" && x.trim().length > 0)
-            : (params.imageUrl ? [params.imageUrl] : []);
-        const firstRef = refs[0];
-        if (firstRef) {
-            const { buffer, mimeType } = await this.resolveImageBuffer(firstRef);
-            body.image = `data:${mimeType};base64,${buffer.toString("base64")}`;
-        }
+        return `gptimg2_${Date.now()}`;
+    }
+
+    private async postUpstream(
+        endpoint: string,
+        payload: Record<string, unknown> | FormData,
+        headers: Record<string, string>,
+        key: string,
+        mode: RequestMode,
+        upstreamModel: UpstreamModel,
+        requestSummary: Record<string, unknown>,
+        requestBodyLog?: Record<string, unknown>
+    ): Promise<AiResponse> {
+        const isFormData = payload instanceof FormData;
         console.log("[AnyfastGptImage2Adapter] request_summary", {
-            endpoint: endpointGenerate,
-            model: body.model,
-            prompt_length: String(body.prompt || "").length,
-            n: count,
-            size,
-            quality,
-            output_format: outputFormat,
-            moderation,
-            reference_image_count: refs.length,
-            image_attached: typeof body.image === "string",
+            mode,
+            endpoint,
+            model: upstreamModel,
+            ...requestSummary,
         });
         console.log("[AnyfastGptImage2Adapter] request_payload_before_send", {
-            endpoint: endpointGenerate,
+            mode,
+            endpoint,
             timeout_ms: GPT_IMAGE2_REQUEST_TIMEOUT_MS,
             headers: {
                 Authorization: "Bearer ****",
-                "Content-Type": "application/json",
+                "Content-Type": isFormData ? "multipart/form-data" : "application/json",
             },
-            body: this.summarizeRequestBody(body),
+            body: requestBodyLog ?? (isFormData ? requestSummary : this.summarizeRequestBody(payload as Record<string, unknown>)),
         });
 
         try {
-            const resData = (await axiosClient.post(endpointGenerate, body, {
+            const resData = (await axiosClient.post(endpoint, payload, {
                 timeout: GPT_IMAGE2_REQUEST_TIMEOUT_MS,
                 headers: {
                     Authorization: `Bearer ${key}`,
-                    "Content-Type": "application/json",
+                    ...(isFormData ? payload.getHeaders() : { "Content-Type": "application/json" }),
+                    ...headers,
                 },
             })).data;
 
             const responseSummary = this.summarizeUpstreamResponse(resData);
             console.log("[AnyfastGptImage2Adapter] response_summary", {
-                endpoint: endpointGenerate,
+                mode,
+                endpoint,
                 model: upstreamModel,
                 ...responseSummary,
             });
@@ -478,7 +580,8 @@ export class AnyfastGptImage2Adapter implements AiProvider {
             const images = await this.parseImagesFromResponse(resData);
             if (!images.length) {
                 console.warn("[AnyfastGptImage2Adapter] empty_image_response", {
-                    endpoint: endpointGenerate,
+                    mode,
+                    endpoint,
                     model: upstreamModel,
                     response_summary: responseSummary,
                 });
@@ -491,15 +594,10 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                 });
             }
 
-            const originalId =
-                (resData && typeof resData === "object" && (resData as Record<string, unknown>).id != null)
-                    ? String((resData as Record<string, unknown>).id)
-                    : (resData && typeof resData === "object" && (resData as Record<string, unknown>).task_id != null)
-                        ? String((resData as Record<string, unknown>).task_id)
-                        : `gptimg2_${Date.now()}`;
-
+            const originalId = this.extractOriginalId(resData);
             console.log("[AnyfastGptImage2Adapter] response_parsed", {
-                endpoint: endpointGenerate,
+                mode,
+                endpoint,
                 model: upstreamModel,
                 image_count: images.length,
                 original_id: originalId,
@@ -509,20 +607,31 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                 original_id: originalId,
                 images,
             };
-        } catch (error: any) {
+        } catch (error: unknown) {
             if (error instanceof ProviderError) throw error;
-            const status = error?.response?.status;
-            const responseData = error?.response?.data;
+            const axiosError = error as {
+                response?: { status?: number; data?: unknown };
+                message?: string;
+            };
+            const status = axiosError?.response?.status;
+            const responseData = axiosError?.response?.data;
+            const responseRoot = responseData && typeof responseData === "object"
+                ? responseData as Record<string, unknown>
+                : undefined;
+            const nestedError = responseRoot?.error && typeof responseRoot.error === "object"
+                ? responseRoot.error as Record<string, unknown>
+                : undefined;
             const msg =
-                responseData?.error?.message ||
-                responseData?.message ||
-                error?.message ||
+                (typeof nestedError?.message === "string" ? nestedError.message : undefined) ||
+                (typeof responseRoot?.message === "string" ? responseRoot.message : undefined) ||
+                axiosError?.message ||
                 "未知错误";
             console.error("[AnyfastGptImage2Adapter] request_failed", {
-                endpoint: endpointGenerate,
+                mode,
+                endpoint,
                 status,
                 message: msg,
-                request: this.summarizeRequestBody(body),
+                request: requestBodyLog ?? (isFormData ? requestSummary : this.summarizeRequestBody(payload as Record<string, unknown>)),
                 response_summary: this.summarizeUpstreamResponse(responseData),
             });
             throw new ProviderError({
@@ -533,5 +642,75 @@ export class AnyfastGptImage2Adapter implements AiProvider {
                 transient: status === 429 || (typeof status === "number" && status >= 500),
             });
         }
+    }
+
+    async generateImage(params: GenerateParams, apiKeyFromConfig: string, _apiUrl: string): Promise<AiResponse> {
+        const upstreamModel = this.resolveUpstreamModel(params.model);
+        const key = this.getApiKey(apiKeyFromConfig, params.model);
+        const baseUrl = this.getBaseUrl();
+        const count = this.resolveImageCount(params);
+        const quality = this.normalizeQuality(params.quality);
+        const size = this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
+        const outputCompression = Number.isFinite(params.outputCompression)
+            ? Math.max(0, Math.min(100, Number(params.outputCompression)))
+            : undefined;
+        const refs = this.collectReferenceUrls(params);
+        const hasRefImage = refs.length > 0;
+
+        if (hasRefImage) {
+            const endpointEdit = `${baseUrl}/v1/images/edits`;
+            const editOutputFormat = this.normalizeEditOutputFormat(params.outputFormat);
+            const { form, summary } = await this.buildEditForm(
+                params,
+                refs,
+                upstreamModel,
+                count,
+                size,
+                editOutputFormat,
+                outputCompression
+            );
+            return this.postUpstream(
+                endpointEdit,
+                form,
+                {},
+                key,
+                "edit",
+                upstreamModel,
+                summary,
+                summary
+            );
+        }
+
+        const endpointGenerate = `${baseUrl}/v1/images/generations`;
+        const outputFormat = this.normalizeOutputFormat(params.outputFormat);
+        const moderation = this.normalizeModeration(params.moderation);
+        const body = this.buildGenerationBody(
+            params,
+            upstreamModel,
+            count,
+            size,
+            quality,
+            outputFormat,
+            moderation,
+            outputCompression
+        );
+
+        return this.postUpstream(
+            endpointGenerate,
+            body,
+            {},
+            key,
+            "generate",
+            upstreamModel,
+            {
+                prompt_length: String(body.prompt || "").length,
+                n: count,
+                size,
+                quality,
+                output_format: outputFormat,
+                moderation,
+                reference_image_count: 0,
+            }
+        );
     }
 }
