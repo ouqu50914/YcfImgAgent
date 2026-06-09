@@ -126,12 +126,12 @@
                 type="textarea"
                 :rows="3"
                 class="chat-input"
-                placeholder="除了输入文案向Gemini提仍和问题，还可以关联工作流基本信息，例如：选中某个节点，询问是做什么的、当前选中了哪些个节点、有什么适合的模板推荐、工作流整体结构说明、优化选中文案提示词等…"
+                placeholder="输入您的问题，我来帮您解答..."
                 @keydown.enter.exact.prevent="handleSend"
                 @keydown.enter.shift.prevent="insertNewLine"
               />
               <div class="chat-input-actions">
-                <span class="chat-input-tip">Enter 发送，Shift+Enter 换行 · 可结合当前画布询问节点含义、连线方式、模板推荐等</span>
+                <span class="chat-input-tip">Enter 发送，Shift+Enter 换行</span>
                 <el-button
                   type="primary"
                   :loading="loading"
