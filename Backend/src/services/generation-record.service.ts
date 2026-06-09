@@ -335,6 +335,7 @@ export class GenerationRecordService {
           SELECT vt.id AS eid, 'video' COLLATE utf8mb4_unicode_ci AS kind, vt.created_at AS sort_at,
             vt.user_id AS user_id, ${sqlU8("u2.username")} AS username, u2.role_id AS user_role_id,
             ${sqlU8("vt.provider")} AS model_or_provider, ${sqlU8("vt.type")} AS op_type,
+            ${sqlU8("CAST(NULL AS CHAR)")} AS model_name, ${sqlU8("CAST(NULL AS CHAR)")} AS model_provider,
             NULL AS image_status, vt.credits_spent AS credits_spent, vt.template_id AS template_id,
             NULL AS image_echo_at,
             vt.finished_at AS video_finished_at,

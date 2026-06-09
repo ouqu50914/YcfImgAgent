@@ -1,14 +1,23 @@
 import axios from "axios";
-import { extractVideoKeyFramesJpeg, isFfmpegVideoFramesEnabled } from "../utils/video-frames-ffmpeg";
+import {
+    extractVideoKeyFramesJpeg,
+    extractVideoKeyFramesJpegFromPath,
+    isFfmpegVideoFramesEnabled,
+} from "../utils/video-frames-ffmpeg";
+import { ensureChatTempLocalPath, readLocalUploadBytes } from "./chat-temp-media.service";
+import { isCosEnabled, getSignedUrl, pathToKey } from "./cos.service";
 
 const MAX_INLINE_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_INLINE_VIDEO_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_URLS = 8;
 const MAX_VIDEO_URLS = 2;
 const MAX_AUDIO_URLS = 2;
 const MAX_HISTORY_TURNS = 8;
-const FETCH_TIMEOUT_MS = 60000;
+const FETCH_TIMEOUT_MS = Number(process.env.GEMINI_FETCH_TIMEOUT_MS || "180000");
 
-const GEMINI_GENERATE_CONTENT_TIMEOUT_MS = 300000;
+const GEMINI_GENERATE_CONTENT_TIMEOUT_MS = Number(
+    process.env.GEMINI_GENERATE_CONTENT_TIMEOUT_MS || "300000"
+);
 
 /** 设为 false 可关闭详细请求日志；未设置时默认打印（便于排查，生产环境可关闭） */
 function shouldLogGeminiRequestDetail(): boolean {
@@ -113,6 +122,59 @@ function isHttpUrl(s: string): boolean {
     return t.startsWith("https://") || t.startsWith("http://");
 }
 
+function isLocalUploadPath(url: string): boolean {
+    const t = url.trim();
+    return t.startsWith("/uploads/") || t.startsWith("uploads/");
+}
+
+function normalizeLocalUploadPath(url: string): string {
+    const t = url.trim();
+    return t.startsWith("/") ? t : `/${t}`;
+}
+
+async function resolveImageUrlForVision(url: string): Promise<string> {
+    if (isHttpUrl(url) || url.startsWith("data:")) return url;
+    if (!isLocalUploadPath(url)) return url;
+    const buf = await readLocalUploadBytes(normalizeLocalUploadPath(url));
+    const mime = guessImageMimeFromUrl(url);
+    return `data:${mime};base64,${buf.toString("base64")}`;
+}
+
+/** 将本地上传路径解析为 Gemini 可访问的公网 URL（COS 预签名或配置的公网域名） */
+async function resolveMediaUriForGenerateContent(url: string): Promise<string> {
+    if (isHttpUrl(url) || url.startsWith("data:")) return url;
+    if (!isLocalUploadPath(url)) return url;
+
+    const normalized = normalizeLocalUploadPath(url);
+    if (isCosEnabled()) {
+        return getSignedUrl(pathToKey(normalized), 3600);
+    }
+
+    const publicBase = process.env.APP_PUBLIC_URL?.trim() || process.env.PUBLIC_API_URL?.trim();
+    if (publicBase) {
+        return `${publicBase.replace(/\/$/, "")}${normalized}`;
+    }
+
+    return normalized;
+}
+
+/** 小视频可 inline 发送，避免 file_uri 无法访问本地路径 */
+async function tryInlineVideoPart(url: string): Promise<Record<string, unknown> | null> {
+    try {
+        const buf = await readLocalUploadBytes(normalizeLocalUploadPath(url));
+        if (buf.length === 0 || buf.length > MAX_INLINE_VIDEO_BYTES) return null;
+        return {
+            inline_data: {
+                mime_type: guessVideoMimeFromUrl(url),
+                data: buf.toString("base64"),
+            },
+        };
+    } catch (e: any) {
+        console.warn("[GeminiMultimodal] 视频 inline 读取失败:", url.slice(0, 120), e?.message || e);
+        return null;
+    }
+}
+
 /**
  * 从 workflowContext.selectedNodes[].media 收集图片、视频 URL（与前端约定一致）
  */
@@ -197,10 +259,37 @@ export async function buildMediaPartsForGenerateContent(
 
     for (const item of items) {
         if (item.kind === "video") {
+            const handle = await ensureChatTempLocalPath(item.url);
+            if (handle) {
+                try {
+                    const frames = extractVideoKeyFramesJpegFromPath(handle.path);
+                    if (frames.length > 0) {
+                        for (const buf of frames) {
+                            parts.push({
+                                inline_data: {
+                                    mime_type: "image/jpeg",
+                                    data: buf.toString("base64"),
+                                },
+                            });
+                        }
+                        continue;
+                    }
+                } finally {
+                    handle.cleanup();
+                }
+            }
+
+            const inlineVideo = await tryInlineVideoPart(item.url);
+            if (inlineVideo) {
+                parts.push(inlineVideo);
+                continue;
+            }
+
+            const fileUri = await resolveMediaUriForGenerateContent(item.url);
             parts.push({
                 file_data: {
                     mime_type: guessVideoMimeFromUrl(item.url),
-                    file_uri: item.url,
+                    file_uri: fileUri,
                 },
             });
             continue;
@@ -217,21 +306,30 @@ export async function buildMediaPartsForGenerateContent(
         }
 
         try {
-            const res = await axios.get(item.url, {
-                responseType: "arraybuffer",
-                timeout: FETCH_TIMEOUT_MS,
-                maxContentLength: MAX_INLINE_IMAGE_BYTES,
-                maxBodyLength: MAX_INLINE_IMAGE_BYTES,
-                validateStatus: (status) => status === 200,
-            });
+            let buf: Buffer;
+            let headerMime: string | undefined;
 
-            const buf = Buffer.from(res.data as ArrayBuffer);
-            if (buf.length > 0 && buf.length <= MAX_INLINE_IMAGE_BYTES) {
-                const headerMime = (res.headers["content-type"] as string | undefined)
+            if (isLocalUploadPath(item.url)) {
+                buf = await readLocalUploadBytes(normalizeLocalUploadPath(item.url));
+            } else {
+                const res = await axios.get(item.url, {
+                    responseType: "arraybuffer",
+                    timeout: FETCH_TIMEOUT_MS,
+                    maxContentLength: MAX_INLINE_IMAGE_BYTES,
+                    maxBodyLength: MAX_INLINE_IMAGE_BYTES,
+                    validateStatus: (status) => status === 200,
+                });
+                buf = Buffer.from(res.data as ArrayBuffer);
+                headerMime = (res.headers["content-type"] as string | undefined)
                     ?.split(";")[0]
                     ?.trim();
+            }
+
+            if (buf.length > 0 && buf.length <= MAX_INLINE_IMAGE_BYTES) {
                 const mime =
-                    headerMime && headerMime.startsWith("image/") ? headerMime : guessImageMimeFromUrl(item.url);
+                    headerMime && headerMime.startsWith("image/")
+                        ? headerMime
+                        : guessImageMimeFromUrl(item.url);
                 parts.push({
                     inline_data: {
                         mime_type: mime,
@@ -294,7 +392,17 @@ async function prepareChatVisionParams(
             next.push(it);
             continue;
         }
-        const frames = extractVideoKeyFramesJpeg(it.url);
+        const handle = await ensureChatTempLocalPath(it.url);
+        let frames: Buffer[] = [];
+        if (handle) {
+            try {
+                frames = extractVideoKeyFramesJpegFromPath(handle.path);
+            } finally {
+                handle.cleanup();
+            }
+        } else {
+            frames = extractVideoKeyFramesJpeg(it.url);
+        }
         if (frames.length === 0) {
             next.push(it);
             continue;
@@ -330,7 +438,7 @@ function parseChatCompletionReply(data: unknown): string {
         ? (ch0.message as Record<string, unknown>).content
         : ch0?.text;
 
-    if (typeof content === "string") return content.trim();
+    if (typeof content === "string") return content;
 
     if (Array.isArray(content)) {
         const texts = content
@@ -341,11 +449,11 @@ function parseChatCompletionReply(data: unknown): string {
                 return "";
             })
             .filter(Boolean);
-        if (texts.length) return texts.join("\n").trim();
+        if (texts.length) return texts.join("\n");
     }
 
     const reply = d.reply ?? d.message ?? d.text;
-    if (typeof reply === "string" && reply.trim()) return reply.trim();
+    if (typeof reply === "string" && reply) return reply;
 
     return "";
 }
@@ -418,12 +526,12 @@ function parseGenerateContentReply(data: unknown): string {
             const texts = parts
                 .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>).text : undefined))
                 .filter((t): t is string => typeof t === "string");
-            if (texts.length) return texts.join("\n").trim();
+            if (texts.length) return texts.join("\n");
         }
     }
 
     const reply = d.reply ?? d.message ?? d.text;
-    if (typeof reply === "string" && reply.trim()) return reply.trim();
+    if (typeof reply === "string" && reply) return reply;
 
     return "";
 }
@@ -463,7 +571,8 @@ export async function callGeminiChatCompletionsWithVision(
 
     const userContent: Record<string, unknown>[] = [{ type: "text", text: textPart }];
     for (const img of imageItems) {
-        userContent.push({ type: "image_url", image_url: { url: img.url } });
+        const visionUrl = await resolveImageUrlForVision(img.url);
+        userContent.push({ type: "image_url", image_url: { url: visionUrl } });
     }
 
     messages.push({ role: "user", content: userContent });
@@ -539,7 +648,8 @@ export async function requestGeminiChatVisionStream(
 
     const userContent: Record<string, unknown>[] = [{ type: "text", text: textPart }];
     for (const img of imageItems) {
-        userContent.push({ type: "image_url", image_url: { url: img.url } });
+        const visionUrl = await resolveImageUrlForVision(img.url);
+        userContent.push({ type: "image_url", image_url: { url: visionUrl } });
     }
 
     messages.push({ role: "user", content: userContent });

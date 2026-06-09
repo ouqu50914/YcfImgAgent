@@ -2,8 +2,12 @@ import { Request, Response } from "express";
 import axios from "axios";
 import { PromptService } from "../services/prompt.service";
 import { LogService } from "../services/log.service";
-// 已移除多模态相关导入，Gemini 现在作为普通聊天机器人使用
-
+import {
+    extractWorkflowMediaUrls,
+    callGeminiMultimodal,
+    callGeminiGenerateContent,
+    requestGeminiChatVisionStream,
+} from "../services/gemini-multimodal.service";
 const promptService = new PromptService();
 const logService = new LogService();
 
@@ -11,7 +15,13 @@ const logService = new LogService();
 const WORKFLOW_CONTEXT_JSON_MAX_CHARS = 16000;
 
 const GEMINI_WORKFLOW_SYSTEM_PROMPT =
-    "你是一个友好的AI助手，能够用自然语言回答用户的问题。";
+    "你是一个强大的多模态AI助手，能够理解和分析图片、视频内容，并用自然语言回答用户的问题。" +
+    "当用户上传图片或视频时，请结合媒体内容进行分析和回答。";
+
+function workflowContextText(workflowContext: unknown): string {
+    if (!workflowContext) return "";
+    return `当前工作流上下文信息：${JSON.stringify(workflowContext).slice(0, WORKFLOW_CONTEXT_JSON_MAX_CHARS)}`;
+}
 
 const GEMINI_ERROR_TRANSLATION_SYSTEM_PROMPT =
     "你是一个技术错误翻译助手。请将用户提供的错误信息翻译为简体中文，要求：\n" +
@@ -153,31 +163,98 @@ export const optimizePrompt = async (req: Request, res: Response) => {
 };
 
 /**
- * Gemini 聊天接口
+ * Gemini 聊天接口（支持多模态）
  */
 export const geminiChat = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { message, history, temperature, maxTokens } = req.body || {};
+        const { message, history, workflowContext, mediaUrls, temperature, maxTokens } = req.body || {};
 
         if (!message || typeof message !== "string") {
             return res.status(400).json({ message: "message 不能为空" });
         }
 
-        const messages: { role: "user" | "assistant" | "system"; content: string }[] = [];
-        messages.push({ role: "system", content: GEMINI_WORKFLOW_SYSTEM_PROMPT });
+        const mediaItems = extractWorkflowMediaUrls(workflowContext);
         
+        if (Array.isArray(mediaUrls)) {
+            for (const url of mediaUrls) {
+                if (typeof url === "string" && url.trim()) {
+                    const kind = url.toLowerCase().includes('.mp4') || url.toLowerCase().includes('.mov') || url.toLowerCase().includes('.webm') 
+                        ? 'video' 
+                        : url.toLowerCase().includes('.wav') || url.toLowerCase().includes('.mp3') || url.toLowerCase().includes('.m4a')
+                            ? 'audio'
+                            : 'image';
+                    mediaItems.push({ url: url.trim(), kind });
+                }
+            }
+        }
+
+        const historyForMultimodal: { role: "user" | "assistant"; content: string }[] = [];
         if (Array.isArray(history)) {
             for (const item of history) {
                 if (!item || typeof item !== "object") continue;
                 const role = item.role === "assistant" ? "assistant" : "user";
                 if (typeof item.content !== "string") continue;
-                messages.push({ role, content: item.content });
+                historyForMultimodal.push({ role, content: item.content });
             }
         }
-        
-        messages.push({ role: "user", content: message });
-        const reply = await promptService.chatWithGemini(messages, { temperature, maxTokens });
+
+        let reply: string;
+
+        if (mediaItems.length > 0) {
+            try {
+                reply = await callGeminiMultimodal({
+                    systemAndContextText: `${GEMINI_WORKFLOW_SYSTEM_PROMPT}\n\n${workflowContextText(workflowContext)}`,
+                    userMessage: message,
+                    history: historyForMultimodal,
+                    mediaItems,
+                    ...(typeof temperature === "number" ? { temperature } : {}),
+                    ...(typeof maxTokens === "number" ? { maxOutputTokens: maxTokens } : {}),
+                });
+            } catch (mmErr: any) {
+                const msg = String(mmErr?.message || mmErr || "");
+                if (mediaItems.some((m) => m.kind === "video")) {
+                    const isConfig = msg.includes("GEMINI_GENERATE_CONTENT_API_URL");
+                    return res.status(isConfig ? 400 : 502).json({
+                        message:
+                            msg ||
+                            (isConfig
+                                ? "视频识别需配置 GEMINI_GENERATE_CONTENT_API_URL（见 Ace 文档 Gemini Generate Content API）"
+                                : "视频识别调用失败"),
+                    });
+                }
+                console.error(
+                    "[PromptController] 多模态（图片）失败，回退纯文本 chat:",
+                    mmErr?.message || mmErr
+                );
+                const messages: { role: "user" | "assistant" | "system"; content: string }[] = [];
+                messages.push({ role: "system", content: GEMINI_WORKFLOW_SYSTEM_PROMPT });
+                for (const h of historyForMultimodal) {
+                    messages.push({ role: h.role, content: h.content });
+                }
+                if (workflowContext) {
+                    messages.push({ role: "system", content: workflowContextText(workflowContext) });
+                }
+                messages.push({ role: "user", content: message });
+                reply = await promptService.chatWithGemini(messages, { temperature, maxTokens });
+            }
+        } else {
+            const messages: { role: "user" | "assistant" | "system"; content: string }[] = [];
+            messages.push({ role: "system", content: GEMINI_WORKFLOW_SYSTEM_PROMPT });
+            if (Array.isArray(history)) {
+                for (const item of history) {
+                    if (!item || typeof item !== "object") continue;
+                    const role = item.role === "assistant" ? "assistant" : "user";
+                    if (typeof item.content !== "string") continue;
+                    messages.push({ role, content: item.content });
+                }
+            }
+            if (workflowContext) {
+                messages.push({ role: "system", content: workflowContextText(workflowContext) });
+            }
+            messages.push({ role: "user", content: message });
+            reply = await promptService.chatWithGemini(messages, { temperature, maxTokens });
+        }
 
         if (userId) {
             const ipAddressRaw = req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
@@ -189,6 +266,9 @@ export const geminiChat = async (req: Request, res: Response) => {
                     type: "gemini-chat",
                     message,
                     historyLength: Array.isArray(history) ? history.length : 0,
+                    workflowContextSummary: workflowContext ? Object.keys(workflowContext) : undefined,
+                    multimodal: mediaItems.length > 0,
+                    mediaCount: mediaItems.length,
                 }
             };
 
@@ -215,11 +295,11 @@ export const geminiChat = async (req: Request, res: Response) => {
 };
 
 /**
- * Gemini 聊天接口（流式）
+ * Gemini 聊天接口（流式，支持多模态）
  * 将 Ace Data 的流式响应原样透传给前端（SSE / chunk）
  */
 export const geminiChatStream = async (req: Request, res: Response) => {
-    const { message, history, temperature, maxTokens } = req.body || {};
+    const { message, history, workflowContext, mediaUrls, temperature, maxTokens } = req.body || {};
 
     if (!message || typeof message !== "string") {
         return res.status(400).json({ message: "message 不能为空" });
@@ -233,8 +313,53 @@ export const geminiChatStream = async (req: Request, res: Response) => {
         return res.status(500).json({ message: "Gemini 聊天服务未正确配置（缺少 GEMINI_CHAT_API_KEY）" });
     }
 
+    const mediaItems = extractWorkflowMediaUrls(workflowContext);
+    
+    if (Array.isArray(mediaUrls)) {
+        for (const url of mediaUrls) {
+            if (typeof url === "string" && url.trim()) {
+                const kind = url.toLowerCase().includes('.mp4') || url.toLowerCase().includes('.mov') || url.toLowerCase().includes('.webm') 
+                    ? 'video' 
+                    : url.toLowerCase().includes('.wav') || url.toLowerCase().includes('.mp3') || url.toLowerCase().includes('.m4a')
+                        ? 'audio'
+                        : 'image';
+                mediaItems.push({ url: url.trim(), kind });
+            }
+        }
+    }
+
+    const historyForMultimodal: { role: "user" | "assistant"; content: string }[] = [];
+    if (Array.isArray(history)) {
+        for (const item of history) {
+            if (!item || typeof item !== "object") continue;
+            const role = item.role === "assistant" ? "assistant" : "user";
+            if (typeof item.content !== "string") continue;
+            historyForMultimodal.push({ role, content: item.content });
+        }
+    }
+
     if (!API_URL) {
         return res.status(500).json({ message: "Gemini 聊天服务未正确配置（缺少 GEMINI_CHAT_API_URL）" });
+    }
+
+    const multimodalPayload = {
+        systemAndContextText: `${GEMINI_WORKFLOW_SYSTEM_PROMPT}\n\n${workflowContextText(workflowContext)}`,
+        userMessage: message,
+        history: historyForMultimodal,
+        mediaItems,
+        ...(typeof temperature === "number" ? { temperature } : {}),
+        ...(typeof maxTokens === "number" ? { maxOutputTokens: maxTokens } : {}),
+    };
+
+    const hasVideo = mediaItems.some((m) => m.kind === "video");
+    const genUrl = process.env.GEMINI_GENERATE_CONTENT_API_URL?.trim();
+
+    if (mediaItems.length > 0 && hasVideo && !genUrl) {
+        return res.status(400).json({
+            message:
+                "视频识别需配置 GEMINI_GENERATE_CONTENT_API_URL，请从 Ace 文档「Gemini Generate Content API」复制完整接口地址：" +
+                "https://platform.acedata.cloud/documents/gemini-generate-content-api",
+        });
     }
 
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -243,19 +368,15 @@ export const geminiChatStream = async (req: Request, res: Response) => {
     // @ts-ignore
     res.flushHeaders && res.flushHeaders();
 
-    try {
+    const pipeChatCompletionsStream = async () => {
         const messages: { role: "user" | "assistant" | "system"; content: string }[] = [];
         messages.push({ role: "system", content: GEMINI_WORKFLOW_SYSTEM_PROMPT });
-        
-        if (Array.isArray(history)) {
-            for (const item of history) {
-                if (!item || typeof item !== "object") continue;
-                const role = item.role === "assistant" ? "assistant" : "user";
-                if (typeof item.content !== "string") continue;
-                messages.push({ role, content: item.content });
-            }
+        for (const h of historyForMultimodal) {
+            messages.push({ role: h.role, content: h.content });
         }
-        
+        if (workflowContext) {
+            messages.push({ role: "system", content: workflowContextText(workflowContext) });
+        }
         messages.push({ role: "user", content: message });
 
         const aceRes = await axios.post(
@@ -272,9 +393,9 @@ export const geminiChatStream = async (req: Request, res: Response) => {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${API_KEY}`,
                 },
-                // 强制直连，不使用系统代理（如 HTTPS_PROXY）
                 proxy: false,
                 responseType: "stream",
+                timeout: 30000, // 30秒超时
             }
         );
 
@@ -291,6 +412,63 @@ export const geminiChatStream = async (req: Request, res: Response) => {
             res.write(`event: error\ndata: ${JSON.stringify({ message: "上游 Gemini 流式出错" })}\n\n`);
             res.end();
         });
+    };
+
+    try {
+        if (mediaItems.length > 0 && hasVideo && genUrl) {
+            try {
+                const reply = await callGeminiGenerateContent(multimodalPayload);
+                writeSseOpenAiStyleDeltas(res, reply);
+                res.end();
+                return;
+            } catch (genErr: any) {
+                console.error("[PromptController] geminiChatStream generate-content（视频）失败:", genErr?.message || genErr);
+                res.write(
+                    `event: error\ndata: ${JSON.stringify({ message: genErr?.message || "视频识别失败" })}\n\n`
+                );
+                res.end();
+                return;
+            }
+        }
+
+        if (mediaItems.length > 0 && !hasVideo) {
+            try {
+                const aceRes = await requestGeminiChatVisionStream(
+                    multimodalPayload,
+                    API_URL,
+                    MODEL,
+                    typeof temperature === "number" ? temperature : undefined,
+                    typeof maxTokens === "number" ? maxTokens : undefined
+                );
+                await new Promise<void>((resolve, reject) => {
+                    aceRes.data.on("data", (chunk: Buffer) => {
+                        res.write(chunk.toString());
+                    });
+                    aceRes.data.on("end", () => resolve());
+                    aceRes.data.on("error", (err: unknown) => reject(err));
+                });
+                res.end();
+                return;
+            } catch (streamVisionErr: any) {
+                console.warn(
+                    "[PromptController] geminiChatStream 图片多模态流式失败，尝试非流式:",
+                    streamVisionErr?.message || streamVisionErr
+                );
+                try {
+                    const reply = await callGeminiMultimodal(multimodalPayload);
+                    writeSseOpenAiStyleDeltas(res, reply);
+                    res.end();
+                    return;
+                } catch (mmErr: any) {
+                    console.error(
+                        "[PromptController] geminiChatStream 多模态失败，回退纯文本流式 chat:",
+                        mmErr?.message || mmErr
+                    );
+                }
+            }
+        }
+
+        await pipeChatCompletionsStream();
     } catch (error: any) {
         console.error("[PromptController] geminiChatStream request error:", error?.message || error);
         res.write(`event: error\ndata: ${JSON.stringify({ message: error?.message || "Gemini 流式调用失败" })}\n\n`);

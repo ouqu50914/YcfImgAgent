@@ -6,6 +6,7 @@ import Profile from '@/views/Profile.vue';
 import Admin from '@/views/Admin.vue';
 import WorkflowPlaza from '@/views/WorkflowPlaza.vue';
 import SeedanceDemo from '@/views/SeedanceDemo.vue';
+import WorkflowChatPopup from '@/views/WorkflowChatPopup.vue';
 
 const routes = [
   {
@@ -23,6 +24,12 @@ const routes = [
     path: '/workflow',
     name: 'Workflow',
     component: Workflow,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/workflow/chat-popup',
+    name: 'WorkflowChatPopup',
+    component: WorkflowChatPopup,
     meta: { requiresAuth: true }
   },
   {

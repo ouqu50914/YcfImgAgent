@@ -358,7 +358,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, markRaw, onMounted, onUnmounted, h, provide, nextTick, computed } from 'vue';
+import { ref, reactive, markRaw, onMounted, onUnmounted, h, provide, nextTick, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router';
 import { useUserStore } from '@/store/user';
@@ -380,6 +380,7 @@ import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
 import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
+import { useChatWindowBridge } from '@/composables/useChatWindowBridge';
 import { getUploadUrl } from '@/utils/image-loader';
 import { getMediaMetadataFromFile } from '@/utils/media-metadata';
 import { requestNotificationPermissionFromUser } from '@/utils/browser-notification';
@@ -1016,6 +1017,16 @@ const workflowContextForChat = computed(() => {
     };
 });
 
+const { broadcastContext, onMessage: onChatBridgeMessage } = useChatWindowBridge('main');
+
+watch(
+    workflowContextForChat,
+    (ctx) => {
+        broadcastContext(ctx);
+    },
+    { deep: true, immediate: true },
+);
+
 /**
  * 解析 Gemini 输出的“画布执行命令”，自动新建节点并连线（但不触发生成）。
  * 生成仍由用户手动点击 DreamNode / VideoNode 的执行按钮。
@@ -1202,6 +1213,12 @@ const executeGeminiCommand = async (cmd: any) => {
         console.error('[executeGeminiCommand] failed:', e);
     }
 };
+
+onChatBridgeMessage((msg) => {
+    if (msg.type === 'gemini-command') {
+        void executeGeminiCommand(msg.payload);
+    }
+});
 
 // 截取画布作为封面图，上传后返回 URL；失败返回 null
 const captureCanvasCover = async (): Promise<string | null> => {

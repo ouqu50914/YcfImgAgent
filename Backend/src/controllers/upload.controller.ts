@@ -5,6 +5,13 @@ import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
+import {
+    chatTempUrlFromFilename,
+    getChatTempDir,
+    isChatTempMediaUrl,
+    persistChatTempMedia,
+} from "../services/chat-temp-media.service";
+import { ChatMediaService } from "../services/chat-media.service";
 import { detectImageFormat } from "../utils/image-format";
 
 const axiosNoProxy = axios.create({ proxy: false });
@@ -51,6 +58,26 @@ const storageMemory = multer.memoryStorage();
 
 const uploadDisk = multer({ storage: storageDisk, fileFilter, limits: multerLimits });
 const uploadMemory = multer({ storage: storageMemory, fileFilter, limits: multerLimits });
+
+/** 聊天临时媒体：COS 启用时内存上传，否则落本地 chat-temp */
+const chatTempStorage = multer.diskStorage({
+    destination: (_req, _file, cb) => {
+        cb(null, getChatTempDir());
+    },
+    filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `chat_${uuidv4()}${ext}`);
+    },
+});
+const uploadChatTempDisk = multer({ storage: chatTempStorage, fileFilter, limits: multerLimits });
+const uploadChatTempMemory = multer({ storage: storageMemory, fileFilter, limits: multerLimits });
+
+export const uploadChatTemp = (req: Request, res: Response, next: () => void) => {
+    const m = isCosEnabled() ? uploadChatTempMemory : uploadChatTempDisk;
+    m.single("image")(req, res, next);
+};
+
+const chatMediaService = new ChatMediaService();
 
 /** 按是否启用 COS 选择：COS 时用内存不落盘，否则落盘 */
 export const upload = (field: string, single: boolean) => {
@@ -129,6 +156,67 @@ export const uploadImages = async (req: Request, res: Response) => {
     } catch (error: any) {
         console.error("[uploadImages]", error?.message ?? error);
         return res.status(500).json({ message: error?.message || "上传失败" });
+    }
+};
+
+/**
+ * 聊天临时媒体上传（COS 启用时上传云端，否则落本地 chat-temp）
+ */
+export const uploadChatTempMedia = async (req: Request, res: Response) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: "未上传文件" });
+        }
+
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录" });
+        }
+
+        const ext = path.extname(req.file.originalname);
+        const filename = isCosEnabled()
+            ? `chat_${uuidv4()}${ext}`
+            : req.file.filename;
+        const sessionId =
+            typeof req.body?.sessionId === "string" ? req.body.sessionId.trim() : undefined;
+
+        if (isCosEnabled() && req.file.buffer) {
+            await persistChatTempMedia(filename, req.file.buffer);
+        }
+
+        const fileUrl = chatTempUrlFromFilename(filename);
+        await chatMediaService.registerChatMedia(userId, fileUrl, sessionId);
+
+        return res.status(200).json({
+            message: "上传成功",
+            data: { url: fileUrl, filename, size: req.file.size },
+        });
+    } catch (error: any) {
+        console.error("[uploadChatTempMedia]", error?.message ?? error);
+        return res.status(500).json({ message: error?.message || "上传失败" });
+    }
+};
+
+/**
+ * 删除聊天临时媒体（清空/删会话或发送失败时由前端调用）
+ */
+export const deleteChatTempMedia = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        if (!userId) {
+            return res.status(401).json({ message: "未登录" });
+        }
+
+        const urls = req.body?.urls;
+        if (!Array.isArray(urls)) {
+            return res.status(400).json({ message: "urls 必须为数组" });
+        }
+        const safe = urls.filter((u): u is string => typeof u === "string" && isChatTempMediaUrl(u));
+        await chatMediaService.deleteChatMediaByUrls(userId, safe);
+        return res.status(200).json({ message: "删除成功" });
+    } catch (error: any) {
+        console.error("[deleteChatTempMedia]", error?.message ?? error);
+        return res.status(500).json({ message: error?.message || "删除失败" });
     }
 };
 

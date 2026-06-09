@@ -2,7 +2,7 @@ import { spawnSync } from "child_process";
 
 const MAX_FRAMES_PER_VIDEO = 4;
 const MAX_FRAME_BYTES = 900 * 1024;
-const FFMPEG_TIMEOUT_MS = 120_000;
+const FFMPEG_TIMEOUT_MS = Number(process.env.GEMINI_FFMPEG_TIMEOUT_MS || "180000");
 
 function binOk(name: string): boolean {
     const r = spawnSync(name, ["-version"], { encoding: "utf8", timeout: 5000 });
@@ -75,10 +75,11 @@ function grabJpegFrameAtSec(videoUrl: string, sec: number): Buffer | null {
 /**
  * 从单个视频 URL 抽取若干关键帧（JPEG），用于走 chat/completions 的 image_url 多模态。
  */
-export function extractVideoKeyFramesJpeg(videoUrl: string): Buffer[] {
-    if (!isFfmpegVideoFramesEnabled()) return [];
+/** 从本地或远程视频路径截帧（不依赖 GEMINI_VIDEO_USE_FFMPEG，供聊天临时文件等场景） */
+export function extractVideoKeyFramesJpegFromPath(videoPathOrUrl: string): Buffer[] {
+    if (!binOk("ffmpeg") || !binOk("ffprobe")) return [];
 
-    const duration = probeDurationSec(videoUrl);
+    const duration = probeDurationSec(videoPathOrUrl);
     let timesSec: number[];
     if (duration != null && duration > 1) {
         timesSec = [0.08, 0.32, 0.58, 0.82].map((r) => Math.min(duration * r, Math.max(0, duration - 0.2)));
@@ -93,8 +94,13 @@ export function extractVideoKeyFramesJpeg(videoUrl: string): Buffer[] {
         const key = t.toFixed(2);
         if (seen.has(key)) continue;
         seen.add(key);
-        const buf = grabJpegFrameAtSec(videoUrl, t);
+        const buf = grabJpegFrameAtSec(videoPathOrUrl, t);
         if (buf && buf.length > 0) out.push(buf);
     }
     return out;
+}
+
+export function extractVideoKeyFramesJpeg(videoUrl: string): Buffer[] {
+    if (!isFfmpegVideoFramesEnabled()) return [];
+    return extractVideoKeyFramesJpegFromPath(videoUrl);
 }

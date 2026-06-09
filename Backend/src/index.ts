@@ -10,6 +10,7 @@ import { URL } from "url";
 import { AppDataSource } from "./data-source";
 import { ApiConfig } from "./entities/ApiConfig";
 import { WorkflowService } from "./services/workflow.service";
+import { ChatMediaService } from "./services/chat-media.service";
 import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
 import imageRoutes from "./routes/image.routes";
@@ -165,6 +166,17 @@ function startExpiredTemplatesJob() {
     setInterval(run, 24 * 60 * 60 * 1000);
 }
 
+function startExpiredChatMediaJob() {
+    const chatMediaService = new ChatMediaService();
+    const run = () => {
+        chatMediaService.deleteExpiredChatMedia()
+            .then((n) => { if (n > 0) console.log(`[cron] 已删除 ${n} 条过期聊天媒体`); })
+            .catch((e) => console.warn("[cron] deleteExpiredChatMedia failed:", e));
+    };
+    run();
+    setInterval(run, 24 * 60 * 60 * 1000);
+}
+
 /**
  * 运行时兜底：确保核心 API 配置记录存在。
  * 仅在记录缺失时插入占位配置，不覆盖管理员已配置的真实值。
@@ -212,6 +224,7 @@ AppDataSource.initialize()
         console.log("✅ Data Source has been initialized!");
         await ensureApiConfigRecords();
         startExpiredTemplatesJob();
+        startExpiredChatMediaJob();
         const port = process.env.PORT || 3000;
         app.listen(port, () => {
             console.log(`🚀 Server is running on http://localhost:${port}`);

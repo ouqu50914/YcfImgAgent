@@ -173,7 +173,7 @@ export class PromptService {
                 debug_tag: debugTag,
                 reply_preview: reply.trim().slice(0, 220),
             });
-            return reply.trim();
+            return reply;
         } catch (error: any) {
             console.error('[PromptService] Gemini chat-completions 调用失败:', {
                 debug_tag: debugTag,

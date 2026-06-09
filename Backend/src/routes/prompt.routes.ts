@@ -14,11 +14,20 @@ import {
     searchTemplates
 } from "../controllers/prompt-template.controller";
 import { authenticateToken } from "../middlewares/auth.middleware";
+import {
+    uploadChatTemp,
+    uploadChatTempMedia,
+    deleteChatTempMedia,
+} from "../controllers/upload.controller";
 
 const router = Router();
 
 // 提示词优化接口（需要登录）
 router.post("/optimize", authenticateToken, optimizePrompt);
+
+// 聊天临时媒体（COS 或本地，随会话生命周期清理）
+router.post("/chat-media", authenticateToken, uploadChatTemp, uploadChatTempMedia);
+router.post("/chat-media/delete", authenticateToken, deleteChatTempMedia);
 
 // Gemini 聊天接口（需要登录）
 router.post("/gemini-chat", authenticateToken, geminiChat);
