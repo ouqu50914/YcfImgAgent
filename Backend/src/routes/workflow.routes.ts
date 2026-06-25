@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { 
     saveTemplate, getTemplates, getTemplate, deleteTemplate, updateTemplate,
-    autoSaveHistory, getHistoryList, getHistory, updateHistory, deleteHistory, getPublicTemplates
+    autoSaveHistory, getHistoryList, getHistory, updateHistory, deleteHistory, getPublicTemplates,
+    getCreativeSquareMembers, getCreativeSquareMemberProjects, getCreativeSquareFork,
+    getRecentProjects
 } from "../controllers/workflow.controller";
 import { authenticateToken } from "../middlewares/auth.middleware";
 import { getActiveCategories } from "../controllers/category.controller";
@@ -13,6 +15,14 @@ router.get("/categories", getActiveCategories);
 
 // 所有路由都需要登录
 router.use(authenticateToken);
+
+// 创意广场
+router.get("/creative-square/members", getCreativeSquareMembers);
+router.get("/creative-square/members/:userId/projects", getCreativeSquareMemberProjects);
+router.get("/creative-square/fork/:source/:id", getCreativeSquareFork);
+
+// 首页最近项目
+router.get("/recent-projects", getRecentProjects);
 
 // 模板相关
 router.post("/template", saveTemplate);

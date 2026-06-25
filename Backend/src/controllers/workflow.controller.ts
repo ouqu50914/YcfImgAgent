@@ -1,9 +1,13 @@
 import { Request, Response } from "express";
 import { WorkflowService } from "../services/workflow.service";
 import { WorkflowHistoryService } from "../services/workflow-history.service";
+import { CreativeSquareService } from "../services/creative-square.service";
+import { RecentProjectsService } from "../services/recent-projects.service";
 
 const workflowService = new WorkflowService();
 const historyService = new WorkflowHistoryService();
+const creativeSquareService = new CreativeSquareService();
+const recentProjectsService = new RecentProjectsService();
 
 export const saveTemplate = async (req: Request, res: Response) => {
     try {
@@ -43,12 +47,28 @@ export const saveTemplate = async (req: Request, res: Response) => {
 export const getTemplates = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const templates = await workflowService.getUserTemplates(userId, false);
+        const lite = req.query.lite === '1' || req.query.lite === 'true';
+        const templates = lite
+            ? await workflowService.getUserTemplatesLite(userId)
+            : await workflowService.getUserTemplates(userId, false);
 
         return res.status(200).json({
             message: "获取成功",
             data: templates
         });
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+// 首页最近项目（轻量合并接口）
+export const getRecentProjects = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        const limitParam = req.query.limit as string | undefined;
+        const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 5, 20) : 5;
+        const list = await recentProjectsService.getRecentProjects(userId, limit);
+        return res.status(200).json({ message: "获取成功", data: list });
     } catch (error: any) {
         return res.status(500).json({ message: error.message });
     }
@@ -175,8 +195,19 @@ export const getHistoryList = async (req: Request, res: Response) => {
         const limit = limitParam === '' || limitParam === undefined ? 100 : parseInt(limitParam) || 20;
         const templateIdParam = req.query.templateId as string | undefined;
         const templateId = templateIdParam ? parseInt(templateIdParam, 10) : undefined;
+        const lite = req.query.lite === '1' || req.query.lite === 'true';
 
-        const histories = await historyService.getHistoryList(userId, limit, Number.isNaN(templateId as any) ? undefined : templateId);
+        const histories = lite
+            ? await historyService.getHistoryListLite(
+                userId,
+                limit,
+                Number.isNaN(templateId as any) ? undefined : templateId
+            )
+            : await historyService.getHistoryList(
+                userId,
+                limit,
+                Number.isNaN(templateId as any) ? undefined : templateId
+            );
 
         return res.status(200).json({
             message: "获取成功",
@@ -249,6 +280,57 @@ export const deleteHistory = async (req: Request, res: Response) => {
         await historyService.deleteHistory(historyId, userId);
 
         return res.status(200).json({ message: "历史记录删除成功" });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+// 创意广场：成员列表
+export const getCreativeSquareMembers = async (_req: Request, res: Response) => {
+    try {
+        const result = await creativeSquareService.getMembers();
+        return res.status(200).json({ message: "获取成功", data: result });
+    } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+// 创意广场：某成员的全部项目
+export const getCreativeSquareMemberProjects = async (req: Request, res: Response) => {
+    try {
+        const userId = (req as any).user?.userId;
+        const idParam = req.params.userId;
+        if (!idParam || Array.isArray(idParam)) {
+            return res.status(400).json({ message: "无效的用户ID" });
+        }
+        const targetUserId = parseInt(idParam, 10);
+        if (Number.isNaN(targetUserId)) {
+            return res.status(400).json({ message: "无效的用户ID" });
+        }
+        const result = await creativeSquareService.getMemberProjects(targetUserId, userId);
+        return res.status(200).json({ message: "获取成功", data: result });
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+    }
+};
+
+// 创意广场：Fork 读取项目
+export const getCreativeSquareFork = async (req: Request, res: Response) => {
+    try {
+        const sourceParam = req.params.source;
+        const idParam = req.params.id;
+        if (!sourceParam || Array.isArray(sourceParam) || !idParam || Array.isArray(idParam)) {
+            return res.status(400).json({ message: "无效的参数" });
+        }
+        if (sourceParam !== 'template' && sourceParam !== 'history') {
+            return res.status(400).json({ message: "无效的项目类型" });
+        }
+        const id = parseInt(idParam, 10);
+        if (Number.isNaN(id)) {
+            return res.status(400).json({ message: "无效的项目ID" });
+        }
+        const data = await creativeSquareService.getProjectForFork(sourceParam, id);
+        return res.status(200).json({ message: "获取成功", data });
     } catch (error: any) {
         return res.status(400).json({ message: error.message });
     }

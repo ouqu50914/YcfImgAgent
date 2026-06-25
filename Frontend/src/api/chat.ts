@@ -1,5 +1,37 @@
 import request from '@/utils/request';
 
+export interface ChatMessageDto {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  mediaUrls?: string[];
+}
+
+export interface ChatSessionDto {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessageDto[];
+}
+
+export const getChatSessions = () => {
+  return request.get<{ message: string; data: { sessions: ChatSessionDto[] } }>('/prompt/chat-sessions');
+};
+
+export const saveChatSession = (session: ChatSessionDto) => {
+  return request.put<{ message: string; data: ChatSessionDto }>('/prompt/chat-sessions', { session });
+};
+
+export const bulkSaveChatSessions = (sessions: ChatSessionDto[]) => {
+  return request.post<{ message: string; data: { count: number } }>('/prompt/chat-sessions/bulk', { sessions });
+};
+
+export const deleteChatSessionApi = (sessionId: string) => {
+  return request.delete<{ message: string }>(`/prompt/chat-sessions/${encodeURIComponent(sessionId)}`);
+};
+
 export interface ChatHistoryItem {
   role: 'user' | 'assistant';
   content: string;

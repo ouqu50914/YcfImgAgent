@@ -66,9 +66,9 @@
         <RecentProjects ref="recentProjectsRef" />
       </div>
       
-      <!-- 灵感发现区域 -->
-      <div class="inspiration-section">
-        <InspirationGrid />
+      <!-- 创意广场区域 -->
+      <div class="creative-square-section">
+        <CreativeSquare />
       </div>
     </div>
 
@@ -127,7 +127,7 @@ import { ElMessage } from 'element-plus';
 import Sidebar from '@/components/Sidebar.vue';
 import QuickStartInput from '@/components/QuickStartInput.vue';
 import RecentProjects from '@/components/RecentProjects.vue';
-import InspirationGrid from '@/components/InspirationGrid.vue';
+import CreativeSquare from '@/components/CreativeSquare.vue';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -357,8 +357,8 @@ const handleApplyCredits = async () => {
   margin: 0 auto;
 }
 
-/* 灵感发现区域 */
-.inspiration-section {
+/* 创意广场区域 */
+.creative-square-section {
   margin-bottom: 48px;
   max-width: 1400px;
   margin: 0 auto;

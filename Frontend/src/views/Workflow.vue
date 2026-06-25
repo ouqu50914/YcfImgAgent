@@ -371,7 +371,8 @@ import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid, VideoCamera, Headset } from '@element-plus/icons-vue';
-import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, getCreativeSquareFork, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { notifyWorkflowListChanged } from '@/utils/workflow-list-events';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
 import { applyCredits } from '@/api/user';
 import { getGenerationRecords } from '@/api/admin';
@@ -2711,7 +2712,7 @@ const loadCategories = async () => {
 // 加载模板列表
 const loadTemplates = async () => {
     try {
-        const res: any = await getTemplates();
+        const res: any = await getTemplates({ lite: true });
         templates.value = res.data || [];
     } catch (error: any) {
         ElMessage.error(error.message || '加载模板列表失败');
@@ -2746,6 +2747,7 @@ const handleDeleteTemplate = async (templateId: number) => {
         await deleteTemplate(templateId);
         ElMessage.success('模板删除成功');
         loadTemplates();
+        notifyWorkflowListChanged();
     } catch (error: any) {
         if (error !== 'cancel') {
             ElMessage.error(error.message || '删除失败');
@@ -2762,7 +2764,7 @@ const showLoadDialogHandler = () => {
 // 加载历史记录列表（仅当前项目）
 const loadHistories = async () => {
     try {
-        const res: any = await getHistoryList(20, currentTemplateId.value != null ? currentTemplateId.value : undefined);
+        const res: any = await getHistoryList(20, currentTemplateId.value != null ? currentTemplateId.value : undefined, { lite: true });
         histories.value = res.data || [];
     } catch (error: any) {
         ElMessage.error(error.message || '加载历史记录失败');
@@ -2806,6 +2808,7 @@ const handleDeleteHistory = async (historyId: number) => {
         await deleteHistoryApi(historyId);
         ElMessage.success('历史记录删除成功');
         loadHistories();
+        notifyWorkflowListChanged();
     } catch (error: any) {
         if (error !== 'cancel') {
             ElMessage.error(error.message || '删除失败');
@@ -3089,6 +3092,42 @@ onMounted(async () => {
 
     // 处理URL参数
     const query = route.query;
+
+    // 创意广场 Fork：从他人项目复制打开（不影响原项目）
+    if (query.forkTemplate || query.forkHistory) {
+        try {
+            const isTemplate = !!query.forkTemplate;
+            const idRaw = isTemplate ? query.forkTemplate : query.forkHistory;
+            const forkId = parseInt(idRaw as string, 10);
+            if (!Number.isNaN(forkId)) {
+                const source = isTemplate ? 'template' : 'history';
+                const res: any = await getCreativeSquareFork(source, forkId);
+                const data = res.data;
+                const workflowData = data?.workflow_data;
+                currentTemplateId.value = null;
+                currentHistoryId.value = null;
+                templateOwnerId.value = null;
+                if (isTemplate) {
+                    sourceTemplateIdForTemp.value = forkId;
+                } else {
+                    sourceTemplateIdForTemp.value = null;
+                }
+                if (workflowData?.nodes && workflowData?.edges) {
+                    setNodes(workflowData.nodes);
+                    setEdges(workflowData.edges);
+                    restoreImageAliasStateFromWorkflow(workflowData);
+                    clearUndoRedoAndPending();
+                    ElMessage.success('已打开项目副本，编辑将保存到您的账号');
+                } else {
+                    ElMessage.warning('项目数据格式不正确');
+                }
+                return;
+            }
+        } catch (error: any) {
+            console.error('Fork 加载失败:', error);
+            ElMessage.error(error?.response?.data?.message || error?.message || '加载项目失败');
+        }
+    }
 
     // 如果有 historyId 参数，加载自动保存的历史（后续保存将覆盖此条）
     if (query.historyId) {

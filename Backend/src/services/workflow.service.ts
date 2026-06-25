@@ -105,6 +105,28 @@ export class WorkflowService {
             .getMany();
     }
 
+    /** 列表展示：不加载 workflow_data */
+    async getUserTemplatesLite(userId: number) {
+        return this.templateRepo
+            .createQueryBuilder('template')
+            .select([
+                'template.id',
+                'template.user_id',
+                'template.name',
+                'template.cover_image',
+                'template.is_public',
+                'template.is_favorite',
+                'template.is_temp',
+                'template.source_template_id',
+                'template.category',
+                'template.created_at',
+                'template.updated_at',
+            ])
+            .where('template.user_id = :userId', { userId })
+            .orderBy('template.updated_at', 'DESC')
+            .getMany();
+    }
+
     /**
      * 获取模板详情
      */

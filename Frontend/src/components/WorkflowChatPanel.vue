@@ -5,7 +5,7 @@
       :disabled="isPopupMode"
     >
       <button
-        v-if="!isPopupMode"
+        v-if="!isPopupMode && !isOpen"
         type="button"
         class="workflow-chat-toggle"
         aria-label="打开 Gemini 助理"
@@ -25,12 +25,25 @@
           class="workflow-chat-panel"
           :class="{
             'popup-mode': isPopupMode,
-            'is-floating': !!panelPos && !isPopupMode,
+            'is-docked-right': !isPopupMode && dockSide === 'right',
+            'is-docked-left': !isPopupMode && dockSide === 'left',
+            'is-floating': !isPopupMode && dockSide === 'floating',
             'is-dragging': isDragging,
-            'show-detach-hint': showDetachHint,
+            'show-snap-hint': showSnapHint,
+            'is-width-resizing': isWidthResizing,
+            'is-layout-narrow': isPanelLayoutNarrow,
           }"
           :style="panelInlineStyle"
         >
+          <div
+            v-if="!isPopupMode"
+            class="chat-panel-width-resize-handle"
+            :class="{ 'is-right-edge': dockSide === 'left' }"
+            title="拖动调整面板宽度"
+            @mousedown.stop="onWidthResizeStart"
+            @touchstart.stop.prevent="onWidthTouchResizeStart"
+          />
+
           <div
             v-if="!isPopupMode"
             class="chat-panel-drag-strip"
@@ -38,14 +51,28 @@
             @touchstart.prevent="onPanelTouchStart"
           >
             <el-icon class="chat-drag-hint"><Rank /></el-icon>
-            <span>拖动移动 · 拖到屏幕边缘松开可分离到独立窗口</span>
+            <span>拖动移动 · 拖到屏幕边缘松开可吸附</span>
           </div>
 
           <div class="workflow-chat-layout">
-          <aside class="workflow-chat-sessions">
+          <aside
+            v-if="isSessionsExpanded && sessionsSide === 'left'"
+            class="workflow-chat-sessions"
+          >
             <div class="sessions-header">
               <span class="sessions-title">会话</span>
               <div class="sessions-actions">
+                <el-button
+                  size="small"
+                  text
+                  title="切换到右侧"
+                  @click="toggleSessionsSide"
+                >
+                  <span class="sessions-side-switch-icon">
+                    <el-icon><ArrowLeft /></el-icon>
+                    <el-icon><ArrowRight /></el-icon>
+                  </span>
+                </el-button>
                 <el-button
                   size="small"
                   type="primary"
@@ -53,6 +80,14 @@
                   @click="createSession"
                 >
                   新建
+                </el-button>
+                <el-button
+                  size="small"
+                  text
+                  title="收起会话"
+                  @click="toggleSessionsExpanded"
+                >
+                  <el-icon><Fold /></el-icon>
                 </el-button>
               </div>
             </div>
@@ -83,7 +118,47 @@
             </el-scrollbar>
           </aside>
 
-          <section class="workflow-chat-main">
+          <div
+            v-if="!isSessionsExpanded && sessionsSide === 'left'"
+            class="sessions-collapsed-rail"
+          >
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="展开会话"
+              aria-label="展开会话"
+              @click="toggleSessionsExpanded"
+            >
+              <el-icon><ChatLineRound /></el-icon>
+            </button>
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="新建会话"
+              aria-label="新建会话"
+              @click="createSession"
+            >
+              <el-icon><Plus /></el-icon>
+            </button>
+            <div class="sessions-rail-spacer" />
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="会话栏移到右侧"
+              aria-label="会话栏移到右侧"
+              @click="toggleSessionsSide"
+            >
+              <span class="sessions-side-switch-icon">
+                <el-icon><ArrowLeft /></el-icon>
+                <el-icon><ArrowRight /></el-icon>
+              </span>
+            </button>
+          </div>
+
+          <section
+            class="workflow-chat-main"
+            :class="{ 'is-narrow': isChatLayoutNarrow }"
+          >
             <header
               class="chat-header"
               :class="{ 'chat-header-draggable': !isPopupMode }"
@@ -93,41 +168,62 @@
             >
               <div class="chat-title">
                 <el-icon
-                  v-if="!isPopupMode"
+                  v-if="!isPopupMode && !isChatLayoutNarrow"
                   class="chat-drag-hint"
                 >
                   <Rank />
                 </el-icon>
-                {{ activeSession?.title || 'Gemini 助理' }}
+                <span class="chat-title-text">{{ activeSession?.title || 'Gemini 助理' }}</span>
               </div>
               <div
                 class="chat-actions"
                 @mousedown.stop
                 @touchstart.stop
               >
-                <el-button
+                <el-tooltip
                   v-if="!isPopupMode"
-                  size="small"
-                  text
-                  @click="detachPanelToPopup"
+                  content="分离窗口"
+                  placement="bottom"
+                  :disabled="!isChatLayoutNarrow"
                 >
-                  分离窗口
-                </el-button>
-                <el-button
-                  size="small"
-                  text
-                  @click="clearActiveSessionMessages"
+                  <el-button
+                    size="small"
+                    text
+                    @click="detachPanelToPopup"
+                  >
+                    <el-icon><Monitor /></el-icon>
+                    <span class="chat-action-label">分离窗口</span>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip
+                  content="清空"
+                  placement="bottom"
+                  :disabled="!isChatLayoutNarrow"
                 >
-                  清空
-                </el-button>
-                <el-button
+                  <el-button
+                    size="small"
+                    text
+                    @click="clearActiveSessionMessages"
+                  >
+                    <el-icon><Delete /></el-icon>
+                    <span class="chat-action-label">清空</span>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip
                   v-if="!isPopupMode"
-                  size="small"
-                  text
-                  @click="closePanel"
+                  content="关闭"
+                  placement="bottom"
+                  :disabled="!isChatLayoutNarrow"
                 >
-                  关闭
-                </el-button>
+                  <el-button
+                    size="small"
+                    text
+                    @click="closePanel"
+                  >
+                    <el-icon><Close /></el-icon>
+                    <span class="chat-action-label">关闭</span>
+                  </el-button>
+                </el-tooltip>
               </div>
             </header>
 
@@ -278,7 +374,6 @@
 支持拖拽图片或视频到此处上传"
                   @keydown.enter.exact.prevent="handleSend"
                   @keydown.enter.shift.prevent="insertNewLine"
-                  @input="handleInput"
                   show-word-limit
                 />
                 <input
@@ -300,19 +395,119 @@
                   >
                     <el-icon><Plus /></el-icon>
                   </el-button>
-                  <span class="chat-input-tip">Enter 发送 · 拖输入框上边框调高度 · 拖顶栏可移动窗口</span>
+                  <span class="chat-input-tip">Enter 发送 · 拖输入框上边框调高度 · 拖左侧边缘调宽度</span>
                 </div>
                 <el-button
                   type="primary"
                   :loading="loading"
                   :disabled="(!currentInput && uploadedMedia.length === 0) || loading"
-                  @click="handleSend"
+                  @click="() => void handleSend()"
                 >
                   发送
                 </el-button>
               </div>
             </footer>
           </section>
+
+          <aside
+            v-if="isSessionsExpanded && sessionsSide === 'right'"
+            class="workflow-chat-sessions is-right-side"
+          >
+            <div class="sessions-header">
+              <span class="sessions-title">会话</span>
+              <div class="sessions-actions">
+                <el-button
+                  size="small"
+                  text
+                  title="切换到左侧"
+                  @click="toggleSessionsSide"
+                >
+                  <span class="sessions-side-switch-icon">
+                    <el-icon><ArrowLeft /></el-icon>
+                    <el-icon><ArrowRight /></el-icon>
+                  </span>
+                </el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  text
+                  @click="createSession"
+                >
+                  新建
+                </el-button>
+                <el-button
+                  size="small"
+                  text
+                  title="收起会话"
+                  @click="toggleSessionsExpanded"
+                >
+                  <el-icon><Fold /></el-icon>
+                </el-button>
+              </div>
+            </div>
+            <el-scrollbar class="sessions-list">
+              <div
+                v-for="session in sessions"
+                :key="session.id"
+                class="session-item"
+                :class="{ active: session.id === activeSessionId }"
+                @click="setActiveSession(session.id)"
+              >
+                <div class="session-item-row">
+                  <span class="session-title">{{ session.title || '未命名会话' }}</span>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    text
+                    class="session-delete-btn"
+                    @click.stop="deleteSession(session.id)"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <div class="session-meta">
+                  {{ formatTime(session.createdAt) }}
+                </div>
+              </div>
+            </el-scrollbar>
+          </aside>
+
+          <div
+            v-if="!isSessionsExpanded && sessionsSide === 'right'"
+            class="sessions-collapsed-rail is-right-side"
+          >
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="展开会话"
+              aria-label="展开会话"
+              @click="toggleSessionsExpanded"
+            >
+              <el-icon><ChatLineRound /></el-icon>
+            </button>
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="新建会话"
+              aria-label="新建会话"
+              @click="createSession"
+            >
+              <el-icon><Plus /></el-icon>
+            </button>
+            <div class="sessions-rail-spacer" />
+            <button
+              type="button"
+              class="sessions-rail-btn"
+              title="会话栏移到左侧"
+              aria-label="会话栏移到左侧"
+              @click="toggleSessionsSide"
+            >
+              <span class="sessions-side-switch-icon">
+                <el-icon><ArrowLeft /></el-icon>
+                <el-icon><ArrowRight /></el-icon>
+              </span>
+            </button>
+          </div>
           </div>
 
           <div
@@ -326,10 +521,10 @@
           </div>
 
           <div
-            v-if="showDetachHint && !isPopupMode"
-            class="chat-detach-hint"
+            v-if="showSnapHint && !isPopupMode"
+            class="chat-snap-hint"
           >
-            松开鼠标即可分离到独立窗口
+            松开鼠标即可吸附到边缘
           </div>
         </div>
       </transition>
@@ -371,7 +566,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { ElMessage, ElImageViewer } from 'element-plus';
-import { Plus, Close, VideoCamera, Rank } from '@element-plus/icons-vue';
+import { Plus, Close, VideoCamera, Rank, ChatLineRound, Fold, ArrowLeft, ArrowRight, Monitor, Delete } from '@element-plus/icons-vue';
 import { useUserStore } from '@/store/user';
 import type { ChatHistoryItem, GeminiChatRequest } from '@/api/chat';
 import {
@@ -379,17 +574,22 @@ import {
   sendGeminiChatStream,
   uploadChatMedia,
   deleteChatMedia,
+  getChatSessions,
+  saveChatSession,
+  bulkSaveChatSessions,
+  deleteChatSessionApi,
 } from '@/api/chat';
 import ChatMessageContent from '@/components/ChatMessageContent.vue';
 import { getUploadUrl } from '@/utils/image-loader';
 import {
   useChatWindowBridge,
   openChatPopup,
+  postChatBridgeMessage,
+  subscribeChatBridge,
+  type ChatBridgeMessage,
 } from '@/composables/useChatWindowBridge';
 
 const chatRobotIconUrl = `${import.meta.env.BASE_URL}icon_robot.png`;
-
-const CHAT_SESSION_EXPIRES_DAYS = 15;
 
 interface ChatMessage {
   id: string;
@@ -416,8 +616,11 @@ const props = withDefaults(
 );
 
 const isPopupMode = computed(() => props.mode === 'popup');
-const popupBridge = props.mode === 'popup' ? useChatWindowBridge('popup') : null;
-const mainWindowClosed = popupBridge?.mainWindowClosed ?? ref(false);
+const popupBridge = isPopupMode.value ? useChatWindowBridge('popup') : null;
+const mainWindowClosed = computed(() =>
+  isPopupMode.value ? popupBridge!.mainWindowClosed.value : false,
+);
+let unsubscribeBridge: (() => void) | null = null;
 
 const emit = defineEmits<{
   /**
@@ -432,6 +635,11 @@ const userStore = useUserStore();
 const isOpen = ref(props.mode === 'popup');
 const sessions = ref<ChatSession[]>([]);
 const activeSessionId = ref<string>('');
+const applyingRemoteSessions = ref(false);
+const loadingSessions = ref(false);
+let refreshSignalTimer: ReturnType<typeof setTimeout> | null = null;
+let scrollRafId: number | null = null;
+let scrollPending = false;
 const currentInput = ref('');
 const loading = ref(false);
 const errorMessage = ref('');
@@ -445,11 +653,25 @@ interface PanelPosition {
   y: number;
 }
 
+type DockSide = 'right' | 'left' | 'floating';
+
+const PANEL_WIDTH_MIN = 320;
+const PANEL_WIDTH_DEFAULT = 560;
+const PANEL_WIDTH_MAX_CAP = 1600;
+const SNAP_EDGE_PX = 36;
+
 const panelPos = ref<PanelPosition | null>(null);
+const dockSide = ref<DockSide>('right');
+const panelWidth = ref(PANEL_WIDTH_DEFAULT);
+const isSessionsExpanded = ref(false);
+type SessionsSide = 'left' | 'right';
+const sessionsSide = ref<SessionsSide>('left');
 const isDragging = ref(false);
-const showDetachHint = ref(false);
+const showSnapHint = ref(false);
 const dragOffset = ref({ x: 0, y: 0 });
-const DETACH_EDGE_PX = 36;
+
+const isWidthResizing = ref(false);
+const widthResizeStart = ref({ x: 0, width: PANEL_WIDTH_DEFAULT });
 
 const INPUT_HEIGHT_MIN = 96;
 const INPUT_HEIGHT_MAX = 520;
@@ -468,15 +690,63 @@ const panelPositionKey = computed(() => {
   return `workflow_gemini_chat_panel_pos_${id}`;
 });
 
+const panelWidthKey = computed(() => {
+  const id = userStore.userInfo?.id ?? 'anonymous';
+  return `workflow_gemini_chat_panel_width_${id}`;
+});
+
+const dockSideKey = computed(() => {
+  const id = userStore.userInfo?.id ?? 'anonymous';
+  return `workflow_gemini_chat_dock_${id}`;
+});
+
+const sessionsExpandedKey = computed(() => {
+  const id = userStore.userInfo?.id ?? 'anonymous';
+  return `workflow_gemini_chat_sessions_expanded_${id}`;
+});
+
+const sessionsSideKey = computed(() => {
+  const id = userStore.userInfo?.id ?? 'anonymous';
+  return `workflow_gemini_chat_sessions_side_${id}`;
+});
+
+const getPanelWidthMax = () => Math.min(PANEL_WIDTH_MAX_CAP, window.innerWidth * 0.96);
+
+const clampPanelWidth = (width: number) =>
+  Math.max(PANEL_WIDTH_MIN, Math.min(width, getPanelWidthMax()));
+
+const SESSIONS_PANEL_WIDTH = 220;
+const SESSIONS_RAIL_WIDTH = 44;
+const CHAT_LAYOUT_NARROW_THRESHOLD = 480;
+const PANEL_LAYOUT_NARROW_THRESHOLD = 420;
+
+const chatMainEstimatedWidth = computed(() => {
+  if (isPopupMode.value) return panelWidth.value;
+  const sessionsPart = isSessionsExpanded.value ? SESSIONS_PANEL_WIDTH : SESSIONS_RAIL_WIDTH;
+  return panelWidth.value - sessionsPart;
+});
+
+const isChatLayoutNarrow = computed(() =>
+  !isPopupMode.value && chatMainEstimatedWidth.value < CHAT_LAYOUT_NARROW_THRESHOLD,
+);
+
+const isPanelLayoutNarrow = computed(() =>
+  !isPopupMode.value && panelWidth.value < PANEL_LAYOUT_NARROW_THRESHOLD,
+);
+
 const panelInlineStyle = computed(() => {
-  if (isPopupMode.value || !panelPos.value) return undefined;
-  return {
-    left: `${panelPos.value.x}px`,
-    top: `${panelPos.value.y}px`,
-    transform: 'none',
-    bottom: 'auto',
-    right: 'auto',
+  if (isPopupMode.value) return undefined;
+  const style: Record<string, string> = {
+    '--chat-panel-width': `${panelWidth.value}px`,
   };
+  if (dockSide.value === 'floating' && panelPos.value) {
+    style.left = `${panelPos.value.x}px`;
+    style.top = `${panelPos.value.y}px`;
+    style.transform = 'none';
+    style.bottom = 'auto';
+    style.right = 'auto';
+  }
+  return style;
 });
 
 interface UploadedMedia {
@@ -496,9 +766,14 @@ const activeSession = computed(() =>
   sessions.value.find((s) => s.id === activeSessionId.value),
 );
 
-const storageKey = computed(() => {
+const legacyStorageKey = computed(() => {
   const id = userStore.userInfo?.id ?? 'anonymous';
   return `workflow_gemini_chat_sessions_${id}`;
+});
+
+const activeSessionKey = computed(() => {
+  const id = userStore.userInfo?.id ?? 'anonymous';
+  return `workflow_gemini_chat_active_session_${id}`;
 });
 
 const formatTime = (iso: string) => {
@@ -512,29 +787,64 @@ const formatTime = (iso: string) => {
   }
 };
 
-const persistSessions = () => {
+const persistActiveSessionId = () => {
   try {
-    window.localStorage.setItem(storageKey.value, JSON.stringify(sessions.value));
+    window.localStorage.setItem(activeSessionKey.value, activeSessionId.value);
   } catch {
-    // ignore storage error
+    // ignore
   }
 };
 
-watch(
-  sessions,
-  () => {
-    persistSessions();
-  },
-  { deep: true },
-);
-
-const scrollToBottom = async () => {
-  await nextTick();
-  const scrollComp = messagesScrollRef.value as any;
-  if (scrollComp && scrollComp.wrapRef) {
-    const el = scrollComp.wrapRef as HTMLElement;
-    el.scrollTop = el.scrollHeight;
+const loadActiveSessionId = () => {
+  try {
+    return window.localStorage.getItem(activeSessionKey.value) || '';
+  } catch {
+    return '';
   }
+};
+
+const notifySessionsRefresh = () => {
+  if (applyingRemoteSessions.value) return;
+  if (refreshSignalTimer) clearTimeout(refreshSignalTimer);
+  refreshSignalTimer = setTimeout(() => {
+    refreshSignalTimer = null;
+    postChatBridgeMessage({ type: 'sessions-refresh' });
+  }, 300);
+};
+
+const saveSessionToServer = async (session: ChatSession) => {
+  try {
+    await saveChatSession(normalizeSession(session));
+    notifySessionsRefresh();
+  } catch {
+    // ignore save errors
+  }
+};
+
+const saveActiveSessionToServer = async () => {
+  const session = activeSession.value;
+  if (!session) return;
+  await saveSessionToServer(session);
+};
+
+watch(activeSessionId, () => {
+  persistActiveSessionId();
+});
+
+const scrollToBottom = async (force = false) => {
+  if (!force && scrollPending) return;
+  scrollPending = !force;
+  if (scrollRafId) cancelAnimationFrame(scrollRafId);
+  scrollRafId = requestAnimationFrame(async () => {
+    scrollRafId = null;
+    await nextTick();
+    const scrollComp = messagesScrollRef.value as any;
+    if (scrollComp?.wrapRef) {
+      const el = scrollComp.wrapRef as HTMLElement;
+      el.scrollTop = el.scrollHeight;
+    }
+    scrollPending = false;
+  });
 };
 
 const normalizeSession = (session: ChatSession): ChatSession => ({
@@ -566,25 +876,10 @@ const deleteMediaUrls = async (urls: string[]) => {
   }
 };
 
-const purgeExpiredSessions = async () => {
-  const cutoff = Date.now() - CHAT_SESSION_EXPIRES_DAYS * 24 * 60 * 60 * 1000;
-  const expired = sessions.value.filter((s) => {
-    const ts = new Date(s.updatedAt || s.createdAt).getTime();
-    return Number.isFinite(ts) && ts < cutoff;
-  });
-  if (expired.length === 0) return;
-
-  const urls = expired.flatMap((s) => collectSessionMediaUrls(s));
-  await deleteMediaUrls(urls);
-  const expiredIds = new Set(expired.map((s) => s.id));
-  sessions.value = sessions.value.filter((s) => !expiredIds.has(s.id));
-  persistSessions();
-};
-
 const ensureDefaultSession = () => {
   if (sessions.value.length === 0) {
     const now = new Date().toISOString();
-    const id = `session_${Date.now()}`;
+    const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     sessions.value.push({
       id,
       title: '新的会话',
@@ -593,25 +888,94 @@ const ensureDefaultSession = () => {
       messages: [],
     });
     activeSessionId.value = id;
-  } else if (!activeSessionId.value) {
+    persistActiveSessionId();
+    return;
+  }
+
+  const activeExists = sessions.value.some((s) => s.id === activeSessionId.value);
+  if (!activeSessionId.value || !activeExists) {
     activeSessionId.value = sessions.value[0]?.id ?? '';
+    persistActiveSessionId();
   }
 };
 
-const loadFromStorage = async () => {
+const applySessionsFromData = (parsed: ChatSession[], nextActiveId?: string) => {
+  applyingRemoteSessions.value = true;
   try {
-    const raw = window.localStorage.getItem(storageKey.value);
-    if (raw) {
-      const parsed = JSON.parse(raw) as ChatSession[];
-      if (Array.isArray(parsed)) {
-        sessions.value = parsed.map(normalizeSession);
-      }
+    if (Array.isArray(parsed)) {
+      sessions.value = parsed.map(normalizeSession);
+    }
+    if (
+      nextActiveId
+      && sessions.value.some((s) => s.id === nextActiveId)
+    ) {
+      activeSessionId.value = nextActiveId;
+    }
+    ensureDefaultSession();
+  } finally {
+    applyingRemoteSessions.value = false;
+  }
+};
+
+const readLegacySessions = (): ChatSession[] => {
+  try {
+    const raw = window.localStorage.getItem(legacyStorageKey.value);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ChatSession[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeSession)
+      .filter((session) => typeof session.id === 'string' && session.id);
+  } catch {
+    return [];
+  }
+};
+
+const clearLegacySessions = () => {
+  try {
+    window.localStorage.removeItem(legacyStorageKey.value);
+  } catch {
+    // ignore
+  }
+};
+
+/** 读取本地会话 → 上传服务端 → 成功后删除本地记录 */
+const migrateLegacySessionsToServer = async (): Promise<number> => {
+  const localSessions = readLegacySessions();
+  if (localSessions.length === 0) {
+    clearLegacySessions();
+    return 0;
+  }
+  try {
+    await bulkSaveChatSessions(localSessions);
+    clearLegacySessions();
+    return localSessions.length;
+  } catch {
+    // 上传失败时保留本地，下次进入再试
+    return 0;
+  }
+};
+
+const loadSessionsFromServer = async () => {
+  if (!userStore.token) {
+    ensureDefaultSession();
+    return;
+  }
+  if (loadingSessions.value) return;
+  loadingSessions.value = true;
+  try {
+    await migrateLegacySessionsToServer();
+    const res: any = await getChatSessions();
+    const remoteSessions = res?.data?.sessions ?? [];
+    applySessionsFromData(remoteSessions, loadActiveSessionId() || undefined);
+    if (isOpen.value || isPopupMode.value) {
+      await scrollToBottom(true);
     }
   } catch {
-    // ignore parse error
+    ensureDefaultSession();
+  } finally {
+    loadingSessions.value = false;
   }
-  await purgeExpiredSessions();
-  ensureDefaultSession();
 };
 
 const loadPanelPosition = () => {
@@ -626,6 +990,93 @@ const loadPanelPosition = () => {
   } catch {
     // ignore
   }
+};
+
+const loadDockSettings = () => {
+  if (isPopupMode.value) return;
+
+  try {
+    const widthRaw = window.localStorage.getItem(panelWidthKey.value);
+    if (widthRaw) {
+      const parsed = Number(widthRaw);
+      if (Number.isFinite(parsed)) {
+        panelWidth.value = clampPanelWidth(parsed);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const dockRaw = window.localStorage.getItem(dockSideKey.value);
+    if (dockRaw === 'right' || dockRaw === 'left' || dockRaw === 'floating') {
+      dockSide.value = dockRaw;
+    } else {
+      const posRaw = window.localStorage.getItem(panelPositionKey.value);
+      dockSide.value = posRaw ? 'floating' : 'right';
+    }
+  } catch {
+    dockSide.value = 'right';
+  }
+
+  if (dockSide.value === 'floating') {
+    loadPanelPosition();
+    if (!panelPos.value) {
+      dockSide.value = 'right';
+    }
+  } else {
+    panelPos.value = null;
+  }
+
+  try {
+    const sideRaw = window.localStorage.getItem(sessionsSideKey.value);
+    if (sideRaw === 'left' || sideRaw === 'right') {
+      sessionsSide.value = sideRaw;
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const persistPanelWidth = () => {
+  try {
+    window.localStorage.setItem(panelWidthKey.value, String(panelWidth.value));
+  } catch {
+    // ignore
+  }
+};
+
+const persistDockSide = () => {
+  try {
+    window.localStorage.setItem(dockSideKey.value, dockSide.value);
+  } catch {
+    // ignore
+  }
+};
+
+const toggleSessionsExpanded = () => {
+  isSessionsExpanded.value = !isSessionsExpanded.value;
+  try {
+    window.localStorage.setItem(
+      sessionsExpandedKey.value,
+      String(isSessionsExpanded.value),
+    );
+  } catch {
+    // ignore
+  }
+};
+
+const persistSessionsSide = () => {
+  try {
+    window.localStorage.setItem(sessionsSideKey.value, sessionsSide.value);
+  } catch {
+    // ignore
+  }
+};
+
+const toggleSessionsSide = () => {
+  sessionsSide.value = sessionsSide.value === 'left' ? 'right' : 'left';
+  persistSessionsSide();
 };
 
 const clampInputHeight = (height: number) =>
@@ -699,7 +1150,7 @@ const onInputTouchResizeStart = (e: TouchEvent) => {
 const persistPanelPosition = () => {
   if (isPopupMode.value) return;
   try {
-    if (panelPos.value) {
+    if (dockSide.value === 'floating' && panelPos.value) {
       window.localStorage.setItem(panelPositionKey.value, JSON.stringify(panelPos.value));
     } else {
       window.localStorage.removeItem(panelPositionKey.value);
@@ -707,6 +1158,54 @@ const persistPanelPosition = () => {
   } catch {
     // ignore
   }
+};
+
+const onWidthResizeMove = (clientX: number) => {
+  if (!isWidthResizing.value) return;
+  const delta = clientX - widthResizeStart.value.x;
+  if (dockSide.value === 'left') {
+    panelWidth.value = clampPanelWidth(widthResizeStart.value.width + delta);
+  } else {
+    panelWidth.value = clampPanelWidth(widthResizeStart.value.width - delta);
+  }
+};
+
+const endWidthResize = () => {
+  if (!isWidthResizing.value) return;
+  isWidthResizing.value = false;
+  document.removeEventListener('mousemove', onWidthResizeMouseMove);
+  document.removeEventListener('mouseup', endWidthResize);
+  document.removeEventListener('touchmove', onWidthResizeTouchMove);
+  document.removeEventListener('touchend', endWidthResize);
+  persistPanelWidth();
+};
+
+const onWidthResizeMouseMove = (e: MouseEvent) => {
+  onWidthResizeMove(e.clientX);
+};
+
+const onWidthResizeTouchMove = (e: TouchEvent) => {
+  const touch = e.touches[0];
+  if (!touch) return;
+  e.preventDefault();
+  onWidthResizeMove(touch.clientX);
+};
+
+const onWidthResizeStart = (e: MouseEvent) => {
+  if (isPopupMode.value || e.button !== 0) return;
+  isWidthResizing.value = true;
+  widthResizeStart.value = { x: e.clientX, width: panelWidth.value };
+  document.addEventListener('mousemove', onWidthResizeMouseMove);
+  document.addEventListener('mouseup', endWidthResize);
+};
+
+const onWidthTouchResizeStart = (e: TouchEvent) => {
+  const touch = e.touches[0];
+  if (!touch || isPopupMode.value) return;
+  isWidthResizing.value = true;
+  widthResizeStart.value = { x: touch.clientX, width: panelWidth.value };
+  document.addEventListener('touchmove', onWidthResizeTouchMove, { passive: false });
+  document.addEventListener('touchend', endWidthResize);
 };
 
 const clampPanelPosition = (x: number, y: number) => {
@@ -720,26 +1219,77 @@ const clampPanelPosition = (x: number, y: number) => {
   };
 };
 
-const isNearViewportEdge = (rect: DOMRect) =>
-  rect.left < DETACH_EDGE_PX
-  || rect.top < DETACH_EDGE_PX
-  || rect.right > window.innerWidth - DETACH_EDGE_PX
-  || rect.bottom > window.innerHeight - DETACH_EDGE_PX;
+const isNearViewportEdge = (rect: DOMRect) => {
+  const distances = [
+    rect.left,
+    window.innerWidth - rect.right,
+    rect.top,
+    window.innerHeight - rect.bottom,
+  ];
+  return Math.min(...distances) < SNAP_EDGE_PX;
+};
 
-const updateDetachHint = () => {
+const updateSnapHint = () => {
   const panel = panelRef.value;
   if (!panel || isPopupMode.value) {
-    showDetachHint.value = false;
+    showSnapHint.value = false;
     return;
   }
-  showDetachHint.value = isNearViewportEdge(panel.getBoundingClientRect());
+  showSnapHint.value = isNearViewportEdge(panel.getBoundingClientRect());
 };
 
 const ensurePanelPositionFromDom = () => {
   const panel = panelRef.value;
-  if (!panel || panelPos.value) return;
-  const rect = panel.getBoundingClientRect();
-  panelPos.value = { x: rect.left, y: rect.top };
+  if (!panel) return;
+  if (dockSide.value !== 'floating') {
+    const rect = panel.getBoundingClientRect();
+    panelPos.value = { x: rect.left, y: rect.top };
+    dockSide.value = 'floating';
+    persistDockSide();
+  } else if (!panelPos.value) {
+    const rect = panel.getBoundingClientRect();
+    panelPos.value = { x: rect.left, y: rect.top };
+  }
+};
+
+const snapPanelToEdge = (rect: DOMRect) => {
+  const distances: Record<string, number> = {
+    left: rect.left,
+    right: window.innerWidth - rect.right,
+    top: rect.top,
+    bottom: window.innerHeight - rect.bottom,
+  };
+
+  const minDist = Math.min(...Object.values(distances));
+  if (minDist >= SNAP_EDGE_PX) {
+    dockSide.value = 'floating';
+    persistDockSide();
+    persistPanelPosition();
+    return;
+  }
+
+  const edge = Object.entries(distances).find(([, d]) => d === minDist)?.[0];
+
+  if (edge === 'right') {
+    dockSide.value = 'right';
+    panelPos.value = null;
+  } else if (edge === 'left') {
+    dockSide.value = 'left';
+    panelPos.value = null;
+  } else if (edge === 'top' && panelPos.value) {
+    dockSide.value = 'floating';
+    panelPos.value = clampPanelPosition(panelPos.value.x, 0);
+  } else if (edge === 'bottom' && panelPos.value) {
+    dockSide.value = 'floating';
+    const panel = panelRef.value;
+    const h = panel?.offsetHeight ?? rect.height;
+    panelPos.value = clampPanelPosition(panelPos.value.x, window.innerHeight - h);
+  } else {
+    dockSide.value = 'floating';
+  }
+
+  persistDockSide();
+  persistPanelPosition();
 };
 
 const onPanelDragMove = (e: MouseEvent) => {
@@ -749,19 +1299,23 @@ const onPanelDragMove = (e: MouseEvent) => {
     e.clientY - dragOffset.value.y,
   );
   panelPos.value = next;
-  updateDetachHint();
+  updateSnapHint();
 };
 
-const detachPanelToPopup = () => {
+const detachPanelToPopup = async () => {
+  await saveActiveSessionToServer();
   const popup = openChatPopup();
   if (!popup) {
     ElMessage.warning('无法打开独立窗口，请在浏览器地址栏允许本站弹窗后重试');
     return false;
   }
+  notifySessionsRefresh();
   closePanel();
+  dockSide.value = 'right';
   panelPos.value = null;
+  persistDockSide();
   persistPanelPosition();
-  showDetachHint.value = false;
+  showSnapHint.value = false;
   ElMessage.success('已分离到独立窗口，可拖到另一块屏幕');
   return true;
 };
@@ -773,13 +1327,10 @@ const onPanelDragEnd = () => {
   document.removeEventListener('mouseup', onPanelDragEnd);
 
   const panel = panelRef.value;
-  if (panel && isNearViewportEdge(panel.getBoundingClientRect())) {
-    detachPanelToPopup();
-    return;
+  if (panel) {
+    snapPanelToEdge(panel.getBoundingClientRect());
   }
-
-  showDetachHint.value = false;
-  persistPanelPosition();
+  showSnapHint.value = false;
 };
 
 const onPanelDragStart = (e: MouseEvent) => {
@@ -809,7 +1360,7 @@ const onPanelTouchMove = (e: TouchEvent) => {
     touch.clientY - dragOffset.value.y,
   );
   panelPos.value = next;
-  updateDetachHint();
+  updateSnapHint();
 };
 
 const onPanelTouchEnd = () => {
@@ -819,13 +1370,10 @@ const onPanelTouchEnd = () => {
   document.removeEventListener('touchend', onPanelTouchEnd);
 
   const panel = panelRef.value;
-  if (panel && isNearViewportEdge(panel.getBoundingClientRect())) {
-    detachPanelToPopup();
-    return;
+  if (panel) {
+    snapPanelToEdge(panel.getBoundingClientRect());
   }
-
-  showDetachHint.value = false;
-  persistPanelPosition();
+  showSnapHint.value = false;
 };
 
 const onPanelTouchStart = (e: TouchEvent) => {
@@ -852,14 +1400,19 @@ const resetPanelPosition = (e: MouseEvent) => {
   if (isPopupMode.value) return;
   const target = e.target as HTMLElement;
   if (target.closest('.chat-actions, .el-button, button')) return;
+  dockSide.value = 'right';
   panelPos.value = null;
+  persistDockSide();
   persistPanelPosition();
 };
 
-const togglePanel = () => {
+const togglePanel = async () => {
+  if (!isOpen.value) {
+    await loadSessionsFromServer();
+  }
   isOpen.value = !isOpen.value;
   if (isOpen.value) {
-    scrollToBottom();
+    await scrollToBottom(true);
   }
 };
 
@@ -867,7 +1420,7 @@ const closePanel = () => {
   isOpen.value = false;
 };
 
-const createSession = () => {
+const createSession = async () => {
   const now = new Date().toISOString();
   const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const session: ChatSession = {
@@ -879,11 +1432,14 @@ const createSession = () => {
   };
   sessions.value.unshift(session);
   activeSessionId.value = id;
+  persistActiveSessionId();
+  await saveSessionToServer(session);
 };
 
 
 const setActiveSession = (id: string) => {
   activeSessionId.value = id;
+  persistActiveSessionId();
   scrollToBottom();
 };
 
@@ -893,7 +1449,7 @@ const clearActiveSessionMessages = async () => {
   await deleteMediaUrls(urls);
   activeSession.value.messages = [];
   activeSession.value.updatedAt = new Date().toISOString();
-  persistSessions();
+  await saveActiveSessionToServer();
 };
 
 /** 删除指定会话；若删的是当前会话则切换到其他会话 */
@@ -904,9 +1460,18 @@ const deleteSession = async (sessionId: string) => {
   }
 
   if (sessions.value.length <= 1) {
+    try {
+      await deleteChatSessionApi(sessionId);
+      notifySessionsRefresh();
+    } catch {
+      // ignore
+    }
     sessions.value = [];
     ensureDefaultSession();
-    persistSessions();
+    const created = activeSession.value;
+    if (created) {
+      await saveSessionToServer(created);
+    }
     return;
   }
   const idx = sessions.value.findIndex((s) => s.id === sessionId);
@@ -914,8 +1479,14 @@ const deleteSession = async (sessionId: string) => {
   sessions.value.splice(idx, 1);
   if (activeSessionId.value === sessionId) {
     activeSessionId.value = sessions.value[0]?.id ?? sessions.value[sessions.value.length - 1]?.id ?? '';
+    persistActiveSessionId();
   }
-  persistSessions();
+  try {
+    await deleteChatSessionApi(sessionId);
+    notifySessionsRefresh();
+  } catch {
+    // ignore
+  }
 };
 
 const buildHistoryForRequest = (session: ChatSession, excludeLast = false): ChatHistoryItem[] => {
@@ -973,10 +1544,13 @@ const handleSend = async () => {
   const content = currentInput.value;
   if (!content && uploadedMedia.value.length === 0) return;
   if (loading.value) return;
+
+  ensureDefaultSession();
   if (!activeSession.value) {
-    ensureDefaultSession();
+    await createSession();
   }
-  const session = activeSession.value!;
+  const session = activeSession.value;
+  if (!session) return;
 
   const now = new Date().toISOString();
 
@@ -987,24 +1561,25 @@ const handleSend = async () => {
     createdAt: now,
     mediaUrls: [],
   };
-  session.messages.push(userMsg);
-  session.updatedAt = now;
-
-  const titleSeed = content.trim() || '图片/视频分析';
-  if (!session.title || session.title === '新的会话') {
-    session.title = titleSeed.slice(0, 20);
-  }
 
   currentInput.value = '';
   const pendingMedia = [...uploadedMedia.value];
   uploadedMedia.value = [];
   revokeMediaPreviewUrls(pendingMedia);
   errorMessage.value = '';
-  await scrollToBottom();
 
   loading.value = true;
   const uploadedTempUrls: string[] = [];
   try {
+    session.messages.push(userMsg);
+    session.updatedAt = now;
+
+    const titleSeed = content.trim() || '图片/视频分析';
+    if (!session.title || session.title === '新的会话') {
+      session.title = titleSeed.slice(0, 20);
+    }
+
+    await scrollToBottom();
     for (const media of pendingMedia) {
       const res: any = await uploadChatMedia(media.file, session.id);
       const url = res?.data?.url;
@@ -1088,7 +1663,8 @@ const handleSend = async () => {
       }
     }
     session.updatedAt = new Date().toISOString();
-    persistSessions();
+    await saveActiveSessionToServer();
+    await scrollToBottom(true);
   } catch (e: any) {
     if (uploadedTempUrls.length > 0 && userMsg.mediaUrls!.length === 0) {
       await deleteMediaUrls(uploadedTempUrls);
@@ -1103,11 +1679,6 @@ const handleSend = async () => {
 
 const insertNewLine = () => {
   currentInput.value += '\n';
-};
-
-const handleInput = () => {
-  // 可以在这里添加输入处理逻辑
-  // 目前主要是为了确保 v-model 能正常工作
 };
 
 // 媒体上传相关函数
@@ -1186,24 +1757,49 @@ const closeVideoPreview = () => {
 };
 
 onMounted(() => {
-  loadPanelPosition();
+  loadDockSettings();
   loadInputHeight();
-  void loadFromStorage();
-  window.addEventListener('beforeunload', persistSessions);
+  void loadSessionsFromServer();
+  window.addEventListener('beforeunload', () => {
+    void saveActiveSessionToServer();
+  });
   window.addEventListener('resize', onWindowResize);
+  const onBridgeMessage = (msg: ChatBridgeMessage) => {
+    if (msg.type === 'sessions-refresh') {
+      void loadSessionsFromServer();
+      return;
+    }
+    if (msg.type === 'popup-closed' && !isPopupMode.value) {
+      void loadSessionsFromServer();
+    }
+  };
+  unsubscribeBridge = isPopupMode.value
+    ? popupBridge!.onMessage(onBridgeMessage)
+    : subscribeChatBridge(onBridgeMessage);
   if (isPopupMode.value) {
-    scrollToBottom();
+    void scrollToBottom(true);
   }
 });
 
 const onWindowResize = () => {
-  if (!panelPos.value) return;
-  panelPos.value = clampPanelPosition(panelPos.value.x, panelPos.value.y);
-  persistPanelPosition();
+  panelWidth.value = clampPanelWidth(panelWidth.value);
+  persistPanelWidth();
+  if (dockSide.value === 'floating' && panelPos.value) {
+    panelPos.value = clampPanelPosition(panelPos.value.x, panelPos.value.y);
+    persistPanelPosition();
+  }
 };
 
 onUnmounted(() => {
-  window.removeEventListener('beforeunload', persistSessions);
+  unsubscribeBridge?.();
+  if (refreshSignalTimer) {
+    clearTimeout(refreshSignalTimer);
+    refreshSignalTimer = null;
+  }
+  if (scrollRafId) {
+    cancelAnimationFrame(scrollRafId);
+    scrollRafId = null;
+  }
   window.removeEventListener('resize', onWindowResize);
   document.removeEventListener('mousemove', onPanelDragMove);
   document.removeEventListener('mouseup', onPanelDragEnd);
@@ -1213,6 +1809,10 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', endInputResize);
   document.removeEventListener('touchmove', onInputResizeTouchMove);
   document.removeEventListener('touchend', endInputResize);
+  document.removeEventListener('mousemove', onWidthResizeMouseMove);
+  document.removeEventListener('mouseup', endWidthResize);
+  document.removeEventListener('touchmove', onWidthResizeTouchMove);
+  document.removeEventListener('touchend', endWidthResize);
   revokeMediaPreviewUrls(uploadedMedia.value);
 });
 </script>
@@ -1251,14 +1851,9 @@ onUnmounted(() => {
 
 .workflow-chat-panel {
   position: fixed;
-  left: 50%;
-  top: 10%;
-  bottom: 10%;
-  transform: translate(-50%, 0%);
-  width: 60%;
-  max-width: 100vw;
   z-index: 10049;
-  border-radius: 24px;
+  width: var(--chat-panel-width, 480px);
+  max-width: 100vw;
   background: var(--app-bg);
   border: 1px solid var(--app-border-strong);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
@@ -1268,9 +1863,30 @@ onUnmounted(() => {
   transition: box-shadow 0.15s ease;
 }
 
+.workflow-chat-panel.is-docked-right {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  left: auto;
+  height: 100vh;
+  transform: none;
+  border-radius: 16px 0 0 16px;
+}
+
+.workflow-chat-panel.is-docked-left {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: auto;
+  height: 100vh;
+  transform: none;
+  border-radius: 0 16px 16px 0;
+}
+
 .workflow-chat-panel.is-floating {
   height: 80vh;
   max-height: calc(100vh - 16px);
+  border-radius: 24px;
 }
 
 .workflow-chat-panel.is-dragging {
@@ -1278,9 +1894,49 @@ onUnmounted(() => {
   user-select: none;
 }
 
-.workflow-chat-panel.show-detach-hint {
+.workflow-chat-panel.is-width-resizing {
+  user-select: none;
+}
+
+.workflow-chat-panel.show-snap-hint {
   outline: 2px solid var(--color-primary, #409eff);
   outline-offset: 2px;
+}
+
+.chat-panel-width-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 6;
+  touch-action: none;
+}
+
+.chat-panel-width-resize-handle.is-right-edge {
+  left: auto;
+  right: 0;
+}
+
+.chat-panel-width-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--app-border-strong, #4b5563);
+  opacity: 0.45;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.chat-panel-width-resize-handle:hover::before,
+.workflow-chat-panel.is-width-resizing .chat-panel-width-resize-handle::before {
+  opacity: 1;
+  background: var(--color-primary, #409eff);
 }
 
 .chat-panel-drag-strip {
@@ -1296,6 +1952,16 @@ onUnmounted(() => {
   cursor: grab;
   touch-action: none;
   user-select: none;
+  min-width: 0;
+}
+
+.workflow-chat-panel.is-layout-narrow .chat-panel-drag-strip span {
+  display: none;
+}
+
+.workflow-chat-panel.is-layout-narrow .chat-panel-drag-strip {
+  justify-content: center;
+  padding: 4px 8px;
 }
 
 .chat-panel-drag-strip:active {
@@ -1323,7 +1989,7 @@ onUnmounted(() => {
   cursor: grabbing;
 }
 
-.chat-detach-hint {
+.chat-snap-hint {
   position: absolute;
   left: 50%;
   bottom: 42px;
@@ -1498,29 +2164,100 @@ onUnmounted(() => {
 }
 
 .workflow-chat-sessions {
-  flex: 0 0 160px;
+  flex: 0 0 220px;
+  min-width: 180px;
   border-right: 1px solid var(--app-border-color);
   display: flex;
   flex-direction: column;
   background: var(--app-bg-sub);
 }
 
+.workflow-chat-sessions.is-right-side {
+  border-right: none;
+  border-left: 1px solid var(--app-border-color);
+}
+
+.sessions-collapsed-rail {
+  flex: 0 0 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px;
+  background: var(--app-bg-sub);
+  border-right: 1px solid var(--app-border-color);
+}
+
+.sessions-collapsed-rail.is-right-side {
+  border-right: none;
+  border-left: 1px solid var(--app-border-color);
+}
+
+.sessions-rail-spacer {
+  flex: 1;
+  min-height: 8px;
+}
+
+.sessions-rail-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sessions-rail-btn:hover {
+  background: var(--app-surface-soft);
+  color: var(--text-main);
+}
+
+.sessions-rail-btn .el-icon {
+  font-size: 18px;
+}
+
 .sessions-header {
-  padding: 12px 12px 8px;
+  padding: 10px 10px 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .sessions-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .sessions-title {
   font-size: 14px;
   color: var(--text-soft);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sessions-side-switch-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.sessions-side-switch-icon .el-icon {
+  font-size: 12px;
+}
+
+.sessions-rail-btn .sessions-side-switch-icon .el-icon {
+  font-size: 11px;
 }
 
 .sessions-list {
@@ -1581,16 +2318,24 @@ onUnmounted(() => {
 }
 
 .chat-header {
-  padding: 12px 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--app-border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .chat-title {
   display: flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+}
+
+.chat-title-text {
   font-size: 15px;
   color: var(--text-main);
   font-weight: 500;
@@ -1600,8 +2345,54 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.chat-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
 .chat-actions :deep(.el-button) {
   color: var(--text-muted);
+  margin-left: 0;
+}
+
+.chat-actions :deep(.el-button > span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.workflow-chat-main.is-narrow .chat-action-label {
+  display: none;
+}
+
+.workflow-chat-main.is-narrow .chat-actions :deep(.el-button) {
+  padding: 6px;
+}
+
+.workflow-chat-main.is-narrow .chat-messages {
+  padding: 8px 10px;
+}
+
+.workflow-chat-main.is-narrow .chat-input-area {
+  padding: 6px 10px 10px;
+}
+
+.workflow-chat-main.is-narrow .chat-input-tip {
+  display: none;
+}
+
+.workflow-chat-main.is-narrow .chat-input :deep(.el-input__count) {
+  display: none;
+}
+
+.workflow-chat-main.is-narrow .message-bubble {
+  max-width: 100%;
+}
+
+.workflow-chat-main.is-narrow .chat-input-actions {
+  gap: 6px;
 }
 
 .chat-messages {
@@ -1841,6 +2632,11 @@ onUnmounted(() => {
     transform: none;
     width: 100vw;
     border-radius: 0;
+    height: 100vh;
+  }
+
+  .chat-panel-width-resize-handle {
+    display: none;
   }
 
   .workflow-chat-toggle {

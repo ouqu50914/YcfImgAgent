@@ -152,6 +152,55 @@ export class WorkflowHistoryService {
         });
     }
 
+    /** 列表展示：不加载 workflow_data，封面用 JSON_EXTRACT */
+    async getHistoryListLite(userId: number, limit: number = 20, templateId?: number) {
+        const params: unknown[] = [userId];
+        let sql = `
+            SELECT
+                h.id,
+                h.user_id,
+                h.template_id,
+                h.snapshot_name,
+                h.created_at,
+                h.updated_at,
+                h.is_public,
+                h.is_favorite,
+                JSON_UNQUOTE(JSON_EXTRACT(h.workflow_data, '$.cover_image')) AS cover_image
+            FROM workflow_history h
+            WHERE h.user_id = ?
+        `;
+        if (templateId !== undefined) {
+            sql += ' AND h.template_id = ?';
+            params.push(templateId);
+        }
+        sql += ' ORDER BY h.updated_at DESC, h.created_at DESC LIMIT ?';
+        params.push(limit);
+
+        const rows = await AppDataSource.query(sql, params) as Array<{
+            id: string | number;
+            user_id: string | number;
+            template_id?: string | number | null;
+            snapshot_name?: string | null;
+            cover_image?: string | null;
+            created_at: Date | string;
+            updated_at?: Date | string | null;
+            is_public?: number;
+            is_favorite?: number;
+        }>;
+
+        return rows.map((row) => ({
+            id: Number(row.id),
+            user_id: Number(row.user_id),
+            template_id: row.template_id != null ? Number(row.template_id) : null,
+            snapshot_name: row.snapshot_name ?? null,
+            cover_image: row.cover_image || null,
+            created_at: new Date(row.created_at),
+            updated_at: new Date(row.updated_at || row.created_at),
+            is_public: row.is_public ?? 0,
+            is_favorite: row.is_favorite ?? 0,
+        }));
+    }
+
     /**
      * 获取历史记录详情
      */

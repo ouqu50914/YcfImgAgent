@@ -35,8 +35,25 @@ export const saveTemplate = (data: {
   return request.post<{ message: string; data: WorkflowTemplate }>('/workflow/template', data);
 };
 
-export const getTemplates = () => {
-  return request.get<{ message: string; data: WorkflowTemplate[] }>('/workflow/templates');
+export const getTemplates = (options?: { lite?: boolean }) => {
+  return request.get<{ message: string; data: WorkflowTemplate[] }>('/workflow/templates', {
+    params: options?.lite ? { lite: 1 } : undefined,
+  });
+};
+
+export interface RecentProjectItem {
+  id: number;
+  name: string;
+  preview?: string;
+  created_at: string;
+  updated_at: string;
+  source: 'template' | 'history';
+}
+
+export const getRecentProjects = (limit = 5) => {
+  return request.get<{ message: string; data: RecentProjectItem[] }>('/workflow/recent-projects', {
+    params: { limit },
+  });
 };
 
 export const getTemplate = (id: number) => {
@@ -84,11 +101,12 @@ export const autoSaveHistory = (workflowData: any, historyId?: number, templateI
   });
 };
 
-export const getHistoryList = (limit?: number, templateId?: number) => {
+export const getHistoryList = (limit?: number, templateId?: number, options?: { lite?: boolean }) => {
   return request.get<{ message: string; data: WorkflowHistory[] }>('/workflow/history', {
     params: {
       limit,
-      ...(templateId != null ? { templateId } : {})
+      ...(templateId != null ? { templateId } : {}),
+      ...(options?.lite ? { lite: 1 } : {}),
     }
   });
 };
@@ -116,4 +134,54 @@ export const getPublicTemplates = (params?: {
   return request.get<{ message: string; data: { list: WorkflowTemplate[]; total: number } }>('/workflow/templates/public', {
     params
   });
+};
+
+// 创意广场相关
+export type CreativeSquareProjectSource = 'template' | 'history';
+
+export interface CreativeSquareLatestProject {
+  id: number;
+  source: CreativeSquareProjectSource;
+  name: string;
+  cover_image?: string;
+  updated_at: string;
+}
+
+export interface CreativeSquareMember {
+  user_id: number;
+  username: string;
+  latest_project: CreativeSquareLatestProject;
+  project_count: number;
+}
+
+export interface CreativeSquareMemberProject {
+  id: number;
+  source: CreativeSquareProjectSource;
+  name: string;
+  cover_image?: string;
+  updated_at: string;
+  is_own: boolean;
+}
+
+export interface CreativeSquareForkData {
+  name: string;
+  workflow_data: any;
+  cover_image?: string;
+  owner_id: number;
+}
+
+export const getCreativeSquareMembers = () => {
+  return request.get<{ message: string; data: { list: CreativeSquareMember[] } }>('/workflow/creative-square/members');
+};
+
+export const getCreativeSquareMemberProjects = (userId: number) => {
+  return request.get<{ message: string; data: { list: CreativeSquareMemberProject[] } }>(
+    `/workflow/creative-square/members/${userId}/projects`
+  );
+};
+
+export const getCreativeSquareFork = (source: CreativeSquareProjectSource, id: number) => {
+  return request.get<{ message: string; data: CreativeSquareForkData }>(
+    `/workflow/creative-square/fork/${source}/${id}`
+  );
 };

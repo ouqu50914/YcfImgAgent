@@ -178,6 +178,7 @@ import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, Search } from '@element-plus/icons-vue';
 import { getPublicTemplates, getTemplates, getTemplate, saveTemplate, updateTemplate, deleteTemplate, getHistoryList, updateHistory, deleteHistory, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
+import { notifyWorkflowListChanged } from '@/utils/workflow-list-events';
 import { getUploadUrl } from '@/utils/image-loader';
 
 const router = useRouter();
@@ -235,7 +236,7 @@ const loadList = async () => {
       total.value = data?.total || 0;
     } else {
       // 我的项目：仅展示模板（项目），不再直接展示自动保存的历史记录
-      const tplRes = await getTemplates();
+      const tplRes = await getTemplates({ lite: true });
       const tplArr = Array.isArray((tplRes as any)?.data) ? (tplRes as any).data as WorkflowTemplate[] : [];
       const merged: typeof myItems.value = [];
       for (const t of tplArr) {
@@ -350,6 +351,7 @@ const handleDeleteItem = async (item: MyItem) => {
     }
     ElMessage.success('已删除');
     loadList();
+    notifyWorkflowListChanged();
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '删除失败');
   }
@@ -411,6 +413,7 @@ const handleDelete = async (template: WorkflowTemplate) => {
     await deleteTemplate(template.id);
     ElMessage.success('已删除');
     loadList();
+    notifyWorkflowListChanged();
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message || '删除失败');
   }

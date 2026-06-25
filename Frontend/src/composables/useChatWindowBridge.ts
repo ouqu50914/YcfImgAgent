@@ -5,7 +5,8 @@ export const CHAT_BRIDGE_CHANNEL = 'workflow-gemini-chat';
 export type ChatBridgeMessage =
   | { type: 'context-update'; payload: unknown }
   | { type: 'gemini-command'; payload: unknown }
-  | { type: 'popup-closed' };
+  | { type: 'popup-closed' }
+  | { type: 'sessions-refresh' };
 
 type BridgeHandler = (msg: ChatBridgeMessage) => void;
 
@@ -22,6 +23,16 @@ function getChannel(): BroadcastChannel | null {
 export function postChatBridgeMessage(msg: ChatBridgeMessage) {
   const ch = getChannel();
   ch?.postMessage(msg);
+}
+
+export function subscribeChatBridge(handler: BridgeHandler) {
+  const ch = getChannel();
+  const listener = (ev: MessageEvent<ChatBridgeMessage>) => {
+    const msg = ev.data;
+    if (msg?.type) handler(msg);
+  };
+  ch?.addEventListener('message', listener);
+  return () => ch?.removeEventListener('message', listener);
 }
 
 export function useChatWindowBridge(role: 'main' | 'popup') {
