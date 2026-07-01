@@ -1,39 +1,14 @@
-import path from "path";
-import fs from "fs";
 import { AppDataSource } from "../data-source";
-import { isCosEnabled, deleteObject as cosDeleteObject, pathToKey } from "./cos.service";
 import { WorkflowTemplate } from "../entities/WorkflowTemplate";
 import { User } from "../entities/User";
 
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const EXPIRES_DAYS = 14;
 
-/** 从 workflow_data 和 cover_image 中收集 /uploads/ 下的文件名（含所有节点类型中的图片引用） */
-function collectUploadFilenames(workflowData: any, coverImage?: string | null): string[] {
-    const names: string[] = [];
-    const add = (url: string | undefined | null) => {
-        if (!url || typeof url !== "string") return;
-        const m = url.match(/\/uploads\/([^/?]+)/);
-        if (m && m[1]) names.push(m[1]);
-    };
-    add(coverImage);
-    if (workflowData && typeof workflowData === "object") {
-        const nodes = workflowData.nodes || [];
-        for (const node of nodes) {
-            const d = node?.data;
-            if (!d) continue;
-            add(d.imageUrl);
-            add(d.originalImageUrl);
-            add(d.image_url);
-            if (Array.isArray(d.imageUrls)) for (const u of d.imageUrls) add(u);
-            const lr = d.layerResult;
-            if (lr?.layers && Array.isArray(lr.layers)) {
-                for (const layer of lr.layers) add(layer?.url);
-            }
-        }
-        add(workflowData.cover_image);
-    }
-    return [...new Set(names)];
+function computeExpiresAt(isPublic: number, isFavorite: number): Date | null {
+    if (isPublic === 1 || isFavorite === 1) return null;
+    const d = new Date();
+    d.setDate(d.getDate() + EXPIRES_DAYS);
+    return d;
 }
 
 export class WorkflowService {
@@ -76,14 +51,7 @@ export class WorkflowService {
         if (category !== undefined) {
             template.category = category;
         }
-        // 未公开且未收藏的项目：14天后自动删除；公开或收藏的永久保留
-        if (template.is_public === 0 && template.is_favorite === 0) {
-            const d = new Date();
-            d.setDate(d.getDate() + EXPIRES_DAYS);
-            template.expires_at = d;
-        } else {
-            template.expires_at = null as any;
-        }
+        template.expires_at = computeExpiresAt(template.is_public, template.is_favorite) as any;
 
         await this.templateRepo.save(template);
         return template;
@@ -155,7 +123,7 @@ export class WorkflowService {
     }
 
     /**
-     * 删除模板并删除关联的上传图片文件
+     * 删除模板（仅删库记录；uploads 文件由孤儿清理任务回收）
      */
     async deleteTemplate(templateId: number, userId: number) {
         const template = await this.templateRepo.findOne({
@@ -166,41 +134,11 @@ export class WorkflowService {
             throw new Error('模板不存在或无权限删除');
         }
 
-        await this.deleteTemplateFiles(template);
         await this.templateRepo.remove(template);
         return { message: '模板删除成功' };
     }
 
-    /** 删除模板关联的 uploads 文件（本地 + COS，不删库记录） */
-    private async deleteTemplateFiles(template: WorkflowTemplate) {
-        let data: any;
-        try {
-            data = JSON.parse(template.workflow_data);
-        } catch {
-            data = null;
-        }
-        const filenames = collectUploadFilenames(data, template.cover_image);
-        const useCos = isCosEnabled();
-        for (const name of filenames) {
-            if (useCos) {
-                try {
-                    await cosDeleteObject(pathToKey(`/uploads/${name}`));
-                } catch (e) {
-                    console.warn("deleteTemplateFiles COS delete failed:", name, e);
-                }
-            }
-            const filePath = path.join(UPLOADS_DIR, name);
-            try {
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
-            } catch (e) {
-                console.warn("deleteTemplateFiles unlink failed:", filePath, e);
-            }
-        }
-    }
-
-    /** 定时任务：删除已过期的未公开且未收藏模板及其图片（公开或收藏的永久保留） */
+    /** 定时任务：删除已过期的未公开且未收藏模板（公开或收藏的永久保留） */
     async deleteExpiredTemplates() {
         const now = new Date();
         const list = await this.templateRepo
@@ -210,7 +148,6 @@ export class WorkflowService {
             .getMany();
         let deleted = 0;
         for (const row of list) {
-            await this.deleteTemplateFiles(row);
             await this.templateRepo.remove(row);
             deleted++;
         }
@@ -249,21 +186,21 @@ export class WorkflowService {
         if (updates.is_temp !== undefined) template.is_temp = updates.is_temp ? 1 : 0;
         if (updates.source_template_id !== undefined) template.source_template_id = updates.source_template_id ?? null;
 
-        // 未公开且未收藏的项目：14天后自动删除；公开或收藏的永久保留
-        if (template.is_public === 0 && template.is_favorite === 0) {
-            // 如果之前没有 expires_at，设置新的过期时间
-            if (!template.expires_at) {
-                const d = new Date();
-                d.setDate(d.getDate() + EXPIRES_DAYS);
-                template.expires_at = d;
-            }
-        } else {
-            // 公开或收藏：清除过期时间，永久保留
-            template.expires_at = null as any;
-        }
+        // 未公开且未收藏：每次更新滑动续期；公开或收藏永久保留
+        template.expires_at = computeExpiresAt(template.is_public, template.is_favorite) as any;
 
         await this.templateRepo.save(template);
         return template;
+    }
+
+    /** 自动保存等只读操作时滑动续期（不修改 workflow_data） */
+    async touchTemplateExpiresAt(templateId: number, userId: number) {
+        const template = await this.templateRepo.findOne({
+            where: { id: templateId, user_id: userId }
+        });
+        if (!template) return;
+        template.expires_at = computeExpiresAt(template.is_public, template.is_favorite) as any;
+        await this.templateRepo.save(template);
     }
 
     /**

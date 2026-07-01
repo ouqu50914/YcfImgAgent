@@ -179,6 +179,10 @@ export const autoSaveHistory = async (req: Request, res: Response) => {
             Number.isNaN(tplId as any) ? undefined : tplId
         );
 
+        if (tplId != null && !Number.isNaN(tplId)) {
+            await workflowService.touchTemplateExpiresAt(tplId, userId);
+        }
+
         return res.status(200).json({
             message: "自动保存成功",
             data: history

@@ -11,6 +11,7 @@ import { AppDataSource } from "./data-source";
 import { ApiConfig } from "./entities/ApiConfig";
 import { WorkflowService } from "./services/workflow.service";
 import { ChatMediaService } from "./services/chat-media.service";
+import { UploadOrphanService } from "./services/upload-orphan.service";
 import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
 import imageRoutes from "./routes/image.routes";
@@ -154,7 +155,7 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 // 全局错误处理中间件（需放在所有路由之后）
 app.use(errorHandler);
 
-// 公开/收藏模板 14 天后过期删除（每天执行一次）
+// 未公开且未收藏模板：expires_at 到期后删库记录（图片由孤儿清理回收）
 function startExpiredTemplatesJob() {
     const workflowService = new WorkflowService();
     const run = () => {
@@ -172,6 +173,22 @@ function startExpiredChatMediaJob() {
         chatMediaService.deleteExpiredChatMedia()
             .then((n) => { if (n > 0) console.log(`[cron] 已删除 ${n} 条过期聊天媒体`); })
             .catch((e) => console.warn("[cron] deleteExpiredChatMedia failed:", e));
+    };
+    run();
+    setInterval(run, 24 * 60 * 60 * 1000);
+}
+
+/** 清理 uploads/ 下未被任何 DB 记录引用的孤儿文件（每天一次，默认 7 天宽限期） */
+function startUploadOrphanCleanupJob() {
+    const orphanService = new UploadOrphanService();
+    const run = () => {
+        orphanService.cleanupOrphanUploads()
+            .then(({ localDeleted, cosDeleted }) => {
+                if (localDeleted > 0 || cosDeleted > 0) {
+                    console.log(`[cron] 孤儿 uploads 清理: 本地 ${localDeleted}，COS ${cosDeleted}`);
+                }
+            })
+            .catch((e) => console.warn("[cron] cleanupOrphanUploads failed:", e));
     };
     run();
     setInterval(run, 24 * 60 * 60 * 1000);
@@ -225,6 +242,7 @@ AppDataSource.initialize()
         await ensureApiConfigRecords();
         startExpiredTemplatesJob();
         startExpiredChatMediaJob();
+        startUploadOrphanCleanupJob();
         const port = process.env.PORT || 3000;
         app.listen(port, () => {
             console.log(`🚀 Server is running on http://localhost:${port}`);

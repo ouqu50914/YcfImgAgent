@@ -8,7 +8,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "ts-node src/seed.ts",
-    "test": "npm run build && node --test dist/tests/**/*.test.js"
+    "test": "npm run build && node --test dist/tests/**/*.test.js",
+    "restore-cos-markers": "ts-node scripts/restore-cos-delete-markers.ts",
+    "backup-mysql-to-cos": "ts-node scripts/backup-mysql-to-cos.ts"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",

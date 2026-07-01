@@ -1,68 +1,5 @@
-import path from "path";
-import fs from "fs";
 import { AppDataSource } from "../data-source";
 import { WorkflowHistory } from "../entities/WorkflowHistory";
-import { isCosEnabled, deleteObject as cosDeleteObject, pathToKey } from "./cos.service";
-
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-
-/** 从 workflow_data 和 cover_image 中收集 /uploads/ 下的文件名（含所有节点类型中的图片引用） */
-function collectUploadFilenames(workflowData: any, coverImage?: string | null): string[] {
-    const names: string[] = [];
-    const add = (url: string | undefined | null) => {
-        if (!url || typeof url !== "string") return;
-        const m = url.match(/\/uploads\/([^/?]+)/);
-        if (m && m[1]) names.push(m[1]);
-    };
-    add(coverImage);
-    if (workflowData && typeof workflowData === "object") {
-        const nodes = workflowData.nodes || [];
-        for (const node of nodes) {
-            const d = node?.data;
-            if (!d) continue;
-            add(d.imageUrl);
-            add(d.originalImageUrl);
-            add(d.image_url);
-            if (Array.isArray(d.imageUrls)) for (const u of d.imageUrls) add(u);
-            const lr = d.layerResult;
-            if (lr?.layers && Array.isArray(lr.layers)) {
-                for (const layer of lr.layers) add(layer?.url);
-            }
-        }
-        add(workflowData.cover_image);
-    }
-    return [...new Set(names)];
-}
-
-/** 删除历史记录关联的 uploads 文件（本地 + COS） */
-async function deleteHistoryFiles(workflowDataRaw: string) {
-    let data: any;
-    try {
-        data = JSON.parse(workflowDataRaw);
-    } catch {
-        data = null;
-    }
-    const coverImage = data?.cover_image;
-    const filenames = collectUploadFilenames(data, coverImage);
-    const useCos = isCosEnabled();
-    for (const name of filenames) {
-        if (useCos) {
-            try {
-                await cosDeleteObject(pathToKey(`/uploads/${name}`));
-            } catch (e) {
-                console.warn("deleteHistoryFiles COS delete failed:", name, e);
-            }
-        }
-        const filePath = path.join(UPLOADS_DIR, name);
-        try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        } catch (e) {
-            console.warn("deleteHistoryFiles unlink failed:", filePath, e);
-        }
-    }
-}
 
 export class WorkflowHistoryService {
     private historyRepo = AppDataSource.getRepository(WorkflowHistory);
@@ -109,7 +46,6 @@ export class WorkflowHistoryService {
         const toPrune = allHistories.filter((h) => (h.is_public ?? 0) === 0 && (h.is_favorite ?? 0) === 0);
         if (toPrune.length > 20) {
             const toDelete = toPrune.slice(20);
-            for (const h of toDelete) await deleteHistoryFiles(h.workflow_data);
             await this.historyRepo.remove(toDelete);
         }
 
@@ -241,7 +177,7 @@ export class WorkflowHistoryService {
     }
 
     /**
-     * 删除历史记录并删除关联的上传图片文件
+     * 删除历史记录（仅删库记录；uploads 文件由孤儿清理任务回收）
      */
     async deleteHistory(historyId: number, userId: number) {
         const history = await this.historyRepo.findOne({
@@ -252,7 +188,6 @@ export class WorkflowHistoryService {
             throw new Error('历史记录不存在');
         }
 
-        await deleteHistoryFiles(history.workflow_data);
         await this.historyRepo.remove(history);
         return { message: '历史记录删除成功' };
     }

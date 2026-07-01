@@ -1,0 +1,8 @@
+node_modules
+dist
+uploads
+temp
+scripts
+*.log
+.env
+.env.local
