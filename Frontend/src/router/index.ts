@@ -7,6 +7,7 @@ import Admin from '@/views/Admin.vue';
 import WorkflowPlaza from '@/views/WorkflowPlaza.vue';
 import SeedanceDemo from '@/views/SeedanceDemo.vue';
 import WorkflowChatPopup from '@/views/WorkflowChatPopup.vue';
+import Skills from '@/views/Skills.vue';
 
 const routes = [
   {
@@ -48,6 +49,12 @@ const routes = [
     path: '/workflow-plaza',
     name: 'WorkflowPlaza',
     component: WorkflowPlaza,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/skills',
+    name: 'Skills',
+    component: Skills,
     meta: { requiresAuth: true }
   },
   {

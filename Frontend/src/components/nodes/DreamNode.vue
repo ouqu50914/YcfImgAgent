@@ -154,6 +154,16 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { createImageGenerationKey } from '@/utils/generation-key';
+import {
+    readConnectedSkillsFromEdges,
+    getAttachedSkillsFromPromptData,
+    mergeSkillWithPrompt,
+    resolvePromptWithSkills,
+    hasPromptOrSkill,
+    isStoryboardPipelineSkill,
+    type SkillFragment,
+} from '@/utils/skill-prompt';
+import { readPipelineFromNodeData } from '@/utils/storyboard-pipeline-display';
 
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
@@ -172,7 +182,7 @@ type CreditTrackerStore = {
     getTotalSpent: () => number;
 };
 
-const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes } = useVueFlow();
+const { findNode, getEdges, addNodes, addEdges, getNodes, setNodes, updateNodeData } = useVueFlow();
 const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
@@ -494,6 +504,7 @@ const pendingImageNodeIds = ref<string[]>([]);
 
 // 从连接读取的数据
 const connectedPrompt = ref('');
+const connectedSkills = ref<SkillFragment[]>([]);
 const connectedImages = ref<string[]>([]);
 const connectedImageAliases = ref<number[]>([]);
 const connectedImageReadiness = ref({
@@ -519,8 +530,17 @@ const upstreamIntoDreamSig = computed(() => {
             parts.push('');
             continue;
         }
-        if (n.type === 'prompt') {
-            parts.push(`p:${getPromptTextFromNodeData(n.data)}`);
+        if (n.type === 'storyboard') {
+            const output = (n.data as { outputPrompt?: string })?.outputPrompt || '';
+            parts.push(`sb:${output}`);
+        } else if (n.type === 'prompt') {
+            const attached = getAttachedSkillsFromPromptData(n.data)
+                .map((s) => `${s.skillId ?? ''}:${s.name ?? ''}:${s.content}:${s.scope ?? ''}`)
+                .join('|');
+            parts.push(`p:${getPromptTextFromNodeData(n.data)}|sk:${attached}`);
+        } else if (n.type === 'skill') {
+            const d = n.data as { content?: string; scope?: string; format?: string; apply_mode?: string };
+            parts.push(`s:${String(d?.content ?? '')}:${String(d?.scope ?? '')}:${String(d?.format ?? '')}:${String(d?.apply_mode ?? '')}`);
         } else if (n.type === 'image') {
             const d = n.data as { imageUrl?: string; isLoading?: boolean; status?: string };
             parts.push(`i:${String(d?.imageUrl ?? '')}:${String(d?.isLoading)}:${String(d?.status ?? '')}`);
@@ -533,15 +553,19 @@ const upstreamIntoDreamSig = computed(() => {
 
 function readConnectedPromptFromEdges(): string {
     const nodes = getNodes.value;
-    let prompt = '';
     for (const e of getEdges.value) {
         if (e.target !== props.id) continue;
         const n = nodes.find((x) => x.id === e.source);
-        if (n?.type !== 'prompt') continue;
-        const t = getPromptTextFromNodeData(n.data);
-        if (t.length > 0 && !prompt) prompt = t;
+        if (n?.type === 'storyboard') {
+            const output = (n.data as { outputPrompt?: string })?.outputPrompt;
+            if (typeof output === 'string' && output.trim()) return output.trim();
+        }
+        if (n?.type === 'prompt') {
+            const t = getPromptTextFromNodeData(n.data);
+            if (t.length > 0) return t;
+        }
     }
-    return prompt;
+    return '';
 }
 
 const imagesReady = computed(() => {
@@ -605,6 +629,12 @@ watch(
         const targetEdges = edges.filter(e => e.target === props.id);
 
         connectedPrompt.value = readConnectedPromptFromEdges();
+        connectedSkills.value = readConnectedSkillsFromEdges({
+            targetNodeId: props.id,
+            edges: getEdges.value,
+            nodes: getNodes.value,
+            targetScope: 'image',
+        });
 
         // 收集图片及其别名 + 就绪状态（isLoading/status）
         connectedImages.value = [];
@@ -641,6 +671,17 @@ watch(
         connectedImageReadiness.value = summarizeConnectedImages(imageMeta);
     },
     { immediate: true }
+);
+
+watch(
+    () => (props.data as { autoRunToken?: number }).autoRunToken,
+    (token) => {
+        if (!token) return;
+        void handleGenerate({
+            overridePrompt: (props.data as { pipelineOverridePrompt?: string }).pipelineOverridePrompt,
+            pipelineRunId: (props.data as { pipelineRunId?: string }).pipelineRunId,
+        });
+    }
 );
 
 // 如果节点已有执行结果，标记为已执行（用于按钮文案“再次执行”）
@@ -779,8 +820,24 @@ const startCosSyncWatcher = (generationKey: string, initialRawImages: string[], 
 
 
 
+function getUpstreamPromptNodeId(): string | null {
+    for (const e of getEdges.value) {
+        if (e.target !== props.id) continue;
+        const n = findNode(e.source);
+        if (n?.type === 'prompt') return n.id;
+    }
+    return null;
+}
+
+function markPipelineRunDone(runId: string, success: boolean) {
+    if (!runId) return;
+    const d = props.data as { pipelineRunComplete?: string; pipelineRunning?: boolean };
+    if (success) d.pipelineRunComplete = runId;
+    d.pipelineRunning = false;
+}
+
 // 生成图片
-const handleGenerate = async () => {
+const handleGenerate = async (options?: { overridePrompt?: string; pipelineRunId?: string }) => {
     if (!canExecute.value) {
         // 优先提示“图片未就绪”，其次才是积分不足
         if (!imagesReady.value) {
@@ -813,23 +870,70 @@ const handleGenerate = async () => {
     loading.value = true;
     let generationKey = '';
     const requestStartMs = performance.now();
+    const overridePrompt =
+        options?.overridePrompt ||
+        (typeof (props.data as { pipelineOverridePrompt?: string }).pipelineOverridePrompt === 'string'
+            ? (props.data as { pipelineOverridePrompt: string }).pipelineOverridePrompt
+            : '');
+    const pipelineRunId =
+        options?.pipelineRunId ||
+        (typeof (props.data as { pipelineRunId?: string }).pipelineRunId === 'string'
+            ? (props.data as { pipelineRunId: string }).pipelineRunId
+            : '');
     try {
-        // 1. 从连接读取数据（执行前再读一次，防止 watch 未触发的边界情况）
-        const finalPrompt = readConnectedPromptFromEdges();
+        const finalPrompt = overridePrompt.trim() || readConnectedPromptFromEdges();
         connectedPrompt.value = finalPrompt;
+        const skills = readConnectedSkillsFromEdges({
+            targetNodeId: props.id,
+            edges: getEdges.value,
+            nodes: getNodes.value,
+            targetScope: 'image',
+        });
+        connectedSkills.value = skills;
+
+        if (!overridePrompt) {
+            const promptId = getUpstreamPromptNodeId();
+            if (promptId) {
+                const promptNode = findNode(promptId);
+                const attached = getAttachedSkillsFromPromptData(promptNode?.data);
+                if (isStoryboardPipelineSkill(attached)) {
+                    const pl = readPipelineFromNodeData(promptNode?.data);
+                    if (pl.step === 'idle' || pl.step === 'done' || pl.step === 'error') {
+                        updateNodeData(promptId, { pipelineStartToken: Date.now() });
+                        ElMessage.info('已启动分镜流程，处理过程会显示在提示词节点');
+                        loading.value = false;
+                        return;
+                    }
+                    if (pl.step !== 'generating') {
+                        ElMessage.info('分镜流程进行中，请在提示词节点查看并继续');
+                        loading.value = false;
+                        return;
+                    }
+                }
+            }
+        }
+
+        const mergedPrompt = overridePrompt.trim()
+            ? overridePrompt.trim()
+            : await resolvePromptWithSkills({
+                  skills,
+                  userPrompt: finalPrompt,
+                  target: 'image',
+              });
         const referenceImageUrls = [...connectedImages.value];
         const referenceImageAliases = [...connectedImageAliases.value];
 
-        // 2. 校验：至少需要提示词或图片之一
-        // 约束：必须至少连接一个提示词节点才能执行
-        if (!finalPrompt) {
-            ElMessage.warning('请先连接一个提示词节点');
+        // 2. 校验：至少需要提示词或 Skill 之一
+        if (!hasPromptOrSkill(finalPrompt, skills)) {
+            ElMessage.warning('请先连接提示词节点（可在提示词节点添加 Skill）');
             loading.value = false;
             return;
         }
 
         console.log(`🔗 使用连接的数据:`, {
             prompt: finalPrompt,
+            skills: skills.map((s) => s.name || 'Skill'),
+            mergedPrompt,
             images: referenceImageUrls.length
         });
 
@@ -856,7 +960,7 @@ const handleGenerate = async () => {
         // 5. 构建请求参数
         const requestParams: any = {
             apiType: apiType.value,
-            prompt: finalPrompt || '基于参考图片生成',
+            prompt: mergedPrompt || '基于参考图片生成',
             numImages: numImages.value,
             imageUrl: hasMultipleReferenceImages ? undefined : (referenceImageUrl || undefined),
             imageUrls: hasMultipleReferenceImages && processedImageUrls.length > 0 ? processedImageUrls : undefined,
@@ -1016,6 +1120,7 @@ const handleGenerate = async () => {
                     failed_placeholders: failedCount,
                 });
                 startCosSyncWatcher(generationKey, allImages, syncStatus);
+                markPipelineRunDone(pipelineRunId, true);
             } else if (res.data.image_url) {
                 // 兼容旧格式：只有 image_url
                 const url = res.data.image_url.startsWith('http')
@@ -1058,6 +1163,7 @@ const handleGenerate = async () => {
                     failed_placeholders: failedCount,
                 });
                 startCosSyncWatcher(generationKey, [res.data.image_url], syncStatus);
+                markPipelineRunDone(pipelineRunId, true);
             } else {
                 console.warn('后端返回数据:', res.data);
                 markPendingPlaceholdersAsError();
@@ -1118,6 +1224,7 @@ const handleGenerate = async () => {
         });
         ElMessage.error(translatedErrMsg || '图片生成失败，请稍后重试');
         saveWorkflowImmediately();
+        markPipelineRunDone(pipelineRunId, false);
     } finally {
         loading.value = false;
     }

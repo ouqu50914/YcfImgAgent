@@ -213,6 +213,8 @@
                 :visible="contextMenuVisible"
                 :position="contextMenuPosition"
                 @insert-prompt="insertPromptNode"
+                @insert-storyboard="insertStoryboardNode"
+                @insert-comic-workflow="insertComicWorkflow"
                 @insert-image="insertImageNode"
                 @insert-dream="insertDreamNode"
                 @insert-video="insertVideoNode"
@@ -403,6 +405,8 @@ import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
 import VideoRefNode from '@/components/nodes/VideoRefNode.vue';
 import AudioRefNode from '@/components/nodes/AudioRefNode.vue';
 import VideoResultNode from '@/components/nodes/VideoResultNode.vue';
+import SkillNode from '@/components/nodes/SkillNode.vue';
+import StoryboardNode from '@/components/nodes/StoryboardNode.vue';
 
 // 注册节点类型
 const nodeTypes = {
@@ -412,6 +416,8 @@ const nodeTypes = {
     image: markRaw(ImageNode),
     layer: markRaw(LayerNode),
     prompt: markRaw(PromptNode),
+    skill: markRaw(SkillNode),
+    storyboard: markRaw(StoryboardNode),
     video: markRaw(VideoNode),
     layerSeparation: markRaw(LayerSeparationNode),
     videoRef: markRaw(VideoRefNode),
@@ -1274,7 +1280,9 @@ const ensureWorkflowCover = async (workflowData: { nodes: any[]; edges: any[]; c
 const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
 'image': { width: 240, height: 300 },
 'prompt': { width: 360, height: 460 },
-'dream': { width: 400, height: 500 },
+    'skill': { width: 340, height: 480 },
+    'storyboard': { width: 520, height: 560 },
+    'dream': { width: 400, height: 500 },
     'upscale': { width: 280, height: 350 },
     'extend': { width: 280, height: 350 },
     'video': { width: 350, height: 450 },
@@ -1557,6 +1565,10 @@ const isValidConnection = (connection: Connection) => {
 
     // 图片/提示词节点作为 target 的限制
     if (targetNode.type === 'image' || targetNode.type === 'prompt') {
+        if (targetNode.type === 'prompt' && sourceNode.type === 'prompt') {
+            return true;
+        }
+
         // ✅ 允许“由生图节点生成的图片节点”作为输入被连线（它们的 data.fromNodeId 存在）
         if (targetNode.type === 'image' && (targetNode.data as any)?.fromNodeId) {
             return true;
@@ -1567,11 +1579,30 @@ const isValidConnection = (connection: Connection) => {
         return false;
     }
 
+    // 分镜节点作为 target：接受 prompt / skill / image
+    if (targetNode.type === 'storyboard') {
+        const allowedSources = new Set(['prompt', 'skill', 'image']);
+        if (!allowedSources.has(sourceNode.type || '')) {
+            ElMessage.warning('分镜节点仅接受文本、Skill 或图片节点的输入');
+            return false;
+        }
+        return true;
+    }
+
+    // 分镜节点作为 source：可连到生图/视频节点
+    if (sourceNode.type === 'storyboard') {
+        if (targetNode.type === 'dream' || targetNode.type === 'video') {
+            return true;
+        }
+        ElMessage.warning('分镜节点只能连接到生图或视频生成节点');
+        return false;
+    }
+
     // 视频节点作为 target：允许来自 prompt / image / videoRef / audioRef / videoResult
     if (targetNode.type === 'video') {
-        const allowedSources = new Set(['prompt', 'image', 'videoRef', 'audioRef', 'videoResult']);
+        const allowedSources = new Set(['prompt', 'skill', 'image', 'videoRef', 'audioRef', 'videoResult']);
         if (!allowedSources.has(sourceNode.type || '')) {
-            ElMessage.warning('视频节点仅接受提示词、图片、视频参考或音频参考节点的输入');
+            ElMessage.warning('视频节点仅接受提示词、Skill、图片、视频参考或音频参考节点的输入');
             return false;
         }
         return true;
@@ -1588,14 +1619,28 @@ const isValidConnection = (connection: Connection) => {
 
     // 如果目标节点是 DreamNode，需要检查连接限制（DreamNode 只有一个 target handle）
     if (targetNode.type === 'dream') {
-        // 限制：只允许 prompt / image 作为输入
-        if (sourceNode.type !== 'prompt' && sourceNode.type !== 'image') {
-            ElMessage.warning('生图节点只接受提示词节点或图片节点的输入');
+        // 限制：允许 prompt / skill / image / storyboard 作为输入
+        if (
+            sourceNode.type !== 'prompt' &&
+            sourceNode.type !== 'image' &&
+            sourceNode.type !== 'skill' &&
+            sourceNode.type !== 'storyboard'
+        ) {
+            ElMessage.warning('生图节点只接受提示词、分镜、Skill 或图片节点的输入');
             return false;
         }
 
         const existingEdges = getEdges.value;
         const incomingEdges = existingEdges.filter(edge => edge.target === connection.target);
+
+        if (sourceNode.type === 'storyboard') {
+            const existingStoryboard = incomingEdges.filter(edge => findNode(edge.source)?.type === 'storyboard');
+            if (existingStoryboard.length >= 1) {
+                ElMessage.warning('生图节点最多只能连接1个分镜节点');
+                return false;
+            }
+            return true;
+        }
 
         const existingPromptConnections = incomingEdges.filter(edge => {
             const src = findNode(edge.source);
@@ -1611,6 +1656,10 @@ const isValidConnection = (connection: Connection) => {
                 ElMessage.warning('生图节点最多只能连接1个提示词节点');
                 return false;
             }
+            return true;
+        }
+
+        if (sourceNode.type === 'skill') {
             return true;
         }
 
@@ -2037,6 +2086,74 @@ const insertPromptNode = () => {
     persistWorkflow().catch((error: any) => {
         console.error('关键操作保存失败（插入提示词节点）:', error);
     });
+};
+
+const insertStoryboardNode = () => {
+    const position = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+
+    const nodeId = `storyboard_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'storyboard',
+        position,
+        data: { localScript: '', maxShots: 10, aspectRatio: '16:9', pipelineMode: 'video', shots: [] }
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入分镜节点）:', error);
+    });
+};
+
+/** 四格漫画：提示词 + Skill → 生图（分镜流程在提示词节点内完成） */
+const insertComicWorkflow = () => {
+    const position = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+    const ts = Date.now();
+    const promptId = `prompt_comic_${ts}`;
+    const dreamId = `dream_comic_${ts}`;
+
+    addNodes({
+        id: promptId,
+        type: 'prompt',
+        position: { x: position.x, y: position.y },
+        data: {
+            text: '',
+            pipeline: {
+                step: 'idle',
+                autoProceed: true,
+                template: 'four_panel_comic',
+                originalScript: '',
+                shots: [],
+            },
+        },
+    });
+    addNodes({
+        id: dreamId,
+        type: 'dream',
+        position: { x: position.x + 480, y: position.y },
+        data: { aspectRatio: '1:1' },
+    });
+    addEdges({
+        id: `edge_comic_wf_${ts}`,
+        source: promptId,
+        target: dreamId,
+        sourceHandle: 'source',
+        targetHandle: 'target',
+        type: 'default',
+        animated: true,
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（四格漫画工作流）:', error);
+    });
+    ElMessage.success('已创建：提示词 → 生图。点「开始处理」后会自动创建分镜稿、提示词稿节点');
 };
 
 const insertImageNode = () => {
@@ -2959,6 +3076,12 @@ const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'i' && !isInputElement) {
         event.preventDefault();
         insertImageNode();
+    }
+
+    // 快捷键：R - 插入分镜节点
+    if (event.key === 'r' && !isInputElement) {
+        event.preventDefault();
+        insertStoryboardNode();
     }
 
     // 快捷键：G - 插入生图节点

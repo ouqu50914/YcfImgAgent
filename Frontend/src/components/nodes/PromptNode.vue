@@ -2,10 +2,46 @@
     <div class="prompt-node" :style="{ width: promptWidth + 'px' }">
         <div class="node-header">
             <el-icon><EditPen /></el-icon>
-            <span>提示词输入</span>
+            <span>{{ nodeTitle }}</span>
+            <el-tag v-if="pipelineStageLabel" size="small" effect="plain" class="stage-tag">{{ pipelineStageLabel }}</el-tag>
         </div>
 
         <div class="node-content">
+            <!-- 分镜流程 · 第 1/2 步节点 -->
+            <div v-if="isSplitStageNode" class="stage-panel nodrag">
+                <p class="stage-hint">Gemini 已拆分分镜，请检查每格/每镜说明，确认后继续。</p>
+                <div v-for="shot in pipelineShots" :key="shot.id" class="shot-row">
+                    <div class="shot-row-head">#{{ shot.sequence }} <span v-if="shot.title">{{ shot.title }}</span></div>
+                    <el-input v-model="shot.shotDescription" type="textarea" :rows="2" resize="none" />
+                </div>
+                <div class="pipeline-actions">
+                    <el-button type="primary" size="small" :loading="pipelineRunning" @click="continueAfterSplit">
+                        确认并继续（生成提示词）
+                    </el-button>
+                </div>
+            </div>
+
+            <div v-else-if="isPromptsStageNode" class="stage-panel nodrag">
+                <p class="stage-hint">生图提示词已生成，可修改后确认；确认后将逐格自动生图。</p>
+                <div v-for="shot in pipelineShots" :key="shot.id" class="shot-row">
+                    <div class="shot-row-head">
+                        <el-checkbox v-model="shot.selected" />
+                        #{{ shot.sequence }}
+                        <span v-if="shot.title">{{ shot.title }}</span>
+                    </div>
+                    <p v-if="shot.shotDescription" class="shot-desc">{{ shot.shotDescription }}</p>
+                    <el-input v-model="shot.prompt" type="textarea" :rows="3" resize="none" />
+                </div>
+                <div class="pipeline-actions">
+                    <el-button type="primary" size="small" :loading="pipelineRunning" @click="continueAfterPrompts">
+                        确认并继续（开始生图）
+                    </el-button>
+                </div>
+                <p v-if="pipelineStatusMessage" class="pipeline-status">{{ pipelineStatusMessage }}</p>
+            </div>
+
+            <!-- 普通 / 文案入口节点 -->
+            <template v-else>
             <div v-if="editor" class="prompt-toolbar nodrag">
                 <button
                     type="button"
@@ -73,7 +109,62 @@
                 <span class="char-count">{{ plainCharCount }} / {{ MAX_PLAIN_CHARS }}</span>
             </div>
 
-            <div class="prompt-actions nodrag">
+            <div v-if="hasPipelineSkill && !isPipelineStageNode" class="prompt-skills nodrag">
+                <div class="skills-row">
+                    <span class="skills-label">Skill</span>
+                    <router-link to="/skills" class="skills-manage-link" @click.stop>管理</router-link>
+                </div>
+                <el-select
+                    v-model="selectedSkillIds"
+                    multiple
+                    filterable
+                    collapse-tags
+                    collapse-tags-tooltip
+                    :max-collapse-tags="2"
+                    placeholder="从库选择 Skill（可多选，执行时自动应用）"
+                    size="small"
+                    class="skills-select"
+                    @change="onAttachedSkillIdsChange"
+                >
+                    <el-option
+                        v-for="item in skillLibrary"
+                        :key="item.id"
+                        :label="item.name"
+                        :value="item.id"
+                    >
+                        <span>{{ item.name }}</span>
+                        <span class="skill-option-meta">{{ skillScopeLabel(item.scope) }}</span>
+                    </el-option>
+                </el-select>
+                <p v-if="attachedSkills.length && !hasPipelineSkill" class="skills-hint">
+                    已选 {{ attachedSkills.length }} 个 Skill，连接生图/视频节点后自动生效
+                </p>
+            </div>
+
+            <div v-if="isRootPipelineNode" class="prompt-pipeline nodrag">
+                <div class="skills-row">
+                    <span class="skills-label">分镜流程</span>
+                    <el-checkbox v-model="pipelineAutoProceed" size="small">自动进行（每步自动创建下一节点）</el-checkbox>
+                </div>
+                <p class="pipeline-desc">
+                    流程会依次创建节点：<strong>文案 → 分镜稿 → 提示词稿 → 生图</strong>。请先连接右侧生图节点。
+                </p>
+                <p v-if="pipelineStatusMessage" class="pipeline-status">{{ pipelineStatusMessage }}</p>
+                <div class="pipeline-actions">
+                    <el-button
+                        type="primary"
+                        size="small"
+                        :loading="pipelineRunning"
+                        :disabled="!text.trim() || !hasDownstreamDream"
+                        @click="startPipeline"
+                    >
+                        开始处理
+                    </el-button>
+                </div>
+                <p v-if="!hasDownstreamDream" class="pipeline-warn">请先连接下游生图节点（提示词 → 生图）</p>
+            </div>
+
+            <div v-if="!isPipelineStageNode" class="prompt-actions nodrag">
                 <el-button
                     size="small"
                     type="primary"
@@ -84,8 +175,22 @@
                     保存提示词
                 </el-button>
             </div>
+            </template>
         </div>
 
+        <Handle
+            id="prompt-target"
+            type="target"
+            :position="Position.Left"
+            :style="{
+                background: '#409eff',
+                width: '12px',
+                height: '12px',
+                border: '2px solid white',
+                borderRadius: '50%',
+                cursor: 'crosshair',
+            }"
+        />
         <Handle
             id="prompt-source"
             type="source"
@@ -153,6 +258,29 @@ import { Handle, Position, type NodeProps, useVueFlow } from '@vue-flow/core';
 import { EditPen } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
+import {
+    getGenerationSkills,
+    isAgentSkillFormat,
+    type GenerationSkill,
+    type GenerationSkillScope,
+} from '@/api/skill';
+import {
+    getAttachedSkillsFromPromptData,
+    isStoryboardPipelineSkill,
+    type SkillFragment,
+} from '@/utils/skill-prompt';
+import { generateStoryboard, type StoryboardShot } from '@/api/storyboard';
+import {
+    formatShotsAsSplitText,
+    formatShotsAsPromptText,
+    isComicPipelineSkill,
+    readPipelineFromNodeData,
+    type PromptPipelineData,
+} from '@/utils/storyboard-pipeline-display';
+import {
+    findDownstreamDreamId,
+    spawnPipelineStageNode,
+} from '@/utils/pipeline-nodes';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import type { JSONContent } from '@tiptap/core';
 import { Extension, getTextBetween } from '@tiptap/core';
@@ -185,7 +313,7 @@ const promptWidth = ref(360);
 const uiTick = ref(0);
 const isComposing = ref(false);
 
-const { getEdges, findNode, updateNodeData } = useVueFlow();
+const { getEdges, findNode, updateNodeData, getNodes, addNodes, addEdges, removeEdges } = useVueFlow();
 
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
@@ -200,6 +328,351 @@ const selectedAliasIndex = ref(0);
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
 const savePromptDescription = ref('');
+
+const skillLibrary = ref<GenerationSkill[]>([]);
+const attachedSkills = ref<SkillFragment[]>(getAttachedSkillsFromPromptData(props.data));
+const selectedSkillIds = ref<number[]>(
+    attachedSkills.value
+        .map((s) => s.skillId)
+        .filter((id): id is number => typeof id === 'number')
+);
+
+const skillScopeLabel = (scope: GenerationSkillScope) => {
+    if (scope === 'image') return '仅生图';
+    if (scope === 'video') return '仅生视频';
+    return '通用';
+};
+
+const syncAttachedSkillsToNode = () => {
+    updateNodeData(props.id, { attachedSkills: attachedSkills.value });
+};
+
+const onAttachedSkillIdsChange = (ids: number[]) => {
+    const prevById = new Map<number, SkillFragment>();
+    for (const item of attachedSkills.value) {
+        if (item.skillId != null) prevById.set(item.skillId, item);
+    }
+
+    attachedSkills.value = ids
+        .map((id) => {
+            const lib = skillLibrary.value.find((s) => s.id === id);
+            if (lib) {
+                return {
+                    skillId: lib.id,
+                    name: lib.name,
+                    content: lib.content,
+                    scope: lib.scope,
+                    format: lib.format || 'plain',
+                    apply_mode:
+                        lib.apply_mode ||
+                        (isAgentSkillFormat(lib.format) ? 'preprocess' : 'merge'),
+                    description: lib.description || undefined,
+                } satisfies SkillFragment;
+            }
+            return prevById.get(id);
+        })
+        .filter((item): item is SkillFragment => !!item && !!item.content?.trim());
+
+    syncAttachedSkillsToNode();
+};
+
+const loadSkillLibrary = async () => {
+    try {
+        const res: { data?: GenerationSkill[] } = await getGenerationSkills();
+        skillLibrary.value = res.data || [];
+    } catch (error: unknown) {
+        console.error('加载 Skill 库失败:', error);
+    }
+};
+
+const hasPipelineSkill = computed(() => isStoryboardPipelineSkill(attachedSkills.value));
+
+const pipelineStage = computed((): 'split' | 'prompts' | null => {
+    const s = (props.data as { pipelineStage?: string })?.pipelineStage;
+    if (s === 'split' || s === 'prompts') return s;
+    return null;
+});
+
+const isSplitStageNode = computed(() => pipelineStage.value === 'split');
+const isPromptsStageNode = computed(() => pipelineStage.value === 'prompts');
+const isPipelineStageNode = computed(() => !!pipelineStage.value);
+const isRootPipelineNode = computed(() => hasPipelineSkill.value && !isPipelineStageNode.value);
+
+const nodeTitle = computed(() => {
+    if (isSplitStageNode.value) return '分镜稿';
+    if (isPromptsStageNode.value) return '提示词稿';
+    return '提示词输入';
+});
+
+const pipelineStageLabel = computed(() => {
+    if (isSplitStageNode.value) return '第 1 步';
+    if (isPromptsStageNode.value) return '第 2 步';
+    return '';
+});
+
+const pipelineRootId = computed(
+    () => (props.data as { pipelineRootId?: string })?.pipelineRootId || props.id
+);
+
+const pipelineShots = ref<StoryboardShot[]>(
+    (Array.isArray((props.data as { shots?: StoryboardShot[] })?.shots)
+        ? (props.data as { shots: StoryboardShot[] }).shots
+        : []
+    ).map((s) => ({ ...s, selected: s.selected !== false }))
+);
+
+const pipeline = ref<PromptPipelineData>(readPipelineFromNodeData(props.data));
+const pipelineRunning = ref(false);
+
+const pipelineStep = computed(() => pipeline.value.step);
+const pipelineStatusMessage = computed(() => pipeline.value.statusMessage || '');
+const pipelineAutoProceed = computed({
+    get: () => getRootPipelineData().autoProceed,
+    set: (v: boolean) => saveRootPipeline({ autoProceed: v }),
+});
+
+function getRootNode() {
+    return findNode(pipelineRootId.value);
+}
+
+function getRootPipelineData(): PromptPipelineData {
+    if (!isPipelineStageNode.value) return pipeline.value;
+    const root = getRootNode();
+    return readPipelineFromNodeData(root?.data);
+}
+
+function saveRootPipeline(partial: Partial<PromptPipelineData>) {
+    const rootId = pipelineRootId.value;
+    const root = findNode(rootId);
+    const current = readPipelineFromNodeData(root?.data);
+    const next = { ...current, ...partial };
+    updateNodeData(rootId, { pipeline: next });
+    if (rootId === props.id) pipeline.value = next;
+}
+
+function savePipeline(partial: Partial<PromptPipelineData>) {
+    if (isPipelineStageNode.value) {
+        saveRootPipeline(partial);
+        return;
+    }
+    pipeline.value = { ...pipeline.value, ...partial };
+    updateNodeData(props.id, { pipeline: { ...pipeline.value } });
+}
+
+function getSkillsForPipeline(): SkillFragment[] {
+    if (isPipelineStageNode.value) {
+        const fromData = (props.data as { attachedSkills?: SkillFragment[] })?.attachedSkills;
+        if (Array.isArray(fromData) && fromData.length) return fromData;
+    }
+    return attachedSkills.value;
+}
+
+function getOriginalScript(): string {
+    const root = getRootNode();
+    const rootText = typeof root?.data?.text === 'string' ? root.data.text.trim() : '';
+    return getRootPipelineData().originalScript || rootText;
+}
+
+const hasDownstreamDream = computed(() =>
+    !!findDownstreamDreamId(props.id, getEdges.value, getNodes.value)
+);
+
+function getConnectedDreamNodeId(): string | null {
+    return findDownstreamDreamId(props.id, getEdges.value, getNodes.value);
+}
+
+function waitForDreamRun(dreamId: string, runId: string, timeoutMs = 300000): Promise<boolean> {
+    return new Promise((resolve) => {
+        const started = Date.now();
+        const timer = setInterval(() => {
+            const node = findNode(dreamId);
+            const data = (node?.data || {}) as { pipelineRunComplete?: string; pipelineRunning?: boolean };
+            if (data.pipelineRunComplete === runId) {
+                clearInterval(timer);
+                resolve(true);
+                return;
+            }
+            if (Date.now() - started > timeoutMs) {
+                clearInterval(timer);
+                resolve(false);
+            }
+        }, 600);
+    });
+}
+
+async function triggerDreamGenerate(dreamId: string, prompt: string, runId: string) {
+    updateNodeData(dreamId, {
+        pipelineOverridePrompt: prompt,
+        pipelineRunId: runId,
+        pipelineRunning: true,
+        pipelineRunComplete: '',
+        autoRunToken: Date.now(),
+    });
+    if (isPromptsStageNode.value) {
+        updateNodeData(props.id, { text: prompt });
+    }
+}
+
+async function runSplitPhase(script: string): Promise<StoryboardShot[]> {
+    const skills = getSkillsForPipeline();
+    const template = isComicPipelineSkill(skills) ? 'four_panel_comic' : 'default';
+    savePipeline({ template, originalScript: script, statusMessage: 'Gemini 正在拆分分镜…' });
+    const res = await generateStoryboard({
+        script,
+        skills: skills.map((s) => ({
+            name: s.name,
+            content: s.content,
+            format: s.format,
+            apply_mode: s.apply_mode,
+            description: s.description,
+        })),
+        maxShots: template === 'four_panel_comic' ? 4 : 10,
+        aspectRatio: template === 'four_panel_comic' ? '1:1' : '16:9',
+        template,
+        phase: 'split',
+    });
+    return (res as { data?: { shots?: StoryboardShot[] } }).data?.shots || [];
+}
+
+async function runPromptsPhase(script: string, shots: StoryboardShot[]): Promise<StoryboardShot[]> {
+    const skills = getSkillsForPipeline();
+    savePipeline({ statusMessage: 'Gemini 正在生成提示词…' });
+    const res = await generateStoryboard({
+        script,
+        skills: skills.map((s) => ({
+            name: s.name,
+            content: s.content,
+            format: s.format,
+            apply_mode: s.apply_mode,
+            description: s.description,
+        })),
+        template: getRootPipelineData().template,
+        phase: 'prompts',
+        shots,
+    });
+    return (res as { data?: { shots?: StoryboardShot[] } }).data?.shots || [];
+}
+
+function spawnStageNode(fromNodeId: string, stage: 'split' | 'prompts', list: StoryboardShot[]) {
+    const text = stage === 'split' ? formatShotsAsSplitText(list) : formatShotsAsPromptText(list);
+    const rootId = pipelineRootId.value;
+    const rootPipeline = getRootPipelineData();
+    return spawnPipelineStageNode({
+        fromNodeId,
+        stage,
+        text,
+        shots: list.map((s) => ({ ...s, selected: s.selected !== false })),
+        pipeline: rootPipeline,
+        rootNodeId: rootId,
+        attachedSkills: getSkillsForPipeline(),
+        nodes: getNodes.value,
+        edges: getEdges.value,
+        addNodes,
+        addEdges,
+        removeEdges,
+    });
+}
+
+async function runGenerationPhase(shots: StoryboardShot[]) {
+    const dreamId = getConnectedDreamNodeId();
+    if (!dreamId) {
+        ElMessage.warning('请先连接生图节点');
+        return;
+    }
+    const selected = shots.filter((s) => s.selected !== false && s.prompt?.trim());
+    if (!selected.length) {
+        ElMessage.warning('没有可生图的镜头');
+        return;
+    }
+    savePipeline({ step: 'generating', statusMessage: `正在生图 0/${selected.length}…` });
+    for (let i = 0; i < selected.length; i++) {
+        const shot = selected[i]!;
+        const runId = `run-${props.id}-${Date.now()}-${i}`;
+        savePipeline({
+            activeShotIndex: i,
+            statusMessage: `正在生图 ${i + 1}/${selected.length}（第 ${shot.sequence} 镜）…`,
+        });
+        await triggerDreamGenerate(dreamId, shot.prompt.trim(), runId);
+        const ok = await waitForDreamRun(dreamId, runId);
+        if (!ok) {
+            savePipeline({ step: 'error', statusMessage: `第 ${shot.sequence} 镜生图超时或失败` });
+            ElMessage.error(`第 ${shot.sequence} 镜生图未完成`);
+            return;
+        }
+    }
+    savePipeline({ step: 'done', statusMessage: `全部 ${selected.length} 镜生图完成` });
+    ElMessage.success('分镜流程已完成');
+}
+
+async function continueAfterSplit() {
+    if (!isSplitStageNode.value || pipelineRunning.value) return;
+    pipelineRunning.value = true;
+    try {
+        syncShotsToNode();
+        const script = getOriginalScript();
+        const list = await runPromptsPhase(script, pipelineShots.value);
+        const newId = spawnStageNode(props.id, 'prompts', list);
+        savePipeline({ step: 'prompt_review', statusMessage: '已创建提示词稿节点' });
+        ElMessage.success('已创建「提示词稿」节点');
+        if (getRootPipelineData().autoProceed) {
+            await nextTick();
+            updateNodeData(newId, { pipelineContinueToken: Date.now() });
+        }
+    } catch (error: unknown) {
+        savePipeline({ step: 'error', statusMessage: '生成提示词失败' });
+        ElMessage.error((error as Error)?.message || '生成提示词失败');
+    } finally {
+        pipelineRunning.value = false;
+    }
+}
+
+async function continueAfterPrompts() {
+    if (!isPromptsStageNode.value || pipelineRunning.value) return;
+    pipelineRunning.value = true;
+    try {
+        syncShotsToNode();
+        await runGenerationPhase(pipelineShots.value);
+    } catch (error: unknown) {
+        savePipeline({ step: 'error', statusMessage: '生图失败' });
+        ElMessage.error((error as Error)?.message || '生图失败');
+    } finally {
+        pipelineRunning.value = false;
+    }
+}
+
+async function startPipeline() {
+    if (!isRootPipelineNode.value) return;
+    const script = text.value.trim();
+    if (!script) {
+        ElMessage.warning('请先输入文案');
+        return;
+    }
+    if (!getConnectedDreamNodeId()) {
+        ElMessage.warning('请先连接下游生图节点');
+        return;
+    }
+    pipelineRunning.value = true;
+    savePipeline({ step: 'running', originalScript: script, statusMessage: 'Gemini 正在拆分分镜…' });
+    try {
+        const list = await runSplitPhase(script);
+        const newId = spawnStageNode(props.id, 'split', list);
+        savePipeline({ step: 'split_review', statusMessage: '已创建分镜稿节点，原文案已保留在本节点' });
+        ElMessage.success('已创建「分镜稿」节点');
+        if (pipeline.value.autoProceed) {
+            await nextTick();
+            updateNodeData(newId, { pipelineContinueToken: Date.now() });
+        }
+    } catch (error: unknown) {
+        savePipeline({ step: 'error', statusMessage: '拆分分镜失败' });
+        ElMessage.error((error as Error)?.message || '拆分分镜失败');
+    } finally {
+        pipelineRunning.value = false;
+    }
+}
+
+function syncShotsToNode() {
+    updateNodeData(props.id, { shots: pipelineShots.value });
+}
 
 function plainToDoc(plain: string): JSONContent {
     const lines = plain.split('\n');
@@ -394,6 +867,10 @@ function syncNodeData() {
 }
 
 function recomputePromptWidth() {
+    if (isPipelineStageNode.value) {
+        promptWidth.value = 420;
+        return;
+    }
     const len = (text.value || '').length;
     let w = 400;
     if (len > 200) w = 460;
@@ -719,6 +1196,47 @@ watch(
     { flush: 'post' }
 );
 
+watch(
+    () => JSON.stringify(getAttachedSkillsFromPromptData(props.data)),
+    () => {
+        const next = getAttachedSkillsFromPromptData(props.data);
+        if (JSON.stringify(next) === JSON.stringify(attachedSkills.value)) return;
+        attachedSkills.value = next;
+        selectedSkillIds.value = next
+            .map((s) => s.skillId)
+            .filter((id): id is number => typeof id === 'number');
+    }
+);
+
+watch(
+    () => (props.data as { pipeline?: PromptPipelineData }).pipeline,
+    (p) => {
+        if (!p) return;
+        if (JSON.stringify(p) !== JSON.stringify(pipeline.value)) {
+            pipeline.value = readPipelineFromNodeData(props.data);
+        }
+    },
+    { deep: true }
+);
+
+watch(
+    () => (props.data as { pipelineContinueToken?: number }).pipelineContinueToken,
+    (token) => {
+        if (!token) return;
+        if (isSplitStageNode.value) void continueAfterSplit();
+        if (isPromptsStageNode.value) void continueAfterPrompts();
+    }
+);
+
+watch(pipelineShots, syncShotsToNode, { deep: true });
+
+watch(
+    () => (props.data as { pipelineStartToken?: number }).pipelineStartToken,
+    (token) => {
+        if (token && hasPipelineSkill.value) void startPipeline();
+    }
+);
+
 watch(text, (val) => {
     const d = props.data as Record<string, unknown>;
     if (d.text !== val) {
@@ -728,6 +1246,7 @@ watch(text, (val) => {
 });
 
 loadPromptTemplates();
+loadSkillLibrary();
 if (typeof document !== 'undefined') {
     document.addEventListener('click', handleClickOutside);
 }
@@ -750,6 +1269,49 @@ onUnmounted(() => {
 
 .nodrag {
     cursor: auto;
+}
+
+.stage-tag {
+    margin-left: auto;
+    background: rgba(64, 158, 255, 0.15);
+    border: none;
+    color: #79bbff;
+}
+
+.stage-panel {
+    padding: 4px 0;
+}
+
+.stage-hint {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: #aaa;
+    line-height: 1.45;
+}
+
+.shot-row {
+    margin-bottom: 10px;
+    padding: 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid #404040;
+}
+
+.shot-row-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #409eff;
+}
+
+.shot-desc {
+    margin: 0 0 6px;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.4;
 }
 
 .prompt-node :deep(.vue-flow__handle) {
@@ -901,6 +1463,88 @@ onUnmounted(() => {
     display: flex;
     justify-content: flex-end;
     margin-top: 6px;
+}
+
+.prompt-skills {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #404040;
+}
+
+.skills-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.skills-label {
+    font-size: 12px;
+    color: #aaa;
+    font-weight: 600;
+}
+
+.skills-manage-link {
+    font-size: 11px;
+    color: #409eff;
+    text-decoration: none;
+}
+
+.skills-manage-link:hover {
+    text-decoration: underline;
+}
+
+.skills-select {
+    width: 100%;
+}
+
+.skills-select :deep(.el-select__wrapper) {
+    background: #252525;
+}
+
+.skill-option-meta {
+    float: right;
+    font-size: 11px;
+    color: #888;
+}
+
+.skills-hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.4;
+}
+
+.prompt-pipeline {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #404040;
+}
+
+.pipeline-desc {
+    margin: 0 0 8px;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.45;
+}
+
+.pipeline-status {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #79bbff;
+    line-height: 1.4;
+}
+
+.pipeline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pipeline-warn {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: #e6a23c;
 }
 
 .char-count {

@@ -310,6 +310,13 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
 import { translateErrorText } from '@/utils/error-toast';
+import {
+    readConnectedSkillsFromEdges,
+    mergeSkillWithPrompt,
+    resolvePromptWithSkills,
+    hasPromptOrSkill,
+    type SkillFragment,
+} from '@/utils/skill-prompt';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -394,6 +401,21 @@ const pixverseMode = ref<
 
 // 输入：从上游节点采集的提示词 & 图片 / 视频 / 音频参考
 const connectedPrompt = ref('');
+const connectedSkills = ref<SkillFragment[]>([]);
+const hasEffectivePrompt = computed(() =>
+    hasPromptOrSkill(connectedPrompt.value, connectedSkills.value)
+);
+const effectivePrompt = computed(() =>
+    mergeSkillWithPrompt(connectedSkills.value, connectedPrompt.value)
+);
+
+async function resolveVideoPrompt(): Promise<string> {
+    return resolvePromptWithSkills({
+        skills: connectedSkills.value,
+        userPrompt: connectedPrompt.value,
+        target: 'video',
+    });
+}
 const connectedImageUrl = ref<string | null>(null);
 const connectedEndImageUrl = ref<string | null>(null);
 const connectedImageUrls = ref<string[]>([]);
@@ -610,6 +632,9 @@ const videoUpstreamSig = computed(() => {
     }
     if (n.type === 'prompt') {
       parts.push(`p:${String((n.data as { text?: string })?.text ?? '')}`);
+    } else if (n.type === 'skill') {
+      const d = n.data as { content?: string; scope?: string; format?: string; apply_mode?: string; description?: string };
+      parts.push(`s:${String(d?.content ?? '')}:${String(d?.scope ?? '')}:${String(d?.format ?? '')}:${String(d?.apply_mode ?? '')}`);
     } else if (n.type === 'image') {
       const d = n.data as Record<string, unknown>;
       parts.push(
@@ -653,6 +678,12 @@ watch(
     const targetEdges = edges.filter(e => e.target === props.id);
 
     connectedPrompt.value = readConnectedPromptFromEdges();
+    connectedSkills.value = readConnectedSkillsFromEdges({
+      targetNodeId: props.id,
+      edges: getEdges.value,
+      nodes: getNodes.value,
+      targetScope: 'video',
+    });
     connectedImageUrl.value = null;
     connectedEndImageUrl.value = null;
     connectedImageUrls.value = [];
@@ -1170,24 +1201,24 @@ const inputReady = computed(() => {
   // Seedance：根据子类型判断
   if (provider.value === 'seedance') {
     if (seedanceMode.value === 'text') {
-      return !!connectedPrompt.value;
+      return hasEffectivePrompt.value;
     }
     if (seedanceMode.value === 'image_first_frame') {
       const first = !!connectedImageUrl.value;
       // 必须且只能 1 张图
-      return !!connectedPrompt.value && first && imageSourceCount.value === 1;
+      return hasEffectivePrompt.value && first && imageSourceCount.value === 1;
     }
     if (seedanceMode.value === 'image_first_last') {
       const first = !!connectedImageUrl.value;
       const end = !!connectedEndImageUrl.value;
       // 必须且只能 2 张图
-      return !!connectedPrompt.value && first && end && imageSourceCount.value === 2;
+      return hasEffectivePrompt.value && first && end && imageSourceCount.value === 2;
     }
     if (seedanceMode.value === 'multi_modal') {
       // 多模态：根据文档，文本必填，图片/视频/音频为可选组合
-      return !!connectedPrompt.value;
+      return hasEffectivePrompt.value;
     }
-    return !!connectedPrompt.value;
+    return hasEffectivePrompt.value;
   }
 
   // PixVerse：仅文生视频（禁止图片/视频/音频参考连线）
@@ -1197,7 +1228,7 @@ const inputReady = computed(() => {
 
     if (pixverseMode.value === 'text_to_video') {
       return (
-        !!connectedPrompt.value &&
+        hasEffectivePrompt.value &&
         imageSourceCount.value === 0 &&
         connectedVideoRefUrls.value.length === 0 &&
         connectedAudioRefUrls.value.length === 0
@@ -1208,7 +1239,7 @@ const inputReady = computed(() => {
     if (pixverseMode.value === 'image_to_video_first_only') {
       const first = !!connectedImageUrl.value;
       return (
-        !!connectedPrompt.value &&
+        hasEffectivePrompt.value &&
         first &&
         imageSourceCount.value >= 1 &&
         imageSourceCount.value <= 7 &&
@@ -1220,7 +1251,7 @@ const inputReady = computed(() => {
     // PixVerse 多主体（fusion）：>=2 张图片，不支持视频/音频参考
     if (pixverseMode.value === 'fusion_multi_subject') {
       return (
-        !!connectedPrompt.value &&
+        hasEffectivePrompt.value &&
         imageSourceCount.value >= 2 &&
         imageSourceCount.value <= 7 &&
         connectedVideoRefUrls.value.length === 0 &&
@@ -1232,7 +1263,7 @@ const inputReady = computed(() => {
       const first = !!connectedImageUrl.value;
       const last = !!connectedEndImageUrl.value;
       return (
-        !!connectedPrompt.value &&
+        hasEffectivePrompt.value &&
         first &&
         last &&
         imageSourceCount.value === 2 &&
@@ -1245,24 +1276,24 @@ const inputReady = computed(() => {
   }
 
   if (mode.value === 'text_to_video') {
-    return !!connectedPrompt.value;
+    return hasEffectivePrompt.value;
   }
   if (mode.value === 'image_to_video') {
     const first = !!connectedImageUrl.value;
     if (imageSubType.value === 'first_only') {
       // Kling 首帧：必须且只能 1 张图
-      return !!connectedPrompt.value && first && imageSourceCount.value === 1;
+      return hasEffectivePrompt.value && first && imageSourceCount.value === 1;
     }
     if (imageSubType.value === 'first_last') {
       const end = !!connectedEndImageUrl.value;
       // Kling 首尾帧：必须且只能 2 张图
-      return !!connectedPrompt.value && first && end && imageSourceCount.value === 2;
+      return hasEffectivePrompt.value && first && end && imageSourceCount.value === 2;
     }
     if (imageSubType.value === 'multi_shot') {
-      return !!connectedPrompt.value && connectedImageUrls.value.length >= 2;
+      return hasEffectivePrompt.value && connectedImageUrls.value.length >= 2;
     }
   }
-  return !!connectedPrompt.value || !!connectedImageUrl.value;
+  return hasEffectivePrompt.value || !!connectedImageUrl.value;
 });
 
 const executeButtonText = computed(() => {
@@ -1759,6 +1790,12 @@ const handleGenerate = async () => {
 
   // 富文本提示词就地更新 data.text 时，兜底再读一次连线（与 dreamUpstreamSig / watch 一致）
   connectedPrompt.value = readConnectedPromptFromEdges();
+  connectedSkills.value = readConnectedSkillsFromEdges({
+    targetNodeId: props.id,
+    edges: getEdges.value,
+    nodes: getNodes.value,
+    targetScope: 'video',
+  });
 
   // 重新生成：若已有成功视频，新建结果节点（保留旧节点上的历史视频）
   forkNewVideoResultNodeIfNeeded();
@@ -1776,8 +1813,10 @@ const handleGenerate = async () => {
   };
 
   try {
+    const resolvedPrompt = (await resolveVideoPrompt()).trim();
+
     if (provider.value === 'seedance') {
-      const basePrompt = connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。';
+      const basePrompt = resolvedPrompt || '微距镜头对准树上鲜艳的花瓣，逐渐放大。';
 
       // 纯文生视频仍走简单接口
       if (seedanceMode.value === 'text') {
@@ -2251,7 +2290,7 @@ const handleGenerate = async () => {
         return;
       }
 
-      const basePrompt = connectedPrompt.value || '生成一个简短的视频';
+      const basePrompt = resolvedPrompt || '生成一个简短的视频';
 
       const normalizePixverseAspectRatio = (ar: string) => {
         if (ar === '9:16') return '9.16';
@@ -2505,7 +2544,7 @@ const handleGenerate = async () => {
     markPendingBeforeRequest();
     const body: any = {
       mode: mode.value,
-      prompt: connectedPrompt.value || '生成一个简短的视频',
+      prompt: resolvedPrompt || '生成一个简短的视频',
       duration: durationAuto.value ? -1 : durationManual.value,
       resolution: resolution.value,
         aspectRatio: aspectRatio.value,

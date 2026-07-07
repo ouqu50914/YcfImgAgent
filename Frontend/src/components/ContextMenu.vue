@@ -15,6 +15,21 @@
         </div>
         <div 
             class="menu-item"
+            @click="handleInsertStoryboard"
+        >
+            <el-icon><Film /></el-icon>
+            <span>插入分镜节点</span>
+            <span class="shortcut">R</span>
+        </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertComicWorkflow"
+        >
+            <el-icon><Film /></el-icon>
+            <span>四格漫画工作流</span>
+        </div>
+        <div 
+            class="menu-item"
             @click="handleInsertImage"
         >
             <el-icon><Picture /></el-icon>
@@ -72,7 +87,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { EditPen, Picture, VideoPlay, VideoCamera, Folder, KnifeFork, Grid } from '@element-plus/icons-vue';
+import { EditPen, Picture, VideoPlay, VideoCamera, Folder, KnifeFork, Grid, Film } from '@element-plus/icons-vue';
 
 interface Position {
     x: number;
@@ -86,6 +101,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     insertPrompt: [];
+    insertStoryboard: [];
+    insertComicWorkflow: [];
     insertImage: [];
     insertDream: [];
     insertVideo: [];
@@ -98,6 +115,16 @@ const emit = defineEmits<{
 
 const handleInsertPrompt = () => {
     emit('insertPrompt');
+    emit('close');
+};
+
+const handleInsertStoryboard = () => {
+    emit('insertStoryboard');
+    emit('close');
+};
+
+const handleInsertComicWorkflow = () => {
+    emit('insertComicWorkflow');
     emit('close');
 };
 

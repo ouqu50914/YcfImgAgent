@@ -41,6 +41,16 @@
         </div>
       </el-tooltip>
 
+      <el-tooltip content="Skill 管理" placement="right">
+        <div
+          class="nav-item"
+          :class="{ active: currentRoute === '/skills' }"
+          @click="handleNavClick('/skills')"
+        >
+          <el-icon :size="24"><MagicStick /></el-icon>
+        </div>
+      </el-tooltip>
+
       <el-tooltip content="设计稿检查工具" placement="right">
         <div 
           class="nav-item"
@@ -92,7 +102,7 @@ import { storeToRefs } from 'pinia';
 
 defineEmits<{ 'open-teaching': [] }>();
 import { useRouter, useRoute } from 'vue-router';
-import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting, VideoPlay } from '@element-plus/icons-vue';
+import { Plus, House, Folder, Document, Collection, QuestionFilled, Setting, VideoPlay, MagicStick } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { useAdminPendingStore } from '@/store/admin-pending';

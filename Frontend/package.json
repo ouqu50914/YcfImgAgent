@@ -25,6 +25,7 @@
     "dompurify": "^3.2.6",
     "element-plus": "^2.13.1",
     "html2canvas": "^1.4.1",
+    "jszip": "^3.10.1",
     "markdown-it": "^14.1.0",
     "pinia": "^3.0.4",
     "prosemirror-model": "^1.24.1",

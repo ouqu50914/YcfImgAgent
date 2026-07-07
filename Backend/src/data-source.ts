@@ -9,6 +9,7 @@ import { UserDailyQuota } from "./entities/UserDailyQuota";
 import { WorkflowTemplate } from "./entities/WorkflowTemplate";
 import { WorkflowHistory } from "./entities/WorkflowHistory";
 import { PromptTemplate } from "./entities/PromptTemplate";
+import { GenerationSkill } from "./entities/GenerationSkill";
 import { WorkflowCategory } from "./entities/WorkflowCategory";
 import { UserCreditApplication } from "./entities/UserCreditApplication";
 import { CreditUsageLog } from "./entities/CreditUsageLog";
@@ -33,7 +34,7 @@ export const AppDataSource = new DataSource({
     synchronize: true,
     logging: false,
     // 这里显式引入实体类，比用字符串路径更稳定，且避免打包后的路径问题
-    entities: [User, ApiConfig, ImageResult, OperationLog, UserDailyQuota, WorkflowTemplate, WorkflowHistory, PromptTemplate, WorkflowCategory, UserCreditApplication, CreditUsageLog, SystemConfig, VideoTask, ChatMedia, ChatSessionRecord],
+    entities: [User, ApiConfig, ImageResult, OperationLog, UserDailyQuota, WorkflowTemplate, WorkflowHistory, PromptTemplate, GenerationSkill, WorkflowCategory, UserCreditApplication, CreditUsageLog, SystemConfig, VideoTask, ChatMedia, ChatSessionRecord],
     subscribers: [],
     migrations: [],
 });
