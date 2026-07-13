@@ -40,8 +40,15 @@
             class="chat-panel-width-resize-handle"
             :class="{ 'is-right-edge': dockSide === 'left' }"
             title="拖动调整面板宽度"
-            @mousedown.stop="onWidthResizeStart"
-            @touchstart.stop.prevent="onWidthTouchResizeStart"
+            @mousedown.stop="onWidthResizeStart($event, dockSide === 'left' ? 'right' : 'left')"
+            @touchstart.stop.prevent="onWidthTouchResizeStart($event, dockSide === 'left' ? 'right' : 'left')"
+          />
+          <div
+            v-if="!isPopupMode && dockSide === 'floating'"
+            class="chat-panel-width-resize-handle is-right-edge"
+            title="拖动调整面板宽度"
+            @mousedown.stop="onWidthResizeStart($event, 'right')"
+            @touchstart.stop.prevent="onWidthTouchResizeStart($event, 'right')"
           />
 
           <div
@@ -234,6 +241,21 @@
               主窗口已关闭，画布命令将不可用
             </div>
 
+            <div
+              v-if="!isPopupMode && isChatLayoutNarrow"
+              class="chat-narrow-banner"
+            >
+              <span>面板较窄，Markdown 内容可能显示不全</span>
+              <el-button
+                size="small"
+                type="primary"
+                text
+                @click="widenPanel"
+              >
+                加宽面板
+              </el-button>
+            </div>
+
             <el-scrollbar
               ref="messagesScrollRef"
               class="chat-messages"
@@ -395,7 +417,7 @@
                   >
                     <el-icon><Plus /></el-icon>
                   </el-button>
-                  <span class="chat-input-tip">Enter 发送 · 拖输入框上边框调高度 · 拖左侧边缘调宽度</span>
+                  <span class="chat-input-tip">{{ inputAreaTip }}</span>
                 </div>
                 <el-button
                   type="primary"
@@ -655,9 +677,10 @@ interface PanelPosition {
 
 type DockSide = 'right' | 'left' | 'floating';
 
-const PANEL_WIDTH_MIN = 320;
+const PANEL_WIDTH_MIN = 400;
 const PANEL_WIDTH_DEFAULT = 560;
 const PANEL_WIDTH_MAX_CAP = 1600;
+const MIN_CHAT_MAIN_WIDTH = 360;
 const SNAP_EDGE_PX = 36;
 
 const panelPos = ref<PanelPosition | null>(null);
@@ -671,6 +694,7 @@ const showSnapHint = ref(false);
 const dragOffset = ref({ x: 0, y: 0 });
 
 const isWidthResizing = ref(false);
+const widthResizeEdge = ref<'left' | 'right'>('left');
 const widthResizeStart = ref({ x: 0, width: PANEL_WIDTH_DEFAULT });
 
 const INPUT_HEIGHT_MIN = 96;
@@ -712,8 +736,22 @@ const sessionsSideKey = computed(() => {
 
 const getPanelWidthMax = () => Math.min(PANEL_WIDTH_MAX_CAP, window.innerWidth * 0.96);
 
+const getSessionsPartWidth = () =>
+  isSessionsExpanded.value ? SESSIONS_PANEL_WIDTH : SESSIONS_RAIL_WIDTH;
+
+const getMinPanelWidth = () =>
+  Math.max(PANEL_WIDTH_MIN, getSessionsPartWidth() + MIN_CHAT_MAIN_WIDTH);
+
 const clampPanelWidth = (width: number) =>
-  Math.max(PANEL_WIDTH_MIN, Math.min(width, getPanelWidthMax()));
+  Math.max(getMinPanelWidth(), Math.min(width, getPanelWidthMax()));
+
+const ensureMinPanelWidth = () => {
+  const next = clampPanelWidth(panelWidth.value);
+  if (next !== panelWidth.value) {
+    panelWidth.value = next;
+    persistPanelWidth();
+  }
+};
 
 const SESSIONS_PANEL_WIDTH = 220;
 const SESSIONS_RAIL_WIDTH = 44;
@@ -733,6 +771,19 @@ const isChatLayoutNarrow = computed(() =>
 const isPanelLayoutNarrow = computed(() =>
   !isPopupMode.value && panelWidth.value < PANEL_LAYOUT_NARROW_THRESHOLD,
 );
+
+const widthResizeHint = computed(() => {
+  if (dockSide.value === 'floating') return '拖左右边缘调宽度';
+  if (dockSide.value === 'left') return '拖右侧边缘调宽度';
+  return '拖左侧边缘调宽度';
+});
+
+const inputAreaTip = computed(() => {
+  if (isChatLayoutNarrow.value) {
+    return `Enter 发送 · ${widthResizeHint.value}`;
+  }
+  return `Enter 发送 · 拖输入框上边框调高度 · ${widthResizeHint.value}`;
+});
 
 const panelInlineStyle = computed(() => {
   if (isPopupMode.value) return undefined;
@@ -1036,6 +1087,17 @@ const loadDockSettings = () => {
   } catch {
     // ignore
   }
+
+  try {
+    const expandedRaw = window.localStorage.getItem(sessionsExpandedKey.value);
+    if (expandedRaw === 'true') {
+      isSessionsExpanded.value = true;
+    }
+  } catch {
+    // ignore
+  }
+
+  ensureMinPanelWidth();
 };
 
 const persistPanelWidth = () => {
@@ -1064,6 +1126,7 @@ const toggleSessionsExpanded = () => {
   } catch {
     // ignore
   }
+  ensureMinPanelWidth();
 };
 
 const persistSessionsSide = () => {
@@ -1163,11 +1226,15 @@ const persistPanelPosition = () => {
 const onWidthResizeMove = (clientX: number) => {
   if (!isWidthResizing.value) return;
   const delta = clientX - widthResizeStart.value.x;
-  if (dockSide.value === 'left') {
-    panelWidth.value = clampPanelWidth(widthResizeStart.value.width + delta);
+  let nextWidth = widthResizeStart.value.width;
+
+  if (dockSide.value === 'left' || widthResizeEdge.value === 'right') {
+    nextWidth = widthResizeStart.value.width + delta;
   } else {
-    panelWidth.value = clampPanelWidth(widthResizeStart.value.width - delta);
+    nextWidth = widthResizeStart.value.width - delta;
   }
+
+  panelWidth.value = clampPanelWidth(nextWidth);
 };
 
 const endWidthResize = () => {
@@ -1191,18 +1258,20 @@ const onWidthResizeTouchMove = (e: TouchEvent) => {
   onWidthResizeMove(touch.clientX);
 };
 
-const onWidthResizeStart = (e: MouseEvent) => {
+const onWidthResizeStart = (e: MouseEvent, edge: 'left' | 'right' = 'left') => {
   if (isPopupMode.value || e.button !== 0) return;
   isWidthResizing.value = true;
+  widthResizeEdge.value = edge;
   widthResizeStart.value = { x: e.clientX, width: panelWidth.value };
   document.addEventListener('mousemove', onWidthResizeMouseMove);
   document.addEventListener('mouseup', endWidthResize);
 };
 
-const onWidthTouchResizeStart = (e: TouchEvent) => {
+const onWidthTouchResizeStart = (e: TouchEvent, edge: 'left' | 'right' = 'left') => {
   const touch = e.touches[0];
   if (!touch || isPopupMode.value) return;
   isWidthResizing.value = true;
+  widthResizeEdge.value = edge;
   widthResizeStart.value = { x: touch.clientX, width: panelWidth.value };
   document.addEventListener('touchmove', onWidthResizeTouchMove, { passive: false });
   document.addEventListener('touchend', endWidthResize);
@@ -1402,8 +1471,15 @@ const resetPanelPosition = (e: MouseEvent) => {
   if (target.closest('.chat-actions, .el-button, button')) return;
   dockSide.value = 'right';
   panelPos.value = null;
+  panelWidth.value = PANEL_WIDTH_DEFAULT;
   persistDockSide();
   persistPanelPosition();
+  persistPanelWidth();
+};
+
+const widenPanel = () => {
+  panelWidth.value = clampPanelWidth(Math.max(panelWidth.value + 160, PANEL_WIDTH_DEFAULT));
+  persistPanelWidth();
 };
 
 const togglePanel = async () => {
@@ -1782,8 +1858,7 @@ onMounted(() => {
 });
 
 const onWindowResize = () => {
-  panelWidth.value = clampPanelWidth(panelWidth.value);
-  persistPanelWidth();
+  ensureMinPanelWidth();
   if (dockSide.value === 'floating' && panelPos.value) {
     panelPos.value = clampPanelPosition(panelPos.value.x, panelPos.value.y);
     persistPanelPosition();
@@ -1908,9 +1983,9 @@ onUnmounted(() => {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 14px;
   cursor: ew-resize;
-  z-index: 6;
+  z-index: 20;
   touch-action: none;
 }
 
@@ -1926,16 +2001,35 @@ onUnmounted(() => {
   top: 50%;
   transform: translate(-50%, -50%);
   width: 4px;
-  height: 40px;
+  height: 72px;
   border-radius: 999px;
   background: var(--app-border-strong, #4b5563);
-  opacity: 0.45;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  opacity: 0.72;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: opacity 0.15s ease, background 0.15s ease, height 0.15s ease;
+}
+
+.chat-panel-width-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 12% 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 18%,
+    rgba(255, 255, 255, 0.08) 82%,
+    transparent 100%
+  );
+  pointer-events: none;
 }
 
 .chat-panel-width-resize-handle:hover::before,
 .workflow-chat-panel.is-width-resizing .chat-panel-width-resize-handle::before {
   opacity: 1;
+  height: 96px;
   background: var(--color-primary, #409eff);
 }
 
@@ -2161,6 +2255,7 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 .workflow-chat-sessions {
@@ -2315,6 +2410,7 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .chat-header {
@@ -2379,12 +2475,14 @@ onUnmounted(() => {
   padding: 6px 10px 10px;
 }
 
-.workflow-chat-main.is-narrow .chat-input-tip {
+.workflow-chat-main.is-narrow .chat-input :deep(.el-input__count) {
   display: none;
 }
 
-.workflow-chat-main.is-narrow .chat-input :deep(.el-input__count) {
-  display: none;
+.workflow-chat-main.is-narrow .chat-input-tip {
+  font-size: 10px;
+  max-width: 180px;
+  line-height: 1.3;
 }
 
 .workflow-chat-main.is-narrow .message-bubble {
@@ -2395,9 +2493,25 @@ onUnmounted(() => {
   gap: 6px;
 }
 
+.chat-narrow-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(64, 158, 255, 0.12);
+  border: 1px solid rgba(64, 158, 255, 0.28);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
 .chat-messages {
   flex: 1;
   padding: 10px 16px;
+  min-width: 0;
 }
 
 .messages-inner {
@@ -2420,10 +2534,12 @@ onUnmounted(() => {
 
 .message-bubble {
   max-width: 80%;
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 12px;
   font-size: 13px;
   line-height: 1.5;
+  overflow-x: auto;
 }
 
 .message-row.user .message-bubble {
