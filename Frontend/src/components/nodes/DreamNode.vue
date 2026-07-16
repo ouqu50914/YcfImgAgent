@@ -149,7 +149,7 @@ import { uploadImage } from '../../api/upload';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
-import { getUploadUrl } from '@/utils/image-loader';
+import { getUploadUrl, toPersistableImageUrl } from '@/utils/image-loader';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
@@ -658,6 +658,8 @@ const tryRecoverFromGenerationKey = async (generationKey: string): Promise<'succ
     try {
         const res: any = await getImageGenerateResultByGenerationKey(generationKey);
         const data = res?.data as any;
+        if (!data) return 'not_found';
+
         const status = data?.status;
         const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
         const syncStatus = typeof data?.sync_status === 'string' ? data.sync_status : 'pending';
@@ -714,12 +716,13 @@ const applyLatestImagesToUi = (rawImages: string[]) => {
             if (idx == null) return node;
             const raw = rawImages[idx] ?? rawImages[0] ?? '';
             if (!raw) return node;
+            const persistable = toPersistableImageUrl(raw) || raw;
             return {
                 ...node,
                 data: {
                     ...node.data,
-                    imageUrl: getUploadUrl(raw),
-                    originalImageUrl: raw,
+                    imageUrl: persistable,
+                    originalImageUrl: persistable,
                 },
             };
         });
@@ -1150,10 +1153,13 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
         };
         
         // 为多图节点添加标记，用于缩小尺寸
+        // 持久化相对路径，避免写死域名/预签名导致日后加载失败
+        const src = originalUrls[index] ?? fullUrl ?? '';
+        const persistable = toPersistableImageUrl(src) || src;
         const nodeData: any = {
-            imageUrl: fullUrl,
+            imageUrl: persistable,
             prompt: readConnectedPromptFromEdges() || '',
-            originalImageUrl: originalUrls[index],
+            originalImageUrl: persistable,
             fromNodeId: props.id, // 记录来源生图节点，方便在 ImageNode 中自动补连线
         };
         
@@ -1237,6 +1243,18 @@ const createPlaceholderImageNodes = (count: number, generationKey: string) => {
 
 let reconcileInterval: ReturnType<typeof setInterval> | null = null;
 let reconcileInFlight = false;
+/** 连续「未找到记录」次数；用于放弃已失效占位（真正进行中的任务能查到 status=0，不会走这条） */
+const notFoundStreakByKey = new Map<string, number>();
+/** 已观察到 pending 后的等待轮次；给跨用户同步留足时间 */
+const pendingWaitStreakByKey = new Map<string, number>();
+const MAX_NOT_FOUND_STREAK = 24; // 约 2 分钟仍无记录 → 视为失效
+const MAX_PENDING_WAIT_STREAK = 360; // 约 30 分钟仍未出图 → 放弃
+
+const markIdsAsError = (ids: string[]) => {
+    if (!ids.length) return;
+    pendingImageNodeIds.value = ids;
+    markPendingPlaceholdersAsError();
+};
 
 const reconcilePendingImagePlaceholders = async () => {
     if (reconcileInFlight) return;
@@ -1254,6 +1272,8 @@ const reconcilePendingImagePlaceholders = async () => {
                 clearInterval(reconcileInterval);
                 reconcileInterval = null;
             }
+            notFoundStreakByKey.clear();
+            pendingWaitStreakByKey.clear();
             return;
         }
 
@@ -1278,16 +1298,33 @@ const reconcilePendingImagePlaceholders = async () => {
             try {
                 res = await getImageGenerateResultByGenerationKey(generationKey);
             } catch (e: any) {
-                // 404：可能是后端尚未创建记录；继续等下一轮
-                const status = e?.response?.status;
-                if (status === 404) continue;
-                // 其它错误：继续等待，避免误把仍在生成的任务标成失败
+                // 网络/旧版 404：当作尚未找到，计入 streak
+                const streak = (notFoundStreakByKey.get(generationKey) || 0) + 1;
+                notFoundStreakByKey.set(generationKey, streak);
+                if (streak >= MAX_NOT_FOUND_STREAK) {
+                    notFoundStreakByKey.delete(generationKey);
+                    pendingWaitStreakByKey.delete(generationKey);
+                    markIdsAsError(ids);
+                }
                 continue;
             }
 
             // request 拦截器已把 axios response.data 直接返回给前端：
-            // 后端响应结构为 { message, data }，所以这里应取 res.data
+            // 后端响应结构为 { message, data }；未找到时 data 为 null
             const data = res?.data as any;
+            if (!data) {
+                const streak = (notFoundStreakByKey.get(generationKey) || 0) + 1;
+                notFoundStreakByKey.set(generationKey, streak);
+                if (streak >= MAX_NOT_FOUND_STREAK) {
+                    notFoundStreakByKey.delete(generationKey);
+                    pendingWaitStreakByKey.delete(generationKey);
+                    markIdsAsError(ids);
+                }
+                continue;
+            }
+
+            notFoundStreakByKey.delete(generationKey);
+
             const status = data?.status;
             const allImages: string[] = Array.isArray(data?.all_images) ? data.all_images : [];
             const syncStatus = typeof data?.sync_status === 'string' ? data.sync_status : 'pending';
@@ -1295,6 +1332,7 @@ const reconcilePendingImagePlaceholders = async () => {
             // 优先以“是否已经拿到图片URL”为准：只要有结果就回填成功，
             // 不必纠结 status=0/1 的语义（避免“猜测还没完成”的体验问题）。
             if (allImages.length > 0) {
+                pendingWaitStreakByKey.delete(generationKey);
                 const fullUrls = allImages.map((url: string) => getUploadUrl(url));
                 imageUrls.value = fullUrls;
                 imageUrl.value = fullUrls[0] || '';
@@ -1317,10 +1355,10 @@ const reconcilePendingImagePlaceholders = async () => {
             }
 
             if (status === 1) {
+                pendingWaitStreakByKey.delete(generationKey);
                 if (!allImages.length) {
                     // 状态成功但没有图片，按失败兜底避免一直 loading
-                    pendingImageNodeIds.value = ids;
-                    markPendingPlaceholdersAsError();
+                    markIdsAsError(ids);
                     continue;
                 }
 
@@ -1346,10 +1384,18 @@ const reconcilePendingImagePlaceholders = async () => {
 
             // status === 2：失败态（后端明确写入）
             if (status === 2) {
-                pendingImageNodeIds.value = ids;
-                markPendingPlaceholdersAsError();
+                pendingWaitStreakByKey.delete(generationKey);
+                markIdsAsError(ids);
+                continue;
             }
-            // status === 0：pending（不做任何事，继续等待下一轮轮询）
+
+            // status === 0：pending —— 自己的或别人的任务都在跑，继续等并同步
+            const pendingStreak = (pendingWaitStreakByKey.get(generationKey) || 0) + 1;
+            pendingWaitStreakByKey.set(generationKey, pendingStreak);
+            if (pendingStreak >= MAX_PENDING_WAIT_STREAK) {
+                pendingWaitStreakByKey.delete(generationKey);
+                markIdsAsError(ids);
+            }
         }
     } finally {
         reconcileInFlight = false;
@@ -1370,6 +1416,8 @@ onMounted(() => {
 onUnmounted(() => {
     if (reconcileInterval) clearInterval(reconcileInterval);
     reconcileInterval = null;
+    notFoundStreakByKey.clear();
+    pendingWaitStreakByKey.clear();
     for (const key of cosSyncWatcherMap.keys()) {
         stopCosSyncWatcher(key);
     }
@@ -1413,12 +1461,14 @@ const fillPlaceholderImageNodes = (fullUrls: string[], originalUrls: string[]): 
             const idx = ids.indexOf(node.id);
             if (idx === -1 || idx >= fillCount) return node;
 
+            const src = originalUrls[idx] ?? fullUrls[idx] ?? '';
+            const persistable = toPersistableImageUrl(src) || src;
             return {
                 ...node,
                 data: {
                     ...node.data,
-                    imageUrl: fullUrls[idx],
-                    originalImageUrl: originalUrls[idx],
+                    imageUrl: persistable,
+                    originalImageUrl: persistable,
                     isLoading: false,
                 },
             };

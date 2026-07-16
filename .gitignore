@@ -53,3 +53,6 @@ Backend/temp/
 ### 备份脚本（含服务器配置，不提交） ###
 scripts/backup_mysql_to_cos.sh
 
+### 本地 Obsidian 知识库（不进版本库） ###
+docs-obsidian/
+

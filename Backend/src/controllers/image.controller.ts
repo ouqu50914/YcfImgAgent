@@ -174,7 +174,10 @@ export const getImageGenerateResultByGenerationKey = async (req: Request, res: R
         }
 
         const data = await imageService.getGenerateResultByGenerationKey(userId, generationKey);
-        if (!data) return res.status(404).json({ message: '生成结果未找到或尚未创建' });
+        // 轮询场景下未找到属正常态（记录尚未创建 / key 已失效），返回 200 + data:null，避免前端全局 404 toast 刷屏
+        if (!data) {
+            return res.status(200).json({ message: '生成结果未找到或尚未创建', data: null });
+        }
 
         return res.status(200).json({ message: '获取生成结果成功', data });
     } catch (error: any) {

@@ -74,14 +74,16 @@ export const getImageGenerateResultByGenerationKey = (generationKey: string) => 
         message: string;
         data: {
             id: number;
-            status: number; // 1 成功 / 0 失败/未完成
+            status: number; // 0 进行中 / 1 成功 / 2 失败
             image_url?: string;
             all_images: string[];
             created_at?: string;
             sync_status?: 'pending' | 'syncing' | 'synced' | 'failed';
-        };
+        } | null;
     }>(`/image/generate-result`, {
         params: { generationKey },
+        // 未找到或网络抖动时不弹 toast；轮询会自行处理
+        silentErrorToast: true,
     });
 };
 

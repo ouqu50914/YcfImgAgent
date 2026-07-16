@@ -140,6 +140,7 @@ app.use("/api/media", mediaRoutes);
 app.use("/api/notifications", notificationRoutes);
 
 // 静态资源 / 腾讯云 COS 预签名重定向
+// 注意：预签名默认约 1 小时过期。302 禁止被浏览器/CDN 长期缓存，否则会命中过期 Location →「图片已过期」。
 app.use("/uploads", (req, res, next) => {
     if ((req.method !== "GET" && req.method !== "HEAD") || !isCosEnabled()) {
         return next();
@@ -147,7 +148,11 @@ app.use("/uploads", (req, res, next) => {
     const key = pathToKey("/uploads" + (req.path === "/" ? "" : req.path));
     if (!key) return next();
     getSignedUrl(key, 3600)
-        .then((url) => res.redirect(302, url))
+        .then((url) => {
+            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+            res.setHeader("Pragma", "no-cache");
+            res.redirect(302, url);
+        })
         .catch(() => next());
 });
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));

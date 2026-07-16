@@ -125,7 +125,7 @@ import { splitImage } from '../../api/image';
 import { ElMessage } from 'element-plus';
 import { useUserStore } from '@/store/user';
 import { getCreditCost } from '@/utils/credits';
-import { getUploadUrl } from '@/utils/image-loader';
+import { getUploadUrl, toPersistableImageUrl } from '@/utils/image-loader';
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -286,6 +286,8 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
     const nodeId = `image_node_${Date.now()}`;
     const edgeId = `edge_${Date.now()}`;
 
+    const persistable = toPersistableImageUrl(originalUrl || fullUrl) || originalUrl || fullUrl;
+
     // 创建图片节点
     addNodes({
         id: nodeId,
@@ -295,10 +297,10 @@ const createImageNode = (fullUrl: string, originalUrl: string) => {
             y: startY
         },
         data: {
-            imageUrl: fullUrl,
+            imageUrl: persistable,
             prompt: props.data?.prompt || '图片拆分',
             // 保存原始URL（相对路径）供后续使用
-            originalImageUrl: originalUrl
+            originalImageUrl: persistable
         }
     });
 

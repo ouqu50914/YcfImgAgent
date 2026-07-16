@@ -130,7 +130,7 @@
             </template>
             <div class="fullscreen-preview-container" @click="showFullscreenPreview = false">
                 <img 
-                    :src="getImageUrl(imageUrl)" 
+                    :src="imageUrl" 
                     class="fullscreen-image"
                     @click.stop
                 />
@@ -174,7 +174,7 @@ import { ref, computed, watch, onMounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { getUploadUrl } from '@/utils/image-loader';
+import { getUploadUrl, getDisplayImageUrl, toPersistableImageUrl } from '@/utils/image-loader';
 import request from '@/utils/request';
 
 // 声明 emits 以消除 Vue Flow 的警告
@@ -195,7 +195,18 @@ const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 
-const imageUrl = ref(props.data?.imageUrl || '');
+/** 节点里可能存了生成时的绝对/预签名 URL；展示一律走可刷新地址 */
+const rawImageUrl = computed(() => String((props.data as any)?.imageUrl || '').trim());
+const rawOriginalUrl = computed(() => String((props.data as any)?.originalImageUrl || '').trim());
+const imageUrl = computed(() => getDisplayImageUrl(rawImageUrl.value, rawOriginalUrl.value));
+/** 传给下游节点 / 下载时用的稳定路径（优先 /uploads/...） */
+const persistableImageUrl = computed(() => {
+    const fromOriginal = toPersistableImageUrl(rawOriginalUrl.value);
+    if (fromOriginal) return fromOriginal;
+    const fromImage = toPersistableImageUrl(rawImageUrl.value);
+    if (fromImage) return fromImage;
+    return rawOriginalUrl.value || rawImageUrl.value || '';
+});
 const isLoading = ref(!!props.data?.isLoading);
 const showActionMenu = ref(false);
 const creatingLayerNode = ref(false);
@@ -215,11 +226,28 @@ const saveWorkflowImmediately = () => {
     }
 };
 
+/** 打开旧项目时：把写死的绝对/预签名 URL 归一成 /uploads/... 再存回去 */
+const healPersistedUrls = () => {
+    const nextImage = toPersistableImageUrl(rawImageUrl.value);
+    const nextOriginal = toPersistableImageUrl(rawOriginalUrl.value) || nextImage;
+    let changed = false;
+    if (nextImage && nextImage !== rawImageUrl.value) {
+        (props.data as any).imageUrl = nextImage;
+        changed = true;
+    }
+    if (nextOriginal && nextOriginal !== rawOriginalUrl.value) {
+        (props.data as any).originalImageUrl = nextOriginal;
+        changed = true;
+    }
+    if (changed) saveWorkflowImmediately();
+};
+
 // 历史恢复兜底：如果已经有 imageUrl 但仍处于 isLoading=true，
 // 会导致一直显示“生成中/加载中”，因此在发现时直接纠正并持久化。
 const syncLoadingState = () => {
-    const rawUrl = (props.data as any)?.imageUrl;
-    const hasUrl = typeof rawUrl === 'string' && rawUrl.trim().length > 0;
+    const hasUrl =
+        (typeof (props.data as any)?.imageUrl === 'string' && String((props.data as any).imageUrl).trim().length > 0) ||
+        (typeof (props.data as any)?.originalImageUrl === 'string' && String((props.data as any).originalImageUrl).trim().length > 0);
     const hasError = (props.data as any)?.status === 'error';
     if ((hasError || hasUrl) && isLoading.value) {
         isLoading.value = false;
@@ -232,7 +260,7 @@ const displayAlias = computed(() => imageAlias.value || '图片');
 
 const isError = computed(() => {
     const status = (props.data as any)?.status;
-    // 兼容：没有 imageUrl 且不在 loading 状态时，也视为失败
+    // 兼容：没有可展示 URL 且不在 loading 状态时，也视为失败
     return status === 'error' || (!isLoading.value && !imageUrl.value);
 });
 
@@ -243,11 +271,9 @@ const currentNode = computed(() => {
 
 // 响应外部数据更新（例如占位节点生成后再写入 imageUrl）
 watch(
-    () => props.data?.imageUrl,
-    (val) => {
-        if (val) {
-            imageUrl.value = val;
-            // 当占位节点异步填充 imageUrl 时，为其补全别名
+    () => [props.data?.imageUrl, (props.data as any)?.originalImageUrl] as const,
+    () => {
+        if (rawImageUrl.value || rawOriginalUrl.value) {
             if (!imageAlias.value) {
                 ensureAliasFromStore();
             }
@@ -313,6 +339,7 @@ const ensureEdgeFromSource = () => {
 };
 
 onMounted(() => {
+    healPersistedUrls();
     ensureAliasFromStore();
     ensureEdgeFromSource();
     syncLoadingState();
@@ -352,7 +379,7 @@ const handleMenuMouseLeave = () => {
 
 // 添加操作节点
 const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => {
-    if (!imageUrl.value) {
+    if (!persistableImageUrl.value && !imageUrl.value) {
         ElMessage.warning('图片不存在');
         return;
     }
@@ -373,9 +400,11 @@ const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => 
         y: currentNode.value.position.y
     };
 
+    const stableUrl = persistableImageUrl.value || imageUrl.value;
+
     // 根据操作类型创建不同的节点
     let nodeType = '';
-    let nodeData: any = { imageUrl: imageUrl.value };
+    let nodeData: any = { imageUrl: stableUrl };
 
     switch (actionType) {
         case 'upscale':
@@ -388,7 +417,7 @@ const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => 
             // 生成变体使用 dream 节点
             nodeType = 'dream';
             nodeData = {
-                imageUrl: imageUrl.value,
+                imageUrl: stableUrl,
                 prompt: props.data?.prompt || '',
                 isVariation: true
             };
@@ -417,7 +446,7 @@ const handleAddActionNode = (actionType: 'upscale' | 'extend' | 'variation') => 
 
 // 图层拆分：创建独立的 LayerNode 节点承接结果
 const handleSplitLayer = async () => {
-    if (!imageUrl.value) {
+    if (!persistableImageUrl.value && !imageUrl.value) {
         ElMessage.warning('图片不存在');
         return;
     }
@@ -446,7 +475,7 @@ const handleSplitLayer = async () => {
             type: 'layer',
             position: newNodePosition,
             data: {
-                imageUrl: imageUrl.value,
+                imageUrl: persistableImageUrl.value || imageUrl.value,
                 fromNodeId: props.id
             }
         });
@@ -483,7 +512,7 @@ const handleImageClick = () => {
 
 // 下载原图：走后端代理接口拉取图片并返回附件，避免直连 CDN 被 CORS 拦截
 const handleDownloadOriginal = async () => {
-    const original = (props.data as any)?.originalImageUrl || imageUrl.value;
+    const original = persistableImageUrl.value || imageUrl.value;
     if (!original) {
         ElMessage.warning('暂无可下载的原图');
         return;

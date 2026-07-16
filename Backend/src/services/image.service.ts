@@ -662,7 +662,9 @@ export class ImageService {
     }
 
     /**
-     * 按 generation_key 查询生成结果（用于刷新/历史恢复后拉取最终态）
+     * 按 generation_key 查询生成结果（用于刷新/历史恢复后拉取最终态）。
+     * 优先查当前用户；若无则按 key 全局只读（分享/fork 打开别人项目时，可等待并同步对方仍在进行中的生成）。
+     * generation_key 为难猜幂等令牌，仅返回图片结果字段。
      */
     async getGenerateResultByGenerationKey(
         userId: number,
@@ -677,10 +679,17 @@ export class ImageService {
     } | null> {
         if (!generationKey) return null;
 
-        const rec = await this.imageRepo.findOneBy({
+        let rec = await this.imageRepo.findOneBy({
             user_id: userId,
             generation_key: generationKey,
         } as any);
+
+        if (!rec) {
+            rec = await this.imageRepo.findOne({
+                where: { generation_key: generationKey } as any,
+                order: { id: 'DESC' },
+            });
+        }
 
         if (!rec) return null;
 

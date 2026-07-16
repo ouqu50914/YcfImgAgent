@@ -851,15 +851,25 @@ const ensureCurrentTemplate = async (workflowData: WorkflowDTO) => {
     }
 };
 
-const persistWorkflow = async () => {
+/**
+ * 单次落库：串行队列在外层保证；此处始终用「此刻」的 nodes 快照写入，
+ * 避免封面生成过程中并发保存把更完整的快照盖掉。
+ */
+const persistWorkflowOnce = async (): Promise<boolean> => {
     const currentNodes = getNodes.value;
     if (currentNodes.length === 0) return false;
 
-    const workflowData: WorkflowDTO = buildWorkflowDataForSave();
+    // 先算封面（可能较慢），写库前再用最新 nodes/edges，并保留封面字段
+    let workflowData: WorkflowDTO = buildWorkflowDataForSave();
     await ensureWorkflowCover(workflowData);
+    const coverImage = workflowData.cover_image;
+    const latest = buildWorkflowDataForSave();
+    workflowData = {
+        ...latest,
+        ...(coverImage != null ? { cover_image: coverImage } : {}),
+    };
 
     try {
-        // 确保当前会话有对应的项目 ID（从新建 / 历史 / 公开项目进入时会触发）
         await ensureCurrentTemplate(workflowData);
 
         const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
@@ -871,7 +881,6 @@ const persistWorkflow = async () => {
 
         let historyRes: any = null;
 
-        // 1. 先更新模板本身（如果当前是“我的项目”里的模板）
         if (isOwnTemplate) {
             await updateTemplate(currentTemplateId.value!, {
                 workflowData,
@@ -879,7 +888,6 @@ const persistWorkflow = async () => {
             });
         }
 
-        // 2. 无论是否模板，都为当前编辑会话保留一条自动保存历史，用于刷新/重新进入时恢复
         const templateIdForSave = currentTemplateId.value != null ? currentTemplateId.value : undefined;
         if (currentHistoryId.value != null) {
             historyRes = await autoSaveHistory(workflowData, currentHistoryId.value, templateIdForSave);
@@ -892,23 +900,52 @@ const persistWorkflow = async () => {
             window.localStorage.setItem('workflow:lastHistoryId', String(historyRes.data.id));
         }
 
-        hasPendingChanges.value = false;
         lastSavedAt.value = new Date();
         autoSaveError.value = null;
+        console.log('[persistWorkflow] 已保存', {
+            nodes: workflowData.nodes.length,
+            images: workflowData.nodes.filter((n: any) => n?.type === 'image').length,
+            templateId: currentTemplateId.value,
+            historyId: currentHistoryId.value,
+        });
         return true;
     } catch (error: any) {
         console.error('工作流持久化失败:', error);
         const msg = error?.message || '自动保存失败，请手动保存或拆分项目';
         autoSaveError.value = msg;
-        // 自动保存场景不打扰太多，这里使用 warning 提示
         ElMessage.warning(msg);
         return false;
     }
 };
 
+/** 合并并发 saveImmediately：执行中又有变更则结束后用最新快照再跑一轮 */
+let persistChain: Promise<boolean> = Promise.resolve(true);
+let persistReschedule = false;
+
+const persistWorkflow = (): Promise<boolean> => {
+    hasPendingChanges.value = true;
+    persistReschedule = true;
+    persistChain = persistChain.then(async () => {
+        let ok = false;
+        try {
+            while (persistReschedule) {
+                persistReschedule = false;
+                ok = await persistWorkflowOnce();
+            }
+            if (!persistReschedule) {
+                hasPendingChanges.value = false;
+            }
+            return ok;
+        } catch (error: any) {
+            console.error('工作流持久化链式调用失败:', error);
+            return false;
+        }
+    });
+    return persistChain;
+};
+
 const workflowPersistenceStore: WorkflowPersistenceStore = {
     saveImmediately: () => {
-        hasPendingChanges.value = true;
         persistWorkflow().catch((error: any) => {
             console.error('关键操作保存失败（workflowPersistenceStore）:', error);
         });
@@ -1400,6 +1437,22 @@ const calculateOptimalPosition = (
 // 封装一次保存当前工作流的逻辑：离开编辑器页面时统一调用
 const saveCurrentWorkflowBeforeLeave = async () => {
     await persistWorkflow();
+};
+
+/** 刷新/关页时尽量触发保存（浏览器不保证等完网络请求） */
+const handlePageHidePersist = () => {
+    if (getNodes.value.length === 0) return;
+    if (!hasPendingChanges.value && !persistReschedule) return;
+    void persistWorkflow();
+};
+
+const handleBeforeUnloadPersist = (event: BeforeUnloadEvent) => {
+    if (getNodes.value.length === 0) return;
+    if (!hasPendingChanges.value && !persistReschedule) return;
+    // 有未落库变更时提示用户；同时踢一脚异步保存
+    void persistWorkflow();
+    event.preventDefault();
+    event.returnValue = '';
 };
 
 // 返回上一页：只负责路由返回，真正的保存逻辑在 onBeforeRouteLeave 中统一处理
@@ -3086,6 +3139,9 @@ onMounted(async () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('paste', handlePaste, true);
+    // 刷新/关页：尽量把进行中的落库跑完（不能真正阻塞卸载，但可触发队列）
+    window.addEventListener('pagehide', handlePageHidePersist);
+    window.addEventListener('beforeunload', handleBeforeUnloadPersist);
 
     // 不阻塞后续加载：异步弹出说明 + 可选申请通知权限
     void offerWorkflowNotificationGuide();
@@ -3167,12 +3223,37 @@ onMounted(async () => {
             if (!isNaN(templateId)) {
                 const res: any = await getTemplate(templateId);
                 const data = res.data;
-                const workflowData = data.workflow_data;
+                let workflowData = data.workflow_data;
                 const ownerId = data.user_id != null ? Number(data.user_id) : null;
                 const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
-                if (ownerId != null && myId != null && ownerId === myId) {
+                const isOwn = ownerId != null && myId != null && ownerId === myId;
+                if (isOwn) {
                     currentTemplateId.value = templateId;
                     templateOwnerId.value = ownerId;
+                    // 自己的项目：优先用该项目最新自动保存 history（比 template 更贴近刷新前画布）
+                    try {
+                        const listRes: any = await getHistoryList(1, templateId, { lite: true });
+                        const latest = Array.isArray(listRes?.data) ? listRes.data[0] : null;
+                        const latestId = latest?.id != null ? Number(latest.id) : NaN;
+                        if (!Number.isNaN(latestId)) {
+                            const templateUpdated = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+                            const historyUpdated = latest.updated_at
+                                ? new Date(latest.updated_at).getTime()
+                                : (latest.created_at ? new Date(latest.created_at).getTime() : 0);
+                            // history 不早于 template 时采用 history（含相等：自动保存往往两边同批，history 更常带全量节点）
+                            if (historyUpdated >= templateUpdated) {
+                                const histRes: any = await getHistory(latestId);
+                                const histData = histRes?.data?.workflow_data;
+                                if (histData?.nodes && histData?.edges) {
+                                    workflowData = histData;
+                                    currentHistoryId.value = latestId;
+                                    window.localStorage.setItem('workflow:lastHistoryId', String(latestId));
+                                }
+                            }
+                        }
+                    } catch (histErr) {
+                        console.warn('加载项目最新 history 失败，回退 template:', histErr);
+                    }
                 } else {
                     currentTemplateId.value = null;
                     templateOwnerId.value = null;
@@ -3373,6 +3454,8 @@ onUnmounted(() => {
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
     window.removeEventListener('paste', handlePaste, true);
+    window.removeEventListener('pagehide', handlePageHidePersist);
+    window.removeEventListener('beforeunload', handleBeforeUnloadPersist);
 });
 </script>
 

@@ -4,6 +4,13 @@ import { useUserStore } from '@/store/user';
 import router from '@/router';
 import { showTranslatedErrorToast } from '@/utils/error-toast';
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /** 为 true 时跳过响应拦截器的错误 toast（轮询/恢复类请求用） */
+    silentErrorToast?: boolean;
+  }
+}
+
 // 创建 axios 实例
 const service = axios.create({
   baseURL: '/api', // 走 vite 代理，指向 http://localhost:3000/api
@@ -281,6 +288,10 @@ service.interceptors.response.use(
       // 403 且是认证相关错误，同样视为登录失效
       redirectToLoginOnce(userStore);
     } else if (error.response?.status !== 401) {
+      // 轮询/恢复类请求可静默失败，避免刷屏
+      if (originalRequest?.silentErrorToast) {
+        return Promise.reject(error);
+      }
       // 非401错误，统一中文错误提示（toast）
       const guessed = guessFriendlyMessage({
         status: error.response?.status,
