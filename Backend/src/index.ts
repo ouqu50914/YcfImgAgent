@@ -1,3 +1,4 @@
+import "./utils/logger"; // 必须最先 import：为所有 console 输出加北京时间戳
 import "reflect-metadata"; // TypeORM 必须
 import express from "express";
 import cors from "cors";
