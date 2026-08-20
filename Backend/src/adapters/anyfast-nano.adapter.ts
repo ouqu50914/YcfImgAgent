@@ -294,7 +294,7 @@ export class AnyfastNanoAdapter implements AiProvider {
                     throw new ProviderError({
                         code: "ANYFAST_EMPTY_IMAGE",
                         status: 502,
-                        message: textParts.length ? `AnyFast 返回纯文本未包含图片: ${textParts[0].slice(0, 200)}` : "AnyFast 返回成功但未包含图片内容。",
+                        message: textParts.length ? `AnyFast 返回纯文本未包含图片: ${(textParts[0] ?? "").slice(0, 200)}` : "AnyFast 返回成功但未包含图片内容。",
                         provider: "anyfast",
                         transient: true,
                     });
