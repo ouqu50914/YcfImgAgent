@@ -217,11 +217,7 @@ export class AnyfastNanoAdapter implements AiProvider {
             const body = {
                 contents: [{ role: "user", parts }],
                 generationConfig: {
-                    responseModalities: ["IMAGE"],
-                    imageConfig: {
-                        aspectRatio: params.aspectRatio || "1:1",
-                        imageSize: this.mapQuality(params.quality),
-                    },
+                    responseModalities: ["TEXT", "IMAGE"],
                 },
             };
 
@@ -278,14 +274,27 @@ export class AnyfastNanoAdapter implements AiProvider {
                 const buffers = this.extractImagesFromResponse(res.data);
                 const first = buffers[0];
                 if (!first) {
+                    // 提取响应中的文本内容，便于诊断为什么没返回图片
+                    let textParts: string[] = [];
+                    try {
+                        const cands = Array.isArray(res?.data?.candidates) ? res.data.candidates : [];
+                        for (const c of cands) {
+                            const ps = Array.isArray(c?.content?.parts) ? c.content.parts : [];
+                            for (const p of ps) {
+                                if (p?.text) textParts.push(String(p.text));
+                            }
+                        }
+                    } catch {}
                     console.warn("[AnyfastNanoAdapter] 未解析到图片内容", {
                         model,
                         topLevelKeys: res?.data && typeof res.data === "object" ? Object.keys(res.data) : [],
+                        textParts: textParts.slice(0, 3),
+                        fullDataPreview: JSON.stringify(res?.data).slice(0, 500),
                     });
                     throw new ProviderError({
                         code: "ANYFAST_EMPTY_IMAGE",
                         status: 502,
-                        message: "AnyFast 返回成功但未包含图片内容。",
+                        message: textParts.length ? `AnyFast 返回纯文本未包含图片: ${textParts[0].slice(0, 200)}` : "AnyFast 返回成功但未包含图片内容。",
                         provider: "anyfast",
                         transient: true,
                     });
