@@ -179,6 +179,11 @@ type MediaAliasStore = {
     getOrCreateAudioAlias: (key: string) => string;
 };
 
+type WorkflowPersistenceStore = {
+    saveImmediately: () => void;
+    markDirty: () => void;
+};
+
 const props = defineProps<NodeProps>();
 const text = ref(typeof props.data?.text === 'string' ? props.data.text : '');
 const promptWidth = ref(360);
@@ -193,6 +198,7 @@ const selectedSuggestionIndex = ref(0);
 
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const mediaAliasStore = inject<MediaAliasStore | null>('mediaAliasStore', null);
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
 const showAliasSuggestions = ref(false);
 const aliasSuggestions = ref<{ key: string; alias: string }[]>([]);
 const selectedAliasIndex = ref(0);
@@ -391,6 +397,24 @@ function syncNodeData() {
         promptDoc: ed.getJSON(),
     });
     recomputePromptWidth();
+    schedulePromptPersist();
+}
+
+let promptPersistTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePromptPersist() {
+    if (workflowPersistence && typeof workflowPersistence.markDirty === 'function') {
+        workflowPersistence.markDirty();
+    }
+    if (promptPersistTimer) clearTimeout(promptPersistTimer);
+    promptPersistTimer = setTimeout(() => {
+        if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+            try {
+                workflowPersistence.saveImmediately();
+            } catch (e) {
+                console.error('[PromptNode] 保存工作流失败:', e);
+            }
+        }
+    }, 800);
 }
 
 function recomputePromptWidth() {
@@ -723,6 +747,7 @@ watch(text, (val) => {
     const d = props.data as Record<string, unknown>;
     if (d.text !== val) {
         updateNodeData(props.id, { text: val });
+        schedulePromptPersist();
     }
     recomputePromptWidth();
 });
@@ -733,6 +758,7 @@ if (typeof document !== 'undefined') {
 }
 
 onUnmounted(() => {
+    if (promptPersistTimer) clearTimeout(promptPersistTimer);
     document.removeEventListener('click', handleClickOutside);
 });
 </script>

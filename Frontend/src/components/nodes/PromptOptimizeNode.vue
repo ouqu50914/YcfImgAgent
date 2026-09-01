@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { MagicStick } from '@element-plus/icons-vue';
 import { optimizePrompt } from '../../api/prompt';
@@ -81,6 +81,7 @@ import { ElMessage } from 'element-plus';
 const props = defineProps<NodeProps>();
 
 const { findNode, getEdges } = useVueFlow();
+const workflowPersistence = inject<{ saveImmediately: () => void; markDirty?: () => void } | null>('workflowPersistence', null);
 
 const originalPrompt = ref('');
 const apiType = ref<'dream' | 'nano'>('dream');
@@ -124,6 +125,9 @@ const handleOptimize = async () => {
             // 更新节点数据，供下游节点使用
             props.data.text = res.data.optimized;
             ElMessage.success('提示词优化成功！');
+            if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+                workflowPersistence.saveImmediately();
+            }
         } else {
             ElMessage.warning('优化成功，但未获取到结果');
         }

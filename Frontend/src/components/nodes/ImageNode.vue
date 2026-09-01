@@ -189,6 +189,7 @@ type ImageAliasStore = {
 
 type WorkflowPersistenceStore = {
     saveImmediately: () => void;
+    markDirty?: () => void;
 };
 
 const props = defineProps<NodeProps>();

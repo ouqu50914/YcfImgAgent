@@ -156,6 +156,7 @@ const props = defineProps<NodeProps>();
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
+const workflowPersistence = inject<{ saveImmediately: () => void; markDirty?: () => void } | null>('workflowPersistence', null);
 const userStore = useUserStore();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
@@ -272,6 +273,9 @@ const handleExtend = async () => {
             // 🔥 创建新的 ImageNode 节点显示扩展后的图片
             if (currentNode.value) {
                 createImageNode(url, res.data.image_url);
+            }
+            if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+                workflowPersistence.saveImmediately();
             }
         } else {
             ElMessage.warning('扩展成功，但未获取到图片URL');

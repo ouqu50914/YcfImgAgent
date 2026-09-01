@@ -202,6 +202,7 @@
                 :default-viewport="{ x: 0, y: 0, zoom: 0.8 }" :infinite="true" :only-render-visible-elements="false"
                 @mousemove="handleCanvasMouseMove"
                 @connect="onConnect" @connect-start="handleConnectStart" @connect-end="handleConnectEnd"
+                @node-drag-stop="handleNodeDragStop"
                 @pane-contextmenu="handlePaneContextMenu">
                 <Background pattern-color="#2d2e36" :gap="8" />
                 <Controls />
@@ -433,7 +434,10 @@ type WorkflowDTO = {
 };
 
 type WorkflowPersistenceStore = {
+    /** 立即落库（关键结构变更 / 拖拽结束等） */
     saveImmediately: () => void;
+    /** 仅标记有未保存变更，供自动保存与刷新/关页拦截 */
+    markDirty: () => void;
 };
 
 // 初始节点数据（默认一个提示词节点）
@@ -639,6 +643,10 @@ const undo = () => {
         setNodes(previousState.nodes);
         setEdges(previousState.edges);
         ElMessage.success('已撤销上一步操作');
+        hasPendingChanges.value = true;
+        persistWorkflow().catch((error: any) => {
+            console.error('关键操作保存失败（撤销）:', error);
+        });
     }
 };
 
@@ -662,6 +670,10 @@ const redo = () => {
         setNodes(nextState.nodes);
         setEdges(nextState.edges);
         ElMessage.success('已重做操作');
+        hasPendingChanges.value = true;
+        persistWorkflow().catch((error: any) => {
+            console.error('关键操作保存失败（重做）:', error);
+        });
     }
 };
 
@@ -897,7 +909,7 @@ const persistWorkflowOnce = async (): Promise<boolean> => {
 
         if (historyRes?.data?.id != null) {
             currentHistoryId.value = historyRes.data.id;
-            window.localStorage.setItem('workflow:lastHistoryId', String(historyRes.data.id));
+            setLastHistoryId(historyRes.data.id);
         }
 
         lastSavedAt.value = new Date();
@@ -932,12 +944,16 @@ const persistWorkflow = (): Promise<boolean> => {
                 persistReschedule = false;
                 ok = await persistWorkflowOnce();
             }
-            if (!persistReschedule) {
+            // 仅成功落库才清 pending；失败保留，供自动保存 / 离开页继续重试
+            if (ok && !persistReschedule) {
                 hasPendingChanges.value = false;
+            } else if (!ok) {
+                hasPendingChanges.value = true;
             }
             return ok;
         } catch (error: any) {
             console.error('工作流持久化链式调用失败:', error);
+            hasPendingChanges.value = true;
             return false;
         }
     });
@@ -950,9 +966,35 @@ const workflowPersistenceStore: WorkflowPersistenceStore = {
             console.error('关键操作保存失败（workflowPersistenceStore）:', error);
         });
     },
+    markDirty: () => {
+        hasPendingChanges.value = true;
+    },
 };
 
 provide<WorkflowPersistenceStore>('workflowPersistence', workflowPersistenceStore);
+
+/** 按用户隔离最近历史 id，避免多账号共用同一 localStorage 键 */
+const lastHistoryStorageKey = () => {
+    const uid = userStore.userInfo?.id;
+    return uid != null ? `workflow:lastHistoryId:${uid}` : 'workflow:lastHistoryId';
+};
+const setLastHistoryId = (id: number) => {
+    window.localStorage.setItem(lastHistoryStorageKey(), String(id));
+};
+const getLastHistoryIdRaw = (): string | null => {
+    const keyed = window.localStorage.getItem(lastHistoryStorageKey());
+    if (keyed) return keyed;
+    // 兼容旧键
+    return window.localStorage.getItem('workflow:lastHistoryId');
+};
+
+/** 拖拽节点结束后落库位置 */
+const handleNodeDragStop = () => {
+    hasPendingChanges.value = true;
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（拖拽节点）:', error);
+    });
+};
 
 /** 判断字符串是否像媒体存储路径或可访问 URL（用于写入 Gemini 上下文，避免把错误文案当链接） */
 function isLikelyMediaUrlString(raw: string): boolean {
@@ -1435,8 +1477,9 @@ const calculateOptimalPosition = (
 };
 
 // 封装一次保存当前工作流的逻辑：离开编辑器页面时统一调用
-const saveCurrentWorkflowBeforeLeave = async () => {
-    await persistWorkflow();
+const saveCurrentWorkflowBeforeLeave = async (): Promise<boolean> => {
+    if (getNodes.value.length === 0) return true;
+    return persistWorkflow();
 };
 
 /** 刷新/关页时尽量触发保存（浏览器不保证等完网络请求） */
@@ -1727,8 +1770,11 @@ const onConnect = (connection: Connection) => {
             console.log('已添加连接线');
             ElMessage.success('节点连接成功');
 
-            // 保存状态到撤销栈
+            // 保存状态到撤销栈并立即持久化
             saveState();
+            persistWorkflow().catch((error: any) => {
+                console.error('关键操作保存失败（节点连接）:', error);
+            });
         } else {
             console.log('连接已存在，跳过');
         }
@@ -2021,6 +2067,9 @@ const pasteCopiedNodes = () => {
         addEdges(newEdges);
     }
     ElMessage.success(`已粘贴 ${newNodes.length} 个节点`);
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（粘贴节点）:', error);
+    });
 };
 
 // 处理粘贴事件：仅支持粘贴已复制的节点（单节点或多节点）
@@ -2490,8 +2539,11 @@ const handleConnectToImage = () => {
     pendingConnection.value = null;
     ElMessage.success('已创建生图节点并建立连接');
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（拖线创建生图节点）:', error);
+    });
 };
 
 // 连接到视频节点
@@ -2580,8 +2632,11 @@ const handleConnectToVideo = () => {
     pendingConnection.value = null;
     ElMessage.success('已创建视频节点并建立连接');
 
-    // 保存状态到撤销栈
+    // 保存状态到撤销栈并立即持久化
     saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（拖线创建视频节点）:', error);
+    });
 };
 
 // 添加新节点逻辑
@@ -2842,7 +2897,7 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
             }
             // 记住当前编辑的是哪条历史记录，并写入本地存储，便于刷新后自动恢复
             currentHistoryId.value = history.id;
-            window.localStorage.setItem('workflow:lastHistoryId', String(history.id));
+            setLastHistoryId(history.id);
             ElMessage.success('历史记录恢复成功');
             showHistoryDialog.value = false;
             clearUndoRedoAndPending();
@@ -3121,10 +3176,14 @@ async function offerWorkflowNotificationGuide() {
 // 路由离开钩子：无论通过哪种方式离开编辑器页面，都尝试保存一次
 onBeforeRouteLeave(async (_to, _from, next) => {
     try {
-        await saveCurrentWorkflowBeforeLeave();
+        const ok = await saveCurrentWorkflowBeforeLeave();
+        if (!ok) {
+            ElMessage.warning('离开前自动保存失败，请返回后手动点「保存工作流」或从历史记录恢复');
+        }
     } catch (error: any) {
         console.error('离开编辑器前保存失败:', error);
-        // 不阻塞导航，只提示错误（控制台），用户可从历史记录恢复
+        ElMessage.warning('离开前自动保存失败，请返回后手动点「保存工作流」或从历史记录恢复');
+        // 不阻塞导航，用户可从历史记录恢复
     } finally {
         next();
     }
@@ -3199,7 +3258,7 @@ onMounted(async () => {
                     setEdges(workflowData.edges);
                     restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
-                    window.localStorage.setItem('workflow:lastHistoryId', String(historyId));
+                    setLastHistoryId(historyId);
                     if (templateIdFromHistory != null) {
                         currentTemplateId.value = templateIdFromHistory;
                         const myId = userStore.userInfo?.id != null ? Number(userStore.userInfo.id) : null;
@@ -3230,7 +3289,7 @@ onMounted(async () => {
                 if (isOwn) {
                     currentTemplateId.value = templateId;
                     templateOwnerId.value = ownerId;
-                    // 自己的项目：优先用该项目最新自动保存 history（比 template 更贴近刷新前画布）
+                    // 自己的项目：在 template 与最新 history 中按 updated_at / 节点数择优
                     try {
                         const listRes: any = await getHistoryList(1, templateId, { lite: true });
                         const latest = Array.isArray(listRes?.data) ? listRes.data[0] : null;
@@ -3240,14 +3299,23 @@ onMounted(async () => {
                             const historyUpdated = latest.updated_at
                                 ? new Date(latest.updated_at).getTime()
                                 : (latest.created_at ? new Date(latest.created_at).getTime() : 0);
-                            // history 不早于 template 时采用 history（含相等：自动保存往往两边同批，history 更常带全量节点）
-                            if (historyUpdated >= templateUpdated) {
-                                const histRes: any = await getHistory(latestId);
-                                const histData = histRes?.data?.workflow_data;
-                                if (histData?.nodes && histData?.edges) {
+                            const histRes: any = await getHistory(latestId);
+                            const histData = histRes?.data?.workflow_data;
+                            if (histData?.nodes && histData?.edges) {
+                                const templateNodeCount = Array.isArray(workflowData?.nodes) ? workflowData.nodes.length : 0;
+                                const historyNodeCount = histData.nodes.length;
+                                // history 更新：直接用；相等时取节点更多的；template 更新：保留 template（应对 history 写入失败）
+                                const preferHistory =
+                                    historyUpdated > templateUpdated ||
+                                    (historyUpdated === templateUpdated && historyNodeCount >= templateNodeCount);
+                                if (preferHistory) {
                                     workflowData = histData;
                                     currentHistoryId.value = latestId;
-                                    window.localStorage.setItem('workflow:lastHistoryId', String(latestId));
+                                    setLastHistoryId(latestId);
+                                } else if (currentHistoryId.value == null) {
+                                    // 仍绑定该 history 以便后续覆盖写，但画布用更新的 template
+                                    currentHistoryId.value = latestId;
+                                    setLastHistoryId(latestId);
                                 }
                             }
                         }
@@ -3281,7 +3349,7 @@ onMounted(async () => {
     // 如果既没有通过 URL 指定 historyId，也没有指定模板 id，
     // 且不是显式“新建项目”(new=1)，则尝试从本地存储中恢复最近一次自动保存的版本
     if (!query.historyId && !query.id && !query.new) {
-        const lastIdRaw = window.localStorage.getItem('workflow:lastHistoryId');
+        const lastIdRaw = getLastHistoryIdRaw();
         const lastId = lastIdRaw ? parseInt(lastIdRaw, 10) : NaN;
         if (!Number.isNaN(lastId)) {
             try {

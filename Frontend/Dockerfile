@@ -21,7 +21,9 @@ COPY . .
 RUN yarn build
 
 # Nginx 服务镜像
-FROM nginx:alpine
+# 不要用浮动标签 nginx:alpine：在 CentOS 7（内核 3.10）上，新版 nginx(1.31+)
+# 写 /run/nginx.pid 会 pwrite EPERM，容器 Restarting，外层出现 502。
+FROM nginx:1.26.2-alpine
 
 # 复制构建产物到 Nginx
 COPY --from=builder /app/dist /usr/share/nginx/html

@@ -147,6 +147,7 @@ const props = defineProps<NodeProps>();
 
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
+const workflowPersistence = inject<{ saveImmediately: () => void; markDirty?: () => void } | null>('workflowPersistence', null);
 const userStore = useUserStore();
 
 // 图层分离使用 Dream API，固定 1 积分
@@ -242,6 +243,9 @@ const handleSeparate = async () => {
             
             // 为每个图层创建下游图片节点
             await createLayerNodes();
+            if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+                workflowPersistence.saveImmediately();
+            }
         } else {
             ElMessage.warning('分离成功，但未获取到图层数据');
         }

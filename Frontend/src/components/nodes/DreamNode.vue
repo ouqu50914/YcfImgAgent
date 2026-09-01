@@ -165,6 +165,7 @@ const props = defineProps<NodeProps>();
 
 type WorkflowPersistenceStore = {
     saveImmediately: () => void;
+    markDirty?: () => void;
 };
 
 type CreditTrackerStore = {

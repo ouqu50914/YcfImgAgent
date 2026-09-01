@@ -90,7 +90,13 @@ type MediaAliasStore = {
   getOrCreateAudioAlias: (key: string) => string;
 };
 
+type WorkflowPersistenceStore = {
+  saveImmediately: () => void;
+  markDirty?: () => void;
+};
+
 const mediaAliasStore = inject<MediaAliasStore | null>('mediaAliasStore', null);
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
 
 const url = ref<string>((props.data as any)?.url || '');
 const alias = ref<string>((props.data as any)?.resourceAlias || '');
@@ -105,6 +111,7 @@ const normalizedUrl = computed(() => {
   return getUploadUrl(v);
 });
 
+let urlWatchReady = false;
 watch(
   url,
   (val) => {
@@ -112,6 +119,11 @@ watch(
       (props as any).data = {};
     }
     (props.data as any).url = val.trim();
+    if (urlWatchReady) {
+      if (workflowPersistence && typeof workflowPersistence.markDirty === 'function') {
+        workflowPersistence.markDirty();
+      }
+    }
   },
   { immediate: true }
 );
@@ -131,6 +143,7 @@ const ensureAlias = () => {
 
 onMounted(() => {
   ensureAlias();
+  urlWatchReady = true;
 });
 
 const handleSelectFile = () => {
@@ -175,6 +188,9 @@ const handleSelectFile = () => {
       (props.data as any).sizeBytes = file.size;
       (props.data as any).mimeType = file.type;
       ElMessage.success('视频上传成功');
+      if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+        workflowPersistence.saveImmediately();
+      }
     } catch (e: any) {
       console.error('[VideoRefNode] 视频上传失败', e);
       if (!(e as any)?.response) {

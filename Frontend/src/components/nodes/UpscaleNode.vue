@@ -122,9 +122,15 @@ type ImageAliasStore = {
 
 const props = defineProps<NodeProps>();
 
+type WorkflowPersistenceStore = {
+    saveImmediately: () => void;
+    markDirty?: () => void;
+};
+
 const { findNode, getEdges, addNodes, addEdges, getNodes } = useVueFlow();
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
+const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
 const userStore = useUserStore();
 
 const inputImageUrl = ref(props.data?.imageUrl || '');
@@ -236,6 +242,9 @@ const handleUpscale = async () => {
             // 🔥 创建新的 ImageNode 节点显示放大后的图片
             if (currentNode.value) {
                 createImageNode(url, res.data.image_url);
+            }
+            if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+                workflowPersistence.saveImmediately();
             }
         } else {
             ElMessage.warning('放大成功，但未获取到图片URL');

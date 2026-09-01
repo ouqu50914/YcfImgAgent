@@ -368,6 +368,7 @@ function withTemplateId<T extends object>(obj: T): T {
 
 type WorkflowPersistenceStore = {
   saveImmediately: () => void;
+  markDirty?: () => void;
 };
 
 const workflowPersistence = inject<WorkflowPersistenceStore | null>('workflowPersistence', null);
