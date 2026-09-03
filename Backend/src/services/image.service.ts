@@ -18,6 +18,7 @@ import { ProviderError } from "../adapters/provider-error";
 import { calculateNanoPolicyRates, isFallbackEligible } from "./nano-policy.util";
 import { detectImageFormat } from "../utils/image-format";
 import { isCosEnabled, upload as cosUpload, pathToKey } from "./cos.service";
+import { isAnyfastGeminiProModel, normalizeAnyfastGeminiModel } from "../utils/nano-credit.util";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -334,13 +335,14 @@ export class ImageService {
 
     /**
      * AnyFast 模型在回退到 Ace 时需要映射到 Ace 可识别的模型名。
-     * - gemini-3-pro-image-preview -> nano-banana-2
-     * - gemini-3.1-flash-image-preview -> nano-banana-pro
+     * - gemini-3-pro-image -> nano-banana-2
+     * - gemini-3.1-flash-image -> nano-banana-pro
      */
     private mapModelForProvider(provider: "ace" | "anyfast", model?: GenerateParams["model"]): GenerateParams["model"] {
         if (provider !== "ace" || !model) return model;
-        if (model === "gemini-3-pro-image-preview") return "nano-banana-2";
-        if (model === "gemini-3.1-flash-image-preview") return "nano-banana-pro";
+        const normalized = normalizeAnyfastGeminiModel(model) || model;
+        if (normalized === "gemini-3-pro-image") return "nano-banana-2";
+        if (normalized === "gemini-3.1-flash-image") return "nano-banana-pro";
         return model;
     }
 
@@ -373,7 +375,12 @@ export class ImageService {
         const normalizedUserId = Number(userId);
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
-        const isAnyfastProRequest = params.model === "gemini-3-pro-image-preview";
+        // 将旧 preview 模型名归一到正式版，避免调用已下线模型
+        const normalizedModel = (normalizeAnyfastGeminiModel(params.model) || params.model) as GenerateParams["model"];
+        if (normalizedModel !== params.model) {
+            params = { ...params, model: normalizedModel };
+        }
+        const isAnyfastProRequest = isAnyfastGeminiProModel(params.model);
         const isGptImage2Request = params.model === "gpt-image-2" || params.model === "gpt-image-2-c";
         const isGptImage2AnyfastRequest =
             (params.model === "gpt-image-2" && params.providerHint === "anyfast")
@@ -398,8 +405,8 @@ export class ImageService {
         const isGptImage2AnyfastDirect = isGptImage2AnyfastRequest;
         const requestedAnyfastDirect =
             params.providerHint === "anyfast" ||
-            params.model === "gemini-3.1-flash-image-preview" ||
-            params.model === "gemini-3-pro-image-preview" ||
+            params.model === "gemini-3.1-flash-image" ||
+            params.model === "gemini-3-pro-image" ||
             isGptImage2AnyfastDirect;
         const requestedAceDirect = params.providerHint === "ace"
             && params.model !== "gpt-image-2"

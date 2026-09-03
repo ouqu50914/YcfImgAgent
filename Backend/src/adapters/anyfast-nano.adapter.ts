@@ -20,11 +20,16 @@ const axiosClient = axios.create({
 // 默认 90 秒超时，避免 AnyFast 长时间无响应拖慢整体回显；可通过环境变量覆盖
 const ANYFAST_REQUEST_TIMEOUT_MS = Number(process.env.ANYFAST_REQUEST_TIMEOUT_MS || "600000");
 const ANYFAST_BASE_URL = (process.env.ANYFAST_BASE_URL || "https://www.anyfast.ai").replace(/\/$/, "");
-const ANYFAST_DEFAULT_MODEL = "gemini-3.1-flash-image-preview";
+const ANYFAST_DEFAULT_MODEL = "gemini-3.1-flash-image";
 const ANYFAST_ALLOWED_MODELS = new Set([
-    "gemini-3.1-flash-image-preview",
-    "gemini-3-pro-image-preview",
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image",
 ]);
+/** 旧 preview 模型名 → 正式版（供应商已下线 preview） */
+const ANYFAST_MODEL_ALIASES: Record<string, string> = {
+    "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+    "gemini-3-pro-image-preview": "gemini-3-pro-image",
+};
 // 默认重试 1 次（总尝试 2 次），失败后尽快走 Ace 兜底
 const ANYFAST_MAX_RETRIES = Math.max(0, Number(process.env.ANYFAST_MAX_RETRIES || "1"));
 const ANYFAST_RETRY_BASE_DELAY_MS = Math.max(100, Number(process.env.ANYFAST_RETRY_BASE_DELAY_MS || "600"));
@@ -51,8 +56,9 @@ export class AnyfastNanoAdapter implements AiProvider {
     }
 
     private resolveModel(model?: string): string {
-        if (model && ANYFAST_ALLOWED_MODELS.has(model)) {
-            return model;
+        const normalized = model ? (ANYFAST_MODEL_ALIASES[model] || model) : undefined;
+        if (normalized && ANYFAST_ALLOWED_MODELS.has(normalized)) {
+            return normalized;
         }
         return ANYFAST_DEFAULT_MODEL;
     }

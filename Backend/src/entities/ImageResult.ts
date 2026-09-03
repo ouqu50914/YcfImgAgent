@@ -12,7 +12,7 @@ export class ImageResult {
     @Column({ length: 20 })
     api_type!: string;
 
-    @Column({ type: "varchar", length: 100, nullable: true, comment: "真实模型名，如 gpt-image-2 / gemini-3-pro-image-preview" })
+    @Column({ type: "varchar", length: 100, nullable: true, comment: "真实模型名，如 gpt-image-2 / gemini-3-pro-image" })
     model_name!: string | null;
 
     @Column({ type: "varchar", length: 50, nullable: true, comment: "模型平台，如 ace/anyfast/dream/nano" })

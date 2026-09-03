@@ -178,8 +178,8 @@ const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
-const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image-preview';
-const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image-preview';
+const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image';
+const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image';
 const GPT_IMAGE2_ACE_MODEL = 'gpt-image-2:ace';
 const GPT_IMAGE2_ANYFAST_MODEL = 'gpt-image-2:anyfast';
 const GPT_IMAGE2_ANYFAST_C_MODEL = 'gpt-image-2-c:anyfast';
@@ -192,7 +192,7 @@ const ALL_MODEL_OPTIONS = [
     { label: 'GPT Image 2-C(anyfast)', value: GPT_IMAGE2_ANYFAST_C_MODEL },
     { label: 'NanoBanana2(ace)（6/张）', value: 'nano:nano-banana-2' },
     { label: 'NanoBanana Pro(ace)（6/张）', value: 'nano:nano-banana-pro' },
-    { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image-preview' },
+    { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image' },
     { label: 'NanoBanana Pro(anyfast)（2K:15/张，4K:20/张）', value: ANYFAST_PRO_MODEL },
 ] as const;
 const availableModelOptions = computed(() => {
@@ -297,12 +297,12 @@ const initialSelectedModel = (() => {
         if (m === 'gpt-image-2') {
             return (props.data as any)?.providerHint === 'anyfast' ? GPT_IMAGE2_ANYFAST_MODEL : GPT_IMAGE2_ACE_MODEL;
         }
-        if (m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image-preview';
-        if (m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image-preview';
+        if (m === 'gemini-3-pro-image' || m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image';
+        if (m === 'gemini-3.1-flash-image' || m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image';
         if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
         if (m === 'nano-banana-2') return 'nano:nano-banana-2';
         // 默认走 AnyFast（若用户未显式选择）
-        return 'anyfast:gemini-3.1-flash-image-preview';
+        return 'anyfast:gemini-3.1-flash-image';
     }
     return (props.data?.apiType || 'dream') as string;
 })();
@@ -323,12 +323,16 @@ const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
 });
 
 // 计算属性：从 selectedModel 中提取具体的 nano 模型
-const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | 'gpt-image-2' | 'gpt-image-2-c' | undefined>(() => {
+const nanoModel = computed<'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image' | 'gemini-3-pro-image' | 'gpt-image-2' | 'gpt-image-2-c' | undefined>(() => {
     if (selectedModel.value === GPT_IMAGE2_ANYFAST_C_MODEL) return 'gpt-image-2-c';
     if (selectedModel.value.startsWith('gpt-image-2:')) return 'gpt-image-2';
     if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
     const parts = selectedModel.value.split(':');
-    return parts[1] as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview' | 'gpt-image-2' | 'gpt-image-2-c';
+    const raw = parts[1];
+    // 兼容旧 preview 模型名
+    if (raw === 'gemini-3-pro-image-preview') return 'gemini-3-pro-image';
+    if (raw === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-flash-image';
+    return raw as 'nano-banana-2' | 'nano-banana-pro' | 'gemini-3.1-flash-image' | 'gemini-3-pro-image' | 'gpt-image-2' | 'gpt-image-2-c';
 });
 
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {

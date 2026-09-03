@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { ImageService } from "../services/image.service";
 import { LogService } from "../services/log.service";
+import { isAnyfastGeminiProModel, normalizeAnyfastGeminiModel } from "../utils/nano-credit.util";
 
 const imageService = new ImageService();
 const logService = new LogService();
@@ -21,7 +22,7 @@ export const generateImage = async (req: Request, res: Response) => {
             imageAliases,
             numImages,
             quality,
-            model,
+            model: rawModel,
             providerHint,
             aspectRatio,
             generationKey,
@@ -35,8 +36,9 @@ export const generateImage = async (req: Request, res: Response) => {
             callbackUrl,
             taskId,
         } = req.body;
+        const model = normalizeAnyfastGeminiModel(rawModel) || rawModel;
         const isAdmin = userRole === 1;
-        const isAnyfastProRequest = model === 'gemini-3-pro-image-preview';
+        const isAnyfastProRequest = isAnyfastGeminiProModel(model);
         if (!isAdmin && isAnyfastProRequest) {
             return res.status(403).json({
                 code: 'ANYFAST_PRO_FORBIDDEN',

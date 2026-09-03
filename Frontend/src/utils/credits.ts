@@ -21,6 +21,13 @@ function isGptImage2Model(model?: string): boolean {
   return model === 'gpt-image-2' || model === 'gpt-image-2-c';
 }
 
+function normalizeAnyfastGeminiModel(model?: string): string | undefined {
+  if (!model) return model;
+  if (model === 'gemini-3-pro-image-preview') return 'gemini-3-pro-image';
+  if (model === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-flash-image';
+  return model;
+}
+
 function calcNanoGenerateCredits(options: {
   model?: string;
   providerHint?: NanoProviderHint;
@@ -29,7 +36,7 @@ function calcNanoGenerateCredits(options: {
 }): number {
   const count = options.imageCount ?? 1;
   const quality = options.quality === '4K' ? '4K' : '2K';
-  const model = options.model;
+  const model = normalizeAnyfastGeminiModel(options.model);
   const provider = resolveNanoProvider(model, options.providerHint);
 
   if (provider === 'anyfast') {
@@ -39,7 +46,7 @@ function calcNanoGenerateCredits(options: {
       return perImage * count;
     }
     const perImage =
-      model === 'gemini-3-pro-image-preview'
+      model === 'gemini-3-pro-image'
         ? quality === '4K'
           ? 20
           : 15

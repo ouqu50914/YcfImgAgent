@@ -77,8 +77,8 @@ export class GenerationRecordService {
             if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
             if (name === "gpt-image-2" && provider === "anyfast") return "GPT Image 2(AnyFast)";
             if (name === "gpt-image-2" && provider === "ace") return "GPT Image 2(Ace)";
-            if (name === "gemini-3-pro-image-preview") return "NanoBanana Pro(AnyFast)";
-            if (name === "gemini-3.1-flash-image-preview") return "NanoBanana2(AnyFast)";
+            if (name === "gemini-3-pro-image" || name === "gemini-3-pro-image-preview") return "NanoBanana Pro(AnyFast)";
+            if (name === "gemini-3.1-flash-image" || name === "gemini-3.1-flash-image-preview") return "NanoBanana2(AnyFast)";
             if (name.startsWith("nano-banana-")) return `Nano(${provider})`;
             return `${name}(${provider})`;
         }

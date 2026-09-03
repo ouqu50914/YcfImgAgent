@@ -1,5 +1,18 @@
 export type NanoProviderHint = 'ace' | 'anyfast';
 
+/** AnyFast Gemini 旧 preview 名 → 正式版 */
+export function normalizeAnyfastGeminiModel(model?: string): string | undefined {
+    if (!model) return model;
+    if (model === 'gemini-3-pro-image-preview') return 'gemini-3-pro-image';
+    if (model === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-flash-image';
+    return model;
+}
+
+export function isAnyfastGeminiProModel(model?: string): boolean {
+    const m = normalizeAnyfastGeminiModel(model);
+    return m === 'gemini-3-pro-image';
+}
+
 /**
  * 解析 Nano 线路供应商（与前端 getCreditCost 保持一致）
  */
@@ -30,7 +43,7 @@ export function calcNanoGenerateCredits(options: {
 }): number {
     const count = options.imageCount ?? 1;
     const quality = options.quality === '4K' ? '4K' : '2K';
-    const model = options.model;
+    const model = normalizeAnyfastGeminiModel(options.model);
     const provider = resolveNanoProvider(model, options.providerHint);
 
     if (provider === 'anyfast') {
@@ -39,7 +52,7 @@ export function calcNanoGenerateCredits(options: {
             const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
             return perImage * count;
         }
-        const perImage = model === 'gemini-3-pro-image-preview'
+        const perImage = isAnyfastGeminiProModel(model)
             ? (quality === '4K' ? 20 : 15)
             : (quality === '4K' ? 15 : 11);
         return perImage * count;
@@ -57,11 +70,12 @@ export function buildCreditUsageApiType(
     providerHint?: NanoProviderHint
 ): string {
     if (apiType !== 'nano') return apiType;
-    if (model === 'gpt-image-2-c') return 'gpt-image-2-c';
-    if (model === 'gpt-image-2' && providerHint === 'anyfast') return 'gpt-image-2-af';
-    if (model === 'gemini-3-pro-image-preview') return 'gemini-3-pro';
-    if (model === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-fl';
-    if (model?.startsWith('nano-banana-')) return 'nano-ace';
+    const normalized = normalizeAnyfastGeminiModel(model);
+    if (normalized === 'gpt-image-2-c') return 'gpt-image-2-c';
+    if (normalized === 'gpt-image-2' && providerHint === 'anyfast') return 'gpt-image-2-af';
+    if (normalized === 'gemini-3-pro-image') return 'gemini-3-pro';
+    if (normalized === 'gemini-3.1-flash-image') return 'gemini-3.1-fl';
+    if (normalized?.startsWith('nano-banana-')) return 'nano-ace';
     return 'nano';
 }
 

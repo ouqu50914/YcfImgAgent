@@ -18,7 +18,9 @@ export interface GenerateParams {
     model?:
         | 'nano-banana-2'
         | 'nano-banana-pro'
-        | 'gemini-3.1-flash-image-preview'
+        | 'gemini-3.1-flash-image'
+        | 'gemini-3-pro-image'
+        | 'gemini-3.1-flash-image-preview' // 兼容旧值
         | 'gemini-3-pro-image-preview'
         | 'gpt-image-2'
         | 'gpt-image-2-c';
