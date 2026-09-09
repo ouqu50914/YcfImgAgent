@@ -879,6 +879,8 @@ const getStatsApiTypeLabel = (apiType: string) => {
     midjourney: 'Midjourney',
     'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
     'gpt-image-2-af': 'GPT Image 2(AnyFast)',
+    'img2.5': 'GPT Image 2.5(AnyFast)',
+    'img2.5-fast': 'GPT Image 2.5-Fast(AnyFast)',
     'gemini-3-pro': 'NanoBanana Pro(AnyFast)',
     'gemini-3.1-fl': 'NanoBanana2(AnyFast)',
     'nano-ace': 'Nano(Ace)',

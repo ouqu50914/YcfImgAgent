@@ -385,10 +385,17 @@ export class ImageService {
             };
         }
         const isAnyfastProRequest = isAnyfastGeminiProModel(params.model);
-        const isGptImage2Request = params.model === "gpt-image-2" || params.model === "gpt-image-2-c";
+        const isGptImage25Request =
+            params.model === "gpt-image-2.5-sunburst" || params.model === "gpt-image-2.5-flare";
+        const isGptImage2Request =
+            params.model === "gpt-image-2"
+            || params.model === "gpt-image-2-c"
+            || isGptImage25Request;
+        const isGptImage2AnyfastOnly =
+            params.model === "gpt-image-2-c" || isGptImage25Request;
         const isGptImage2AnyfastRequest =
             (params.model === "gpt-image-2" && params.providerHint === "anyfast")
-            || params.model === "gpt-image-2-c";
+            || isGptImage2AnyfastOnly;
         if (!isAdmin && isAnyfastProRequest) {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
                 status: 403,
@@ -414,7 +421,8 @@ export class ImageService {
             isGptImage2AnyfastDirect;
         const requestedAceDirect = params.providerHint === "ace"
             && params.model !== "gpt-image-2"
-            && params.model !== "gpt-image-2-c";
+            && params.model !== "gpt-image-2-c"
+            && !isGptImage25Request;
 
         // 路由策略（普通用户/管理员统一）：
         // - 用户显式选了 ace/anyfast：按所选为主路由，另一家为兜底
@@ -470,7 +478,7 @@ export class ImageService {
             });
             const adapter = this.nanoProviderAdapters[provider];
             const result = isGptImage2Request
-                ? (provider === "anyfast" || params.model === "gpt-image-2-c"
+                ? (provider === "anyfast" || isGptImage2AnyfastOnly
                     ? await this.anyfastGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl)
                     : await this.aceGptImage2Adapter.generateImage(providerParams, apiKey, apiUrl))
                 : await adapter.generateImage(providerParams, apiKey, apiUrl);

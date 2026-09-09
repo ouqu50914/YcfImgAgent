@@ -12,13 +12,17 @@ function resolveNanoProvider(model?: string, providerHint?: NanoProviderHint): N
   if (providerHint === 'ace' || providerHint === 'anyfast') return providerHint;
   if (model?.startsWith('gemini-')) return 'anyfast';
   if (model === 'gpt-image-2-c') return 'anyfast';
+  if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
   if (model === 'gpt-image-2') return 'ace';
   if (model?.startsWith('nano-banana-')) return 'ace';
   return 'ace';
 }
 
 function isGptImage2Model(model?: string): boolean {
-  return model === 'gpt-image-2' || model === 'gpt-image-2-c';
+  return model === 'gpt-image-2'
+    || model === 'gpt-image-2-c'
+    || model === 'gpt-image-2.5-sunburst'
+    || model === 'gpt-image-2.5-flare';
 }
 
 function normalizeAnyfastGeminiModel(model?: string): string | undefined {

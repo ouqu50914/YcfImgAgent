@@ -41,6 +41,8 @@ const DEFAULT_EXPORT_MODELS = [
     "gpt-image-2 (ace)",
     "gpt-image-2 (anyfast)",
     "gpt-image-2-c (anyfast)",
+    "gpt-image-2.5-sunburst (anyfast)",
+    "gpt-image-2.5-flare (anyfast)",
     "gemini-3.1-flash-image (anyfast)",
     "gemini-3-pro-image (anyfast)",
     "midjourney (midjourney)",

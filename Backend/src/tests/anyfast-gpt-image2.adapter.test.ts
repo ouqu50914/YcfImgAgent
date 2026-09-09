@@ -103,3 +103,49 @@ test("AnyfastGptImage2Adapter: generateImage 无参考图时走 generations 端�
 
     assert.match(capturedEndpoint, /\/v1\/images\/generations$/);
 });
+
+test("AnyfastGptImage2Adapter: generateImage img2.5 无参考图时走 generations 并透传上游模型名", async () => {
+    const adapter = new AnyfastGptImage2Adapter() as any;
+    let capturedEndpoint = "";
+    let capturedSummary: Record<string, unknown> | undefined;
+    adapter.postUpstream = async (
+        endpoint: string,
+        _payload: unknown,
+        _headers: unknown,
+        _key: string,
+        _mode: string,
+        upstreamModel: string,
+        requestSummary: Record<string, unknown>
+    ) => {
+        capturedEndpoint = endpoint;
+        capturedSummary = { ...requestSummary, model: upstreamModel };
+        return { original_id: "test-id", images: ["/uploads/test.png"] };
+    };
+
+    await adapter.generateImage(
+        {
+            prompt: "文生图",
+            model: "gpt-image-2.5-sunburst",
+            size: "1024x1024",
+        },
+        "fake-key",
+        ""
+    );
+
+    assert.match(capturedEndpoint, /\/v1\/images\/generations$/);
+    assert.equal(capturedSummary?.model, "gpt-image-2.5-sunburst");
+});
+
+test("AnyfastGptImage2Adapter: buildEditForm img2.5-fast 透传 flare 模型名", async () => {
+    const adapter = new AnyfastGptImage2Adapter() as any;
+    const { summary } = await adapter.buildEditForm(
+        { prompt: "编辑图片" },
+        [PNG_DATA_URL],
+        "gpt-image-2.5-flare",
+        1,
+        "1024x1024",
+        "png"
+    );
+    assert.equal(summary.model, "gpt-image-2.5-flare");
+    assert.equal(summary.response_format, undefined);
+});

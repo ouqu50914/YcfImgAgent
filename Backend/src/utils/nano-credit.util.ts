@@ -23,13 +23,17 @@ export function resolveNanoProvider(
     if (providerHint === 'ace' || providerHint === 'anyfast') return providerHint;
     if (model?.startsWith('gemini-')) return 'anyfast';
     if (model === 'gpt-image-2-c') return 'anyfast';
+    if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
     if (model === 'gpt-image-2') return 'ace';
     if (model?.startsWith('nano-banana-')) return 'ace';
     return 'ace';
 }
 
 export function isGptImage2Model(model?: string): boolean {
-    return model === 'gpt-image-2' || model === 'gpt-image-2-c';
+    return model === 'gpt-image-2'
+        || model === 'gpt-image-2-c'
+        || model === 'gpt-image-2.5-sunburst'
+        || model === 'gpt-image-2.5-flare';
 }
 
 /**
@@ -71,6 +75,8 @@ export function buildCreditUsageApiType(
 ): string {
     if (apiType !== 'nano') return apiType;
     const normalized = normalizeAnyfastGeminiModel(model);
+    if (normalized === 'gpt-image-2.5-sunburst') return 'img2.5';
+    if (normalized === 'gpt-image-2.5-flare') return 'img2.5-fast';
     if (normalized === 'gpt-image-2-c') return 'gpt-image-2-c';
     if (normalized === 'gpt-image-2' && providerHint === 'anyfast') return 'gpt-image-2-af';
     if (normalized === 'gemini-3-pro-image') return 'gemini-3-pro';
@@ -85,6 +91,8 @@ export function getCreditUsageApiTypeLabel(apiType: string): string {
         dream: 'Dream(文生图)',
         nano: 'Nano(通用)',
         midjourney: 'Midjourney',
+        'img2.5': 'GPT Image 2.5(AnyFast)',
+        'img2.5-fast': 'GPT Image 2.5-Fast(AnyFast)',
         'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
         'gpt-image-2-af': 'GPT Image 2(AnyFast)',
         'gemini-3-pro': 'NanoBanana Pro(AnyFast)',

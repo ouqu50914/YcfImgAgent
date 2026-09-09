@@ -14,7 +14,7 @@ const GPT_IMAGE2_DEFAULT_BASE_URL = "https://www.anyfast.ai";
 const GPT_IMAGE2_REQUEST_TIMEOUT_MS = Number(process.env.GPT_IMG2_REQUEST_TIMEOUT_MS || "600000");
 const GPT_IMAGE2_MAX_EDIT_REFS = 16;
 
-type UpstreamModel = "gpt-image-2" | "gpt-image-2-c";
+type UpstreamModel = "gpt-image-2" | "gpt-image-2-c" | "gpt-image-2.5-sunburst" | "gpt-image-2.5-flare";
 type RequestMode = "generate" | "edit";
 
 export class AnyfastGptImage2Adapter implements AiProvider {
@@ -88,11 +88,15 @@ export class AnyfastGptImage2Adapter implements AiProvider {
     }
 
     private resolveUpstreamModel(model?: GenerateParams["model"]): UpstreamModel {
-        return model === "gpt-image-2-c" ? "gpt-image-2-c" : "gpt-image-2";
+        if (model === "gpt-image-2-c") return "gpt-image-2-c";
+        if (model === "gpt-image-2.5-sunburst") return "gpt-image-2.5-sunburst";
+        if (model === "gpt-image-2.5-flare") return "gpt-image-2.5-flare";
+        return "gpt-image-2";
     }
 
     private getApiKey(apiKeyFromConfig?: string, model?: GenerateParams["model"]): string {
         const upstreamModel = this.resolveUpstreamModel(model);
+        // GPT Image 2.5 / 2.5-Fast 与 Image 2 共用 GPT_IMG2_API_KEY
         const key = upstreamModel === "gpt-image-2-c"
             ? (process.env.GPT_IMG2_API_KEY_C || apiKeyFromConfig)
             : (process.env.GPT_IMG2_API_KEY || process.env.ANYFAST_API_KEY || apiKeyFromConfig);

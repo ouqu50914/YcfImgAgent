@@ -22,7 +22,9 @@ export interface GenerateParams {
         | 'gemini-3.1-flash-image-preview' // 兼容旧值，运行时会归一到正式版
         | 'gemini-3-pro-image-preview'
         | 'gpt-image-2'
-        | 'gpt-image-2-c'; // 模型选择
+        | 'gpt-image-2-c'
+        | 'gpt-image-2.5-sunburst'
+        | 'gpt-image-2.5-flare'; // 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）
     providerHint?: 'ace' | 'anyfast'; // 可选的供应商提示
     size?: string; // GPT Image 2 尺寸，格式如 "1536x1024"

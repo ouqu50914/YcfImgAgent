@@ -23,7 +23,9 @@ export interface GenerateParams {
         | 'gemini-3.1-flash-image-preview' // 兼容旧值
         | 'gemini-3-pro-image-preview'
         | 'gpt-image-2'
-        | 'gpt-image-2-c';
+        | 'gpt-image-2-c'
+        | 'gpt-image-2.5-sunburst'
+        | 'gpt-image-2.5-flare';
     providerHint?: 'ace' | 'anyfast';
     size?: string;
     outputFormat?: 'png' | 'webp' | 'jpeg';
