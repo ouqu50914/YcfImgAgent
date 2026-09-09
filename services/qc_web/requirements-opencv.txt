@@ -1,2 +1,4 @@
-# 完整 L0 预检（清晰度拉普拉斯）可选依赖
+# 可选：本地补全清晰度预检（生产 Docker 已含 opencv-python-headless）
 opencv-python>=4.8
+# 或：
+# opencv-python-headless>=4.8

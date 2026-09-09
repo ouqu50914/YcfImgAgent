@@ -38,7 +38,10 @@ services:
       - "8082:8082"
     environment:
       API_KEY: ${QC_API_KEY:-}
+      QC_API_KEY: ${QC_API_KEY:-}
+      ACE_API_KEY: ${ACE_API_KEY:-}
       API_BASE: ${QC_API_BASE:-https://api.acedata.cloud/v1}
       QC_PORT: 8082
+      QC_HOST: 0.0.0.0
     volumes:
       - ./data/qc_uploads:/app/uploads

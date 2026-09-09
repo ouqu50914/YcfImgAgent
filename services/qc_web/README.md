@@ -4,6 +4,22 @@ YcfImgAgent 侧车服务：上传效果图（可选需求图）→ GPT 自动评
 
 本目录位于 monorepo：`YcfImgAgent/services/qc_web`。工作流前端通过 Backend `/api/review` 代理调用，请勿让浏览器直连本服务。
 
+## Docker 生产部署
+
+已纳入根目录 `docker-compose.prod.yml` 的 `qc_web` 服务：
+
+- 镜像内安装 flask / numpy / pillow / opencv-python-headless
+- 仅 Docker 内网访问，**不要**把 8082 映射到公网
+- Backend 使用 `QC_WEB_URL=http://qc_web:8082`
+- Key：`QC_API_KEY` 优先，否则回退 `ACE_API_KEY`（均从根目录 `.env` 注入）
+
+```bash
+# 服务器上
+cp .env.example .env   # 首次
+# 编辑 .env 填入 ACE_API_KEY 或 QC_API_KEY 等
+docker compose -f docker-compose.prod.yml up -d --build qc_web backend frontend
+```
+
 ## 本地启动
 
 ### 推荐（读 Backend/.env.local）

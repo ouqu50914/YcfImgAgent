@@ -20,12 +20,20 @@ import review_auto
 
 HOST = os.environ.get("QC_HOST", "0.0.0.0")
 PORT = int(os.environ.get("QC_PORT", "8082"))
-API_KEY = os.environ.get("API_KEY", "")
-API_BASE = os.environ.get("API_BASE", "https://api.acedata.cloud/v1")
+API_KEY = (
+    os.environ.get("API_KEY")
+    or os.environ.get("QC_API_KEY")
+    or os.environ.get("ACE_API_KEY")
+    or ""
+)
+API_BASE = os.environ.get("API_BASE") or os.environ.get("QC_API_BASE") or "https://api.acedata.cloud/v1"
 MAX_SIDE = int(os.environ.get("QC_MAX_SIDE", "768"))
 QUALITY = int(os.environ.get("QC_QUALITY", "80"))
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+if not API_KEY:
+    print("[WARN] 未配置 API_KEY / QC_API_KEY / ACE_API_KEY，质检调用将会失败")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -48,10 +56,7 @@ def annotate_image(im_path, issues_text, main_box_idx=0):
     W, H = im.size
     im = Image.blend(im, Image.new("RGB", (W, H), (0, 0, 0)), 0.30)
     draw = ImageDraw.Draw(im)
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", max(26, int(W * 0.020)))
-    except Exception:
-        font = None
+    font = _load_font(max(26, int(W * 0.020)), bold=True)
     boxes = parse_boxes(issues_text)
     if not boxes:
         return im, 0
@@ -105,6 +110,19 @@ def _strip_num_prefix(s):
 # ========== 合成图生成（标注图+文字质检单合一） ==========
 NOTO_REG = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 NOTO_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+WQY_ZEN = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
+FONT_CANDIDATES_REG = [NOTO_REG, WQY_ZEN, "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
+FONT_CANDIDATES_BOLD = [NOTO_BOLD, WQY_ZEN, "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
+
+
+def _load_font(size, bold=False):
+    paths = FONT_CANDIDATES_BOLD if bold else FONT_CANDIDATES_REG
+    for p in paths:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 def _wrap_text(draw, text, font, max_w):
     """按像素宽度自动换行，返回行列表"""
@@ -152,11 +170,11 @@ def generate_summary_image(report, annotated_path, output_path):
     ok_c = (120, 210, 140)
     accent_c = (100, 180, 240)
 
-    f_title = ImageFont.truetype(NOTO_BOLD, 30)
-    f_section = ImageFont.truetype(NOTO_BOLD, 20)
-    f_body = ImageFont.truetype(NOTO_REG, 16)
-    f_small = ImageFont.truetype(NOTO_REG, 14)
-    f_score = ImageFont.truetype(NOTO_BOLD, 48)
+    f_title = _load_font(30, bold=True)
+    f_section = _load_font(20, bold=True)
+    f_body = _load_font(16, bold=False)
+    f_small = _load_font(14, bold=False)
+    f_score = _load_font(48, bold=True)
 
     # 第一遍：用临时画布测量所有内容高度
     tmp = Image.new("RGB", (W, 100), bg)
@@ -425,10 +443,7 @@ def merge_req_images(req_paths, max_side=1024):
         if len(req_paths) == 1:
             im = Image.open(req_paths[0]).convert("RGB")
             draw = ImageDraw.Draw(im)
-            try:
-                font = ImageFont.truetype(NOTO_BOLD, 28)
-            except:
-                font = ImageFont.load_default()
+            font = _load_font(28, bold=True)
             draw.rounded_rectangle([8, 8, 56, 44], radius=6, fill=(37, 99, 235))
             draw.text((20, 12), "1", font=font, fill=(255,255,255))
             return im
@@ -444,10 +459,7 @@ def merge_req_images(req_paths, max_side=1024):
             cw = int(im.width * scale)
             im = im.resize((cw, cell_h), Image.LANCZOS)
             draw = ImageDraw.Draw(im)
-            try:
-                font = ImageFont.truetype(NOTO_BOLD, 24)
-            except:
-                font = ImageFont.load_default()
+            font = _load_font(24, bold=True)
             draw.rounded_rectangle([6, 6, 48, 38], radius=5, fill=(37, 99, 235))
             label = str(i+1)
             tw = draw.textbbox((0,0), label, font=font)[2]

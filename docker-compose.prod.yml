@@ -31,6 +31,28 @@ services:
     networks:
       - ycf_network
 
+  # AI 质检侧车（仅内网；Backend 通过 QC_WEB_URL 访问，勿对外暴露端口）
+  qc_web:
+    build:
+      context: ./services/qc_web
+      dockerfile: Dockerfile
+    container_name: ycf_qc_web
+    restart: always
+    env_file:
+      - ./.env
+    environment:
+      # 优先 QC_API_KEY；为空时 qc_web.py 会回退 ACE_API_KEY
+      API_KEY: ${QC_API_KEY:-}
+      QC_API_KEY: ${QC_API_KEY:-}
+      ACE_API_KEY: ${ACE_API_KEY:-}
+      API_BASE: ${QC_API_BASE:-https://api.acedata.cloud/v1}
+      QC_HOST: 0.0.0.0
+      QC_PORT: 8082
+    volumes:
+      - ./data/qc_uploads:/app/uploads
+    networks:
+      - ycf_network
+
   # 后端服务（仅宿主机可访问，由宿主机 Nginx 反代）
   backend:
     build:
@@ -40,8 +62,7 @@ services:
     restart: always
     ports:
       - "127.0.0.1:3000:3000"
-    # 建议：在服务器上创建单独的 .env.prod（不要提交到 git），由 compose 自动加载
-    # 也可以不使用 env_file，改用部署系统注入环境变量
+    # 建议：在服务器上创建单独的 .env（不要提交到 git），由 compose 自动加载
     env_file:
       - ./.env
     environment:
@@ -49,14 +70,14 @@ services:
       PORT: 3000
       # 【关键配置】Docker内部连接走服务名，不用改 IP
       DB_HOST: mysql
-      DB_PORT: 3306 
+      DB_PORT: 3306
       DB_USERNAME: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       DB_DATABASE: ${MYSQL_DATABASE:-ai_image_tool}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # 质检侧车：必须用 compose 服务名，不要用 127.0.0.1
       QC_WEB_URL: http://qc_web:8082
-      # 下面是你的 API Key 等配置，请确保由环境变量或 env_file 注入
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://www.artycf.com,http://www.artycf.com}
@@ -67,23 +88,6 @@ services:
       - mysql
       - redis
       - qc_web
-    networks:
-      - ycf_network
-
-  # AI 质检侧车（仅内网；Backend 通过 QC_WEB_URL 访问）
-  qc_web:
-    build:
-      context: ./services/qc_web
-      dockerfile: Dockerfile
-    container_name: ycf_qc_web
-    restart: always
-    environment:
-      API_KEY: ${QC_API_KEY}
-      API_BASE: ${QC_API_BASE:-https://api.acedata.cloud/v1}
-      QC_HOST: 0.0.0.0
-      QC_PORT: 8082
-    volumes:
-      - ./data/qc_uploads:/app/uploads
     networks:
       - ycf_network
 

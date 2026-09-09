@@ -28,6 +28,9 @@ Backend/.env.local
 Frontend/.env
 Frontend/.env.*
 
+### 部署私密配置 ###
+scripts/deploy.config
+
 ### IDE / 编辑器 ###
 .vscode/
 .idea/
