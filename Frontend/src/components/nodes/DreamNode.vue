@@ -65,26 +65,6 @@
                     </el-select>
                 </div>
 
-                <div class="param-item">
-                    <div class="param-label">Skill（提示词增强）</div>
-                    <el-select
-                        v-model="selectedSkillId"
-                        clearable
-                        filterable
-                        placeholder="可选"
-                        size="small"
-                        class="param-select nodrag nopan"
-                        @change="persistSkillId"
-                    >
-                        <el-option-group label="全员">
-                            <el-option v-for="s in globalSkillOptions" :key="'g'+s.id" :label="s.name" :value="s.id" />
-                        </el-option-group>
-                        <el-option-group label="我的">
-                            <el-option v-for="s in mineSkillOptions" :key="'m'+s.id" :label="s.name" :value="s.id" />
-                        </el-option-group>
-                    </el-select>
-                </div>
-
                 <div v-if="proposeGenerateHint" class="propose-hint nodrag nopan">
                     {{ proposeGenerateHint }}
                     <el-button size="small" text type="primary" @click="clearProposeHint">知道了</el-button>
@@ -174,8 +154,6 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { createImageGenerationKey } from '@/utils/generation-key';
-import { getSkill, listSkills, type SkillListItem } from '@/api/skill';
-
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -200,10 +178,6 @@ const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
 const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image';
-const selectedSkillId = ref<number | null>((props.data as any)?.skillId ?? null);
-const skillOptions = ref<SkillListItem[]>([]);
-const globalSkillOptions = computed(() => skillOptions.value.filter((s) => s.visibility === 'global' || s.group === 'global'));
-const mineSkillOptions = computed(() => skillOptions.value.filter((s) => s.group === 'mine' || s.visibility === 'private'));
 const proposeGenerateHint = computed(() => {
     const d = props.data as any;
     if (!d?.proposeGenerate) return '';
@@ -218,26 +192,6 @@ const clearProposeHint = () => {
         delete next.proposeGenerate;
         delete next.proposeMessage;
         node.data = next;
-    }
-};
-
-const persistSkillId = () => {
-    const node = findNode(props.id);
-    if (node) {
-        node.data = { ...(node.data || {}), skillId: selectedSkillId.value };
-    }
-};
-
-const applySkillToPrompt = async (base: string): Promise<string> => {
-    if (!selectedSkillId.value) return base;
-    try {
-        const res: any = await getSkill(selectedSkillId.value);
-        const body = String(res?.data?.body_md || '').trim();
-        if (!body) return base;
-        const clipped = body.length > 8000 ? body.slice(0, 8000) + '\n…' : body;
-        return `[Skill]\n${clipped}\n\n[UserPrompt]\n${base}`;
-    } catch {
-        return base;
     }
 };
 
@@ -536,8 +490,44 @@ watch(selectedModel, (newModel) => {
         ? 'gpt-image-2-c'
         : (isGptImage2 ? 'gpt-image-2' : (isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined)));
     (props.data as any).providerHint = (isNano || isGptImage2) ? providerHint.value : undefined;
+    // 保留选择器 value（dream / gpt-image-2:anyfast 等）供 Agent 回写对照
+    (props.data as any).selectedModel = newModel;
 }, { immediate: true });
 
+// Agent configure_node 可能回写 data
+watch(
+    () => (props.data as any)?.selectedModel || (props.data as any)?.model,
+    (m) => {
+        if (typeof m !== 'string' || !m) return;
+        // model 字段可能是短名；优先 selectedModel
+        const cand = (props.data as any)?.selectedModel || m;
+        if (typeof cand === 'string' && cand && cand !== selectedModel.value) {
+            // 短名 gpt-image-2 → 尽量映射到当前下拉值
+            if (cand === 'gpt-image-2' || cand === 'gpt-image-2-c') return;
+            if (ALL_MODEL_OPTIONS.some((o) => o.value === cand)) selectedModel.value = cand;
+            else if (cand === 'dream' || cand === 'midjourney') selectedModel.value = cand;
+        }
+    }
+);
+watch(
+    () => (props.data as any)?.aspectRatio,
+    (r) => {
+        if (typeof r === 'string' && r && r !== aspectRatio.value) aspectRatio.value = r;
+    }
+);
+watch(
+    () => (props.data as any)?.quality,
+    (q) => {
+        if (typeof q === 'string' && q && q !== quality.value) quality.value = q;
+    }
+);
+watch(
+    () => (props.data as any)?.numImages,
+    (n) => {
+        const v = Number(n);
+        if (Number.isFinite(v) && v >= 1 && v !== numImages.value) numImages.value = v;
+    }
+);
 // 将本地参数同步到节点数据，确保自动保存能带上这些配置
 watch(quality, (val) => {
     (props.data as any).quality = val;
@@ -618,9 +608,7 @@ const imagesReady = computed(() => {
     return s.ready === s.total;
 });
 
-const canExecute = computed(() => {
-    return canExecuteCredits.value && imagesReady.value;
-});
+const canExecute = computed(() => canExecuteCredits.value && imagesReady.value);
 
 /** 按钮禁用时悬停说明（与「有无提示词」无关；提示词在点击后再校验） */
 const executeBlockedHint = computed(() => {
@@ -849,7 +837,7 @@ const startCosSyncWatcher = (generationKey: string, initialRawImages: string[], 
 
 
 
-// 生成图片
+// 生成图片（Skill 仅在右侧 Agent 发送时注入；此处直接生成）
 const handleGenerate = async () => {
     if (!canExecute.value) {
         // 优先提示“图片未就绪”，其次才是积分不足
@@ -880,6 +868,7 @@ const handleGenerate = async () => {
         }
         return;
     }
+    clearProposeHint();
     loading.value = true;
     let generationKey = '';
     const requestStartMs = performance.now();
@@ -924,10 +913,9 @@ const handleGenerate = async () => {
         }
 
         // 5. 构建请求参数
-        const promptWithSkill = await applySkillToPrompt(finalPrompt || '基于参考图片生成');
         const requestParams: any = {
             apiType: apiType.value,
-            prompt: promptWithSkill,
+            prompt: finalPrompt || '基于参考图片生成',
             numImages: numImages.value,
             imageUrl: hasMultipleReferenceImages ? undefined : (referenceImageUrl || undefined),
             imageUrls: hasMultipleReferenceImages && processedImageUrls.length > 0 ? processedImageUrls : undefined,
@@ -1471,13 +1459,6 @@ const reconcilePendingImagePlaceholders = async () => {
 };
 
 onMounted(() => {
-    void listSkills()
-        .then((res: any) => {
-            skillOptions.value = res?.data?.skills || [];
-        })
-        .catch(() => {
-            skillOptions.value = [];
-        });
     // 首次拉取稍微延迟，确保 getNodes() 已完成恢复
     setTimeout(() => {
         if (reconcileInterval) return;

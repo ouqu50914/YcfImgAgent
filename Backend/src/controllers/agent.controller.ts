@@ -145,9 +145,14 @@ async function runUntilClientOrDone(
         for (const call of calls) {
             if (call.name === "ask_user") {
                 const q = String(call.arguments?.question || "请补充信息");
+                msgs.push({
+                    role: "tool",
+                    tool_call_id: call.id,
+                    content: JSON.stringify({ status: "waiting_user", question: q }),
+                });
                 writeSse(res, { type: "ask_user", question: q });
                 writeSse(res, { type: "done", text: q });
-                res.write(`data: ${JSON.stringify({ type: "state", messages: msgs, round })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "state", messages: msgs, round, waiting_user: true })}\n\n`);
                 res.end();
                 return;
             }

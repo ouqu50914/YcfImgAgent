@@ -204,24 +204,9 @@
           </el-select>
         </div>
 
-        <div class="param-item">
-          <div class="param-label">Skill（提示词增强）</div>
-          <el-select
-            v-model="selectedSkillId"
-            clearable
-            filterable
-            placeholder="可选"
-            size="small"
-            class="param-select nodrag nopan"
-            @change="persistSkillId"
-          >
-            <el-option-group label="全员">
-              <el-option v-for="s in globalSkillOptions" :key="'g'+s.id" :label="s.name" :value="s.id" />
-            </el-option-group>
-            <el-option-group label="我的">
-              <el-option v-for="s in mineSkillOptions" :key="'m'+s.id" :label="s.name" :value="s.id" />
-            </el-option-group>
-          </el-select>
+        <div v-if="proposeGenerateHint" class="propose-hint nodrag nopan">
+          {{ proposeGenerateHint }}
+          <el-button size="small" text type="primary" @click="clearProposeHint">知道了</el-button>
         </div>
 
         <el-button
@@ -318,7 +303,6 @@ import {
 import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
-import { getSkill, listSkills, type SkillListItem } from '@/api/skill';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
 import { translateErrorText } from '@/utils/error-toast';
@@ -331,28 +315,20 @@ const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } = useVueFlow();
 const userStore = useUserStore();
 
-const selectedSkillId = ref<number | null>((props.data as any)?.skillId ?? null);
-const skillOptions = ref<SkillListItem[]>([]);
-const globalSkillOptions = computed(() =>
-  skillOptions.value.filter((s) => s.visibility === 'global' || s.group === 'global')
-);
-const mineSkillOptions = computed(() =>
-  skillOptions.value.filter((s) => s.group === 'mine' || s.visibility === 'private')
-);
-const persistSkillId = () => {
+const proposeGenerateHint = computed(() => {
+  const d = props.data as any;
+  if (!d?.proposeGenerate) return '';
+  return typeof d.proposeMessage === 'string' && d.proposeMessage
+    ? d.proposeMessage
+    : 'Agent 建议在此节点确认后执行生成（不会自动扣费）';
+});
+const clearProposeHint = () => {
   const node = findNode(props.id);
-  if (node) node.data = { ...(node.data || {}), skillId: selectedSkillId.value };
-};
-const applySkillToPrompt = async (base: string): Promise<string> => {
-  if (!selectedSkillId.value) return base;
-  try {
-    const res: any = await getSkill(selectedSkillId.value);
-    const body = String(res?.data?.body_md || '').trim();
-    if (!body) return base;
-    const clipped = body.length > 8000 ? body.slice(0, 8000) + '\n…' : body;
-    return `[Skill]\n${clipped}\n\n[UserPrompt]\n${base}`;
-  } catch {
-    return base;
+  if (node) {
+    const next = { ...(node.data || {}) };
+    delete next.proposeGenerate;
+    delete next.proposeMessage;
+    node.data = next;
   }
 };
 
@@ -936,6 +912,50 @@ const durationAuto = ref(false);
 const durationManual = ref<number>(4);
 const resolution = ref<'480p' | '540p' | '720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
+
+// Agent configure_node 回写 data 时同步到本地控件
+watch(
+  () => (props.data as any)?.provider,
+  (v) => {
+    if (v === 'kling' || v === 'seedance' || v === 'pixverse') provider.value = v;
+  }
+);
+watch(
+  () => (props.data as any)?.resolution,
+  (v) => {
+    if (typeof v === 'string' && v && v !== resolution.value) resolution.value = v as any;
+  }
+);
+watch(
+  () => (props.data as any)?.aspectRatio,
+  (v) => {
+    if (typeof v === 'string' && v && v !== aspectRatio.value) aspectRatio.value = v;
+  }
+);
+watch(
+  () => (props.data as any)?.durationManual ?? (props.data as any)?.durationSeconds,
+  (v) => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) durationManual.value = n;
+  }
+);
+// 本地参数写入节点，供 snapshot / Agent 复用
+watch(
+  [provider, resolution, aspectRatio, durationManual],
+  () => {
+    const node = findNode(props.id);
+    if (!node) return;
+    node.data = {
+      ...(node.data || {}),
+      provider: provider.value,
+      resolution: resolution.value,
+      aspectRatio: aspectRatio.value,
+      durationManual: durationManual.value,
+      durationSeconds: durationManual.value,
+    };
+  },
+  { deep: false }
+);
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -1752,6 +1772,7 @@ const startPollingPixverse = (videoId: number, opts?: { silent?: boolean }) => {
 };
 
 const handleGenerate = async () => {
+  // Skill 仅在右侧 Agent 发送时注入；节点执行直接生成
   // 互斥：避免同一节点在 UI 尚未刷新时被重复点击触发多次创建
   if (generationInFlight.value) return;
   // 冷却：若上一次创建命中 429（带 retryAfter），冷却期内不允许再次创建
@@ -1787,6 +1808,7 @@ const handleGenerate = async () => {
     }
   }
 
+  clearProposeHint();
   generationInFlight.value = true;
   loading.value = true;
   errorMessage.value = null;
@@ -1811,9 +1833,7 @@ const handleGenerate = async () => {
 
   try {
     if (provider.value === 'seedance') {
-      const basePrompt = await applySkillToPrompt(
-        connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。'
-      );
+      const basePrompt = connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。';
 
       // 纯文生视频仍走简单接口
       if (seedanceMode.value === 'text') {
@@ -2287,7 +2307,7 @@ const handleGenerate = async () => {
         return;
       }
 
-      const basePrompt = await applySkillToPrompt(connectedPrompt.value || '生成一个简短的视频');
+      const basePrompt = connectedPrompt.value || '生成一个简短的视频';
 
       const normalizePixverseAspectRatio = (ar: string) => {
         if (ar === '9:16') return '9.16';
@@ -2539,7 +2559,7 @@ const handleGenerate = async () => {
 
     // Kling 流程
     markPendingBeforeRequest();
-    const klingPrompt = await applySkillToPrompt(connectedPrompt.value || '生成一个简短的视频');
+    const klingPrompt = connectedPrompt.value || '生成一个简短的视频';
     const body: any = {
       mode: mode.value,
       prompt: klingPrompt,
@@ -2707,13 +2727,6 @@ const downloadVideo = (url: string) => {
 };
 
 onMounted(() => {
-  void listSkills()
-    .then((res: any) => {
-      skillOptions.value = res?.data?.skills || [];
-    })
-    .catch(() => {
-      skillOptions.value = [];
-    });
   // 历史恢复场景：刷新后 workflow/节点可能是异步 setNodes，
   // 因此用有限重试确保拿到 videoResult 节点并启动轮询。
   let restoreTries = 0;
@@ -2999,6 +3012,20 @@ onUnmounted(() => {
 .execute-btn {
   width: 100%;
   margin-top: 4px;
+}
+
+.propose-hint {
+  font-size: 12px;
+  color: #f0c674;
+  background: #2a2618;
+  border: 1px solid #5a4a20;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .result-section {

@@ -462,22 +462,44 @@
       <el-tab-pane v-if="isSuperAdmin" label="Skill 管理" name="skills">
         <div class="toolbar" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <el-upload :show-file-list="false" accept=".zip,.md" :http-request="onAdminSkillUpload">
-            <el-button type="primary" :loading="skillLoading">上传全局 Skill（默认 draft）</el-button>
+            <el-button type="primary" :loading="skillLoading">上传skill</el-button>
           </el-upload>
           <el-button @click="loadAdminSkills" :loading="skillLoading">刷新</el-button>
-          <span style="color:#888;font-size:12px">设为「通用」后全员可用</span>
+          <span style="color:#888;font-size:12px">上传后自动体检评级；可「生成适配版」。设为通用后全员可用</span>
         </div>
         <el-table :data="adminSkills" border v-loading="skillLoading" style="margin-top: 16px">
           <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
-          <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="visibility" label="可见性" width="100" />
-          <el-table-column prop="status" label="状态" width="110" />
-          <el-table-column prop="owner_user_id" label="Owner" width="90" />
-          <el-table-column label="操作" width="300" fixed="right">
+          <el-table-column label="名称" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ skillDisplayLabel(row) }}</template>
+          </el-table-column>
+          <el-table-column prop="name" label="标识" min-width="120" show-overflow-tooltip />
+          <el-table-column label="评级" width="100">
             <template #default="{ row }">
+              <el-tag v-if="row.compat_grade" size="small" :type="compatGradeTagType(row.compat_grade)">
+                {{ row.compat_grade }} {{ row.compat_report?.grade_label || '' }}
+              </el-tag>
+              <span v-else style="color:#999">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="适配版" width="80">
+            <template #default="{ row }">{{ row.has_adapted ? '有' : '无' }}</template>
+          </el-table-column>
+          <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="visibility" label="可见性" width="90" />
+          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column prop="owner_user_id" label="Owner" width="80" />
+          <el-table-column label="操作" width="420" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="showSkillCompat(row)">缺口</el-button>
+              <el-button size="small" type="primary" :loading="adaptLoadingId === row.id" @click="runAdminAdapt(row)">
+                生成适配版
+              </el-button>
               <el-button v-if="row.visibility !== 'global'" size="small" type="success" @click="setSkillVis(row, 'global')">设为通用</el-button>
-              <el-button size="small" @click="setSkillVis(row, 'draft')">draft</el-button>
+              <el-button
+                v-if="row.visibility !== 'private'"
+                size="small"
+                @click="setSkillVis(row, 'private')"
+              >仅上传人</el-button>
               <el-button size="small" type="warning" @click="setSkillVis(row, 'disabled')">下架</el-button>
               <el-button size="small" type="danger" @click="removeAdminSkill(row)">删除</el-button>
             </template>
@@ -730,10 +752,13 @@ import {
   exportCreditUsage
 } from '@/api/admin';
 import {
+  adminAdaptSkill,
   adminDeleteSkill,
   adminImportSkill,
   adminListSkills,
   adminSetSkillVisibility,
+  compatGradeTagType,
+  skillDisplayLabel,
   type SkillListItem,
 } from '@/api/skill';
 import {
@@ -756,6 +781,7 @@ const generationTabLabel = computed(() => (isSuperAdmin.value ? '生成记录' :
 const activeTab = ref('users');
 const skillLoading = ref(false);
 const adminSkills = ref<SkillListItem[]>([]);
+const adaptLoadingId = ref<number | null>(null);
 
 const loadAdminSkills = async () => {
   skillLoading.value = true;
@@ -769,11 +795,51 @@ const loadAdminSkills = async () => {
   }
 };
 
+const showSkillCompat = (row: SkillListItem) => {
+  const gaps = row.compat_report?.gaps || [];
+  const lines = [
+    `评级：${row.compat_grade || '—'} ${row.compat_report?.grade_label || ''}`,
+    row.compat_report?.summary || '',
+    row.has_adapted ? '已有 ARTN 适配版（Agent 优先使用）' : '尚未生成适配版',
+    '',
+    ...gaps.map((g) => `• [${g.severity}] ${g.message}`),
+  ].filter(Boolean);
+  ElMessageBox.alert(lines.join('\n') || '暂无报告', `Skill 适配：${skillDisplayLabel(row)}`, {
+    confirmButtonText: '知道了',
+  });
+};
+
+const runAdminAdapt = async (row: SkillListItem) => {
+  adaptLoadingId.value = row.id;
+  try {
+    const res: any = await adminAdaptSkill(row.id);
+    const report = res?.data?.report;
+    ElMessage.success(`适配完成：${report?.grade || ''} ${report?.grade_label || ''}`);
+    if (report?.gaps?.length) {
+      await ElMessageBox.alert(
+        report.gaps.map((g: any) => `• [${g.severity}] ${g.message}`).join('\n'),
+        '不可适配 / 需注意项',
+        { confirmButtonText: '知道了' }
+      );
+    }
+    await loadAdminSkills();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e?.message || '适配失败');
+  } finally {
+    adaptLoadingId.value = null;
+  }
+};
+
 const onAdminSkillUpload = async (opt: any) => {
   skillLoading.value = true;
   try {
-    await adminImportSkill(opt.file as File);
-    ElMessage.success('已导入为 draft，请设为通用');
+    const res: any = await adminImportSkill(opt.file as File);
+    const grade = res?.data?.compat_grade;
+    ElMessage.success(
+      grade
+        ? `已上传（评级 ${grade}）。可生成适配版后「设为通用」`
+        : '已上传，当前仅你可用；可「设为通用」供全员使用'
+    );
     await loadAdminSkills();
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || e?.message || '导入失败');
@@ -782,7 +848,7 @@ const onAdminSkillUpload = async (opt: any) => {
   }
 };
 
-const setSkillVis = async (row: SkillListItem, visibility: 'draft' | 'global' | 'disabled') => {
+const setSkillVis = async (row: SkillListItem, visibility: 'private' | 'global' | 'disabled') => {
   await adminSetSkillVisibility(row.id, visibility);
   ElMessage.success('已更新');
   await loadAdminSkills();

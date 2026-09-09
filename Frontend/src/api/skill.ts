@@ -4,6 +4,8 @@ import { useUserStore } from '@/store/user';
 export type SkillListItem = {
   id: number;
   name: string;
+  /** 中文/可读展示名 */
+  display_name?: string;
   description: string;
   visibility: string;
   status: string;
@@ -12,7 +14,60 @@ export type SkillListItem = {
   group: 'global' | 'mine' | 'draft' | 'other';
   created_at?: string;
   updated_at?: string;
+  /** true：节点执行拉起 Agent；false/缺省：拼 prompt 后直接生成 */
+  requires_agent?: boolean;
+  compat_grade?: string | null;
+  compat_report?: {
+    grade: string;
+    grade_label: string;
+    summary: string;
+    gaps: { code: string; severity: string; message: string; remediable: boolean }[];
+    adapted?: boolean;
+  } | null;
+  has_adapted?: boolean;
 };
+
+/** 从 Dream/Video 节点带到 Agent 的生成参数（Skill 优先复用，勿重复追问） */
+export type AgentNodeGenerationPrefs = {
+  nodeType: 'dream' | 'video';
+  nodeId: string;
+  model?: string;
+  selectedModel?: string;
+  numImages?: number;
+  quality?: string;
+  resolution?: string;
+  aspectRatio?: string;
+  /** video */
+  provider?: string;
+  durationSeconds?: number;
+  mode?: string;
+};
+
+export type AgentSkillKickoff = {
+  skillId: number;
+  dreamNodeId?: string;
+  hint?: string;
+  generationPrefs?: AgentNodeGenerationPrefs;
+  nonce: number;
+};
+
+/** 下拉/表格展示：优先中文名 */
+export function skillDisplayLabel(s: Pick<SkillListItem, 'name' | 'display_name' | 'description'>): string {
+  const dn = String(s.display_name || '').trim();
+  if (dn) return dn;
+  const desc = String(s.description || '').trim().split(/[\n。；;]/)[0]?.trim();
+  if (desc) return desc.slice(0, 40);
+  return s.name;
+}
+
+export function skillNeedsAgent(s: Pick<SkillListItem, 'requires_agent' | 'compat_flags'> | null | undefined): boolean {
+  if (!s) return false;
+  if (typeof s.requires_agent === 'boolean') return s.requires_agent;
+  if (s.compat_flags?.requires_agent === true) return true;
+  if (Number(s.compat_flags?.asset_count) > 0) return true;
+  const paths = Array.isArray(s.compat_flags?.entry_paths) ? (s.compat_flags!.entry_paths as unknown[]) : [];
+  return paths.some((p) => /(^|\/)(references|assets)\//i.test(String(p)));
+}
 
 export const listSkills = () => {
   return request.get<{ message: string; data: { skills: SkillListItem[] } }>('/skills');
@@ -50,13 +105,36 @@ export const adminImportSkill = (file: File) => {
   });
 };
 
-export const adminSetSkillVisibility = (id: number, visibility: 'draft' | 'global' | 'disabled') => {
+export const adminSetSkillVisibility = (id: number, visibility: 'private' | 'global' | 'disabled') => {
   return request.patch(`/admin/skills/${id}/visibility`, { visibility });
 };
 
 export const adminDeleteSkill = (id: number) => {
   return request.delete(`/admin/skills/${id}`);
 };
+
+export const reassessSkillCompat = (id: number) => {
+  return request.post(`/skills/${id}/compat/reassess`);
+};
+
+export const adaptSkill = (id: number) => {
+  return request.post(`/skills/${id}/adapt`);
+};
+
+export const adminReassessSkillCompat = (id: number) => {
+  return request.post(`/admin/skills/${id}/compat/reassess`);
+};
+
+export const adminAdaptSkill = (id: number) => {
+  return request.post(`/admin/skills/${id}/adapt`);
+};
+
+export function compatGradeTagType(grade?: string | null): '' | 'success' | 'warning' | 'danger' | 'info' {
+  if (grade === 'A') return 'success';
+  if (grade === 'B') return 'warning';
+  if (grade === 'C') return 'danger';
+  return 'info';
+}
 
 export async function downloadSkillPackage(id: number, asAdmin = false) {
   const userStore = useUserStore();
@@ -219,7 +297,7 @@ export async function runWorkflowAgentLoop(params: {
     handlers
   );
 
-  while (pendingCalls.length && messages && round < 8) {
+  while (pendingCalls.length && messages && round < 16) {
     const batch = pendingCalls.splice(0, pendingCalls.length);
     const tool_results = [];
     for (const c of batch) {

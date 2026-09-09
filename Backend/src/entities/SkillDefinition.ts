@@ -28,6 +28,18 @@ export class SkillDefinition {
     @Column({ type: "mediumtext", comment: "SKILL.md 正文" })
     body_md!: string;
 
+    @Column({ type: "mediumtext", nullable: true, comment: "LLM 改造后的 ARTN 适配版正文" })
+    adapted_body_md?: string | null;
+
+    @Column({ type: "varchar", length: 8, nullable: true, comment: "适配评级 A|B|C" })
+    compat_grade?: string | null;
+
+    @Column({ type: "json", nullable: true, comment: "适配体检与 gaps 报告" })
+    compat_report_json?: Record<string, unknown> | null;
+
+    @Column({ type: "datetime", nullable: true, comment: "最近一次 LLM 适配时间" })
+    adapted_at?: Date | null;
+
     @Column({ type: "json", nullable: true, comment: "frontmatter 原文结构" })
     frontmatter_json?: Record<string, unknown> | null;
 

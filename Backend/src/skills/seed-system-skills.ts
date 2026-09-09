@@ -24,7 +24,14 @@ export async function seedSystemSkills(): Promise<void> {
             const exists = await repo.findOne({
                 where: { name: parsed.name, visibility: "global" },
             });
-            if (exists) continue;
+            if (exists) {
+                // 同步系统包文案（含 title），便于下拉展示中文名
+                exists.description = parsed.description;
+                exists.body_md = parsed.body;
+                exists.frontmatter_json = parsed.frontmatter;
+                await repo.save(exists);
+                continue;
+            }
             const row = repo.create({
                 owner_user_id: 0,
                 name: parsed.name,

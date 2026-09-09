@@ -1,5 +1,6 @@
 ---
 name: ecommerce-poster
+title: 电商主图
 description: >
   电商主图/卖点海报提示词与生图流水线编排。
   在用户提到主图、详情页、卖点海报、白底图时使用。

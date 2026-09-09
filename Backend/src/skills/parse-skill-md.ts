@@ -3,6 +3,8 @@
  */
 export type ParsedSkillMd = {
     name: string;
+    /** 展示用中文/可读标题；可空，由 resolveSkillDisplayName 回退 */
+    title: string;
     description: string;
     body: string;
     frontmatter: Record<string, unknown>;
@@ -26,6 +28,7 @@ export function parseSkillMarkdown(raw: string): ParsedSkillMd {
 
     const nameRaw = String(frontmatter.name || "").trim().toLowerCase();
     const description = String(frontmatter.description || "").trim();
+    const title = String(frontmatter.title || frontmatter.display_name || "").trim();
 
     if (!nameRaw || !NAME_RE.test(nameRaw)) {
         throw new Error("SKILL.md 缺少合法 name（小写字母/数字/连字符，最长 64）");
@@ -36,8 +39,34 @@ export function parseSkillMarkdown(raw: string): ParsedSkillMd {
     if (description.length > 1024) {
         throw new Error("description 过长（最多 1024 字符）");
     }
+    if (title.length > 64) {
+        throw new Error("title 过长（最多 64 字符）");
+    }
 
-    return { name: nameRaw, description, body: body.trim(), frontmatter };
+    return { name: nameRaw, title, description, body: body.trim(), frontmatter };
+}
+
+/** 下拉/列表用展示名：title > 正文一级标题 > description 首句 > name */
+export function resolveSkillDisplayName(input: {
+    name: string;
+    description?: string | null;
+    body_md?: string | null;
+    frontmatter_json?: Record<string, unknown> | null;
+}): string {
+    const fm = input.frontmatter_json || {};
+    const fromFm = String(fm.title || fm.display_name || "").trim();
+    if (fromFm) return fromFm.slice(0, 64);
+
+    const body = String(input.body_md || "");
+    const h1 = body.match(/^#\s+(.+?)\s*$/m);
+    if (h1?.[1]) return h1[1].trim().slice(0, 64);
+
+    const desc = String(input.description || "").trim();
+    if (desc) {
+        const first = desc.split(/[\n。；;]/)[0]?.trim() || "";
+        if (first) return first.slice(0, 40);
+    }
+    return input.name;
 }
 
 function stripQuotes(v: string): string {
@@ -87,5 +116,14 @@ export function detectHasScripts(paths: string[]): boolean {
     return paths.some((p) => {
         const n = p.replace(/\\/g, "/").toLowerCase();
         return n.includes("/scripts/") || n.startsWith("scripts/") || /(^|\/)scripts(\/|$)/.test(n);
+    });
+}
+
+/** 仅可执行脚本才标 unsupported；市场包里的 scripts/*.js GUI 不阻塞 Agent 使用 */
+export function detectExecutableScripts(paths: string[]): boolean {
+    return paths.some((p) => {
+        const n = p.replace(/\\/g, "/").toLowerCase();
+        if (!(n.includes("/scripts/") || n.startsWith("scripts/"))) return false;
+        return /\.(py|sh|bash|zsh|rb|php|pl|exe|bat|ps1|cmd)$/i.test(n);
     });
 }

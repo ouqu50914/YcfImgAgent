@@ -1101,17 +1101,154 @@ function collectMediaFromSelectedNode(node: { type?: string; data?: any }): {
     };
 }
 
+function clipBriefText(raw: string, max = 180): string {
+    const t = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function extractPromptTextFromNodeData(data: unknown): string {
+    if (!data || typeof data !== 'object') return '';
+    const d = data as { text?: unknown };
+    if (typeof d.text === 'string') return d.text.trim();
+    return '';
+}
+
+type CanvasIntentMode = '文生图' | '图生图' | '文生视频' | '图生视频' | '多模态';
+
+type CanvasIntentCard = {
+    mode: CanvasIntentMode;
+    nodeId: string;
+    nodeType: string;
+    content: string;
+    meta: string;
+};
+
+/** 根据连线推断节点创作意图卡片（供 Agent 面板展示，不塞进输入框） */
+function buildCanvasIntentCards(
+    nodes: Array<{ id: string; type?: string; selected?: boolean; data?: any }>,
+    edges: Array<{ source: string; target: string }>
+): CanvasIntentCard[] {
+    const selected = nodes.filter((n) => n.selected);
+    const focus =
+        selected.length > 0
+            ? selected
+            : nodes.filter((n) => n.type === 'dream' || n.type === 'video');
+
+    const upstreamOf = (targetId: string) => {
+        const prompts: string[] = [];
+        let imageCount = 0;
+        for (const e of edges) {
+            if (e.target !== targetId) continue;
+            const src = nodes.find((n) => n.id === e.source);
+            if (!src) continue;
+            if (src.type === 'prompt') {
+                const t = extractPromptTextFromNodeData(src.data);
+                if (t) prompts.push(t);
+            } else if (src.type === 'image' && (src.data as any)?.imageUrl) {
+                imageCount += 1;
+            }
+        }
+        return { prompts, imageCount };
+    };
+
+    const cards: CanvasIntentCard[] = [];
+    for (const n of focus.slice(0, 8)) {
+        const d = n.data || {};
+        const { prompts, imageCount } = upstreamOf(n.id);
+        const content = prompts[0] ? clipBriefText(prompts[0], 120) : '';
+
+        if (n.type === 'dream') {
+            const mode: CanvasIntentMode = imageCount > 0 ? '图生图' : '文生图';
+            const model = d.selectedModel || d.model || '-';
+            const ratio = d.aspectRatio || '-';
+            const num = d.numImages ?? 1;
+            cards.push({
+                mode,
+                nodeId: n.id,
+                nodeType: 'dream',
+                content: content || (imageCount > 0 ? `参考图 ${imageCount} 张` : '（未连接提示词）'),
+                meta: `${model} · ${ratio} · ${num}张${imageCount ? ` · 参考${imageCount}` : ''}`,
+            });
+            continue;
+        }
+        if (n.type === 'video') {
+            const mode: CanvasIntentMode = imageCount > 0 ? '图生视频' : '文生视频';
+            cards.push({
+                mode,
+                nodeId: n.id,
+                nodeType: 'video',
+                content: content || (imageCount > 0 ? `参考图 ${imageCount} 张` : '（未连接提示词）'),
+                meta: `${d.provider || '-'} · ${d.aspectRatio || '-'} · ${d.durationManual ?? d.duration ?? '-'}s${
+                    imageCount ? ` · 参考${imageCount}` : ''
+                }`,
+            });
+        }
+    }
+
+    // 仅有提示词/图、尚无 dream/video 时，给一个多模态占位，避免面板空白
+    if (!cards.length) {
+        const promptNode = (selected.length ? selected : nodes).find((n) => n.type === 'prompt');
+        const imageNodes = (selected.length ? selected : nodes).filter(
+            (n) => n.type === 'image' && (n.data as any)?.imageUrl
+        );
+        if (promptNode || imageNodes.length) {
+            const t = promptNode ? extractPromptTextFromNodeData(promptNode.data) : '';
+            cards.push({
+                mode: imageNodes.length && t ? '多模态' : imageNodes.length ? '图生图' : '文生图',
+                nodeId: promptNode?.id || imageNodes[0]?.id || '',
+                nodeType: promptNode ? 'prompt' : 'image',
+                content: t ? clipBriefText(t, 120) : `参考图 ${imageNodes.length} 张`,
+                meta: '尚未连接生图/视频节点',
+            });
+        }
+    }
+    return cards;
+}
+
+function buildCanvasBriefForChat(
+    nodes: Array<{ id: string; type?: string; selected?: boolean; data?: any }>,
+    edges: Array<{ source: string; target: string }>
+): string {
+    const cards = buildCanvasIntentCards(nodes, edges);
+    if (!cards.length) {
+        return `画布共 ${nodes.length} 个节点、${edges.length} 条连线`;
+    }
+    return cards
+        .map((c) => `· [${c.mode}] ${c.nodeId}：${c.content}${c.meta ? `（${c.meta}）` : ''}`)
+        .join('\n');
+}
+
 // 提供给 Gemini 聊天的工作流上下文（精简版）
 const workflowContextForChat = computed(() => {
     const nodes = getNodes.value;
     const edges = getEdges.value;
     const selectedNodes = nodes.filter(node => node.selected);
+    const canvasIntents = buildCanvasIntentCards(nodes, edges);
+    // 指纹：提示词/模型就地修改时也能触发 Agent 面板卡片刷新
+    const contentSig = nodes
+        .map((n) => {
+            const d = n.data || {};
+            if (n.type === 'prompt') return `p:${n.id}:${extractPromptTextFromNodeData(d)}`;
+            if (n.type === 'dream') {
+                return `d:${n.id}:${d.selectedModel || d.model}:${d.aspectRatio}:${d.numImages}:${d.proposeGenerate ? 1 : 0}`;
+            }
+            if (n.type === 'video') {
+                return `v:${n.id}:${d.provider}:${d.aspectRatio}:${d.durationManual ?? d.duration}`;
+            }
+            if (n.type === 'image') return `i:${n.id}:${d.imageUrl || ''}`;
+            return `${n.type}:${n.id}:${n.selected ? 1 : 0}`;
+        })
+        .join('|');
 
     return {
         historyId: currentHistoryId.value,
         templateId: currentTemplateId.value,
         nodesCount: nodes.length,
         edgesCount: edges.length,
+        contentSig,
+        canvasBrief: buildCanvasBriefForChat(nodes, edges),
+        canvasIntents,
         selectedNodes: selectedNodes.map(node => ({
             id: node.id,
             type: node.type,

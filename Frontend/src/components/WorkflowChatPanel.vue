@@ -382,27 +382,51 @@
                   clearable
                   filterable
                   size="small"
-                  placeholder="选用 Skill（可选）"
+                  placeholder="选用 Skill（发送时交给 Agent）"
                   class="chat-skill-select"
+                  teleported
+                  popper-class="workflow-chat-skill-popper"
+                  :loading="skillOptionsLoading"
+                  @visible-change="(open: boolean) => open && loadSkillOptions()"
                 >
-                  <el-option-group label="全员">
+                  <el-option-group v-if="globalSkills.length" label="全员">
                     <el-option
                       v-for="s in globalSkills"
                       :key="'g-' + s.id"
-                      :label="s.name"
+                      :label="skillDisplayLabel(s)"
                       :value="s.id"
                     />
                   </el-option-group>
-                  <el-option-group label="我的">
+                  <el-option-group v-if="mineSkills.length" label="我的">
                     <el-option
                       v-for="s in mineSkills"
                       :key="'m-' + s.id"
-                      :label="s.name"
+                      :label="skillDisplayLabel(s)"
                       :value="s.id"
                     />
                   </el-option-group>
+                  <template v-if="!skillOptionsLoading && !globalSkills.length && !mineSkills.length" #empty>
+                    <div class="skill-select-empty">暂无可用 Skill，请先在「Skill 库」上传或由管理员发布全员 Skill</div>
+                  </template>
                 </el-select>
                 <el-switch v-model="useAgentMode" size="small" inline-prompt active-text="Agent" inactive-text="闲聊" />
+              </div>
+
+              <div v-if="canvasIntentCards.length" class="chat-canvas-intents">
+                <div
+                  v-for="card in canvasIntentCards"
+                  :key="`${card.mode}-${card.nodeId}`"
+                  class="canvas-intent-card"
+                >
+                  <span class="intent-mode">{{ card.mode }}</span>
+                  <div class="intent-body">
+                    <div class="intent-content" :title="card.content">{{ card.content }}</div>
+                    <div class="intent-meta">{{ card.meta }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="selectedSkillIds.length" class="chat-canvas-intents is-empty">
+                画布上暂无可用的生图/视频链路，请先连接提示词与节点
               </div>
 
               <div
@@ -423,7 +447,7 @@
                   type="textarea"
                   :maxlength="50000"
                   class="chat-input"
-                  placeholder="输入您的问题，我来帮您解答...
+                  placeholder="输入你的需求（画布意图在上方卡片，会随节点变化自动更新）
 
 支持拖拽图片或视频到此处上传"
                   @keydown.enter.exact.prevent="handleSend"
@@ -454,7 +478,7 @@
                 <el-button
                   type="primary"
                   :loading="loading"
-                  :disabled="(!currentInput && uploadedMedia.length === 0) || loading"
+                  :disabled="!canSendMessage || loading"
                   @click="() => void handleSend()"
                 >
                   发送
@@ -622,7 +646,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from '
 import { ElMessage, ElImageViewer } from 'element-plus';
 import { Plus, Close, VideoCamera, Rank, ChatLineRound, Fold, ArrowLeft, ArrowRight, Monitor, Delete } from '@element-plus/icons-vue';
 import { useUserStore } from '@/store/user';
-import { listSkills, runWorkflowAgentLoop } from '@/api/skill';
+import { listSkills, runWorkflowAgentLoop, skillDisplayLabel, type AgentSkillKickoff } from '@/api/skill';
 import type { ChatHistoryItem, GeminiChatRequest } from '@/api/chat';
 import {
   sendGeminiChat,
@@ -667,8 +691,10 @@ const props = withDefaults(
     workflowContext?: unknown;
     mode?: 'embedded' | 'popup';
     executeTool?: (call: { id: string; name: string; arguments: Record<string, unknown> }) => Promise<string>;
+    /** 节点侧「执行」踢腿：复杂 Skill 拉起 Agent */
+    agentKickoff?: AgentSkillKickoff | null;
   }>(),
-  { mode: 'embedded' },
+  { mode: 'embedded', agentKickoff: null },
 );
 
 const isPopupMode = computed(() => props.mode === 'popup');
@@ -702,19 +728,132 @@ const errorMessage = ref('');
 const useAgentMode = ref(true);
 const selectedSkillIds = ref<number[]>([]);
 const skillOptions = ref<import('@/api/skill').SkillListItem[]>([]);
+const skillOptionsLoading = ref(false);
 const globalSkills = computed(() => skillOptions.value.filter((s) => s.visibility === 'global' || s.group === 'global'));
 const mineSkills = computed(() =>
-  skillOptions.value.filter((s) => s.group === 'mine' || s.visibility === 'private')
+  skillOptions.value.filter(
+    (s) =>
+      s.group === 'mine' ||
+      s.visibility === 'private' ||
+      s.visibility === 'draft' ||
+      s.visibility === 'disabled'
+  )
 );
 
 const loadSkillOptions = async () => {
+  skillOptionsLoading.value = true;
   try {
     const res: any = await listSkills();
-    skillOptions.value = res?.data?.skills || [];
-  } catch {
+    skillOptions.value = res?.data?.skills || res?.skills || [];
+  } catch (e: any) {
     skillOptions.value = [];
+    console.warn('[Agent] load skills failed', e);
+  } finally {
+    skillOptionsLoading.value = false;
   }
 };
+
+type CanvasIntentCard = {
+  mode: string;
+  nodeId: string;
+  nodeType: string;
+  content: string;
+  meta: string;
+};
+
+const selectedSkillLabels = computed(() =>
+  selectedSkillIds.value
+    .map((id) => skillOptions.value.find((s) => s.id === id))
+    .filter(Boolean)
+    .map((s) => skillDisplayLabel(s!))
+);
+
+const readLiveWorkflowContext = () => {
+  const base: Record<string, unknown> = { time: new Date().toISOString() };
+  const ctx =
+    props.mode === 'popup' ? popupBridge?.workflowContext.value : props.workflowContext;
+  if (ctx && typeof ctx === 'object') return { ...base, ...(ctx as Record<string, unknown>) };
+  return base;
+};
+
+const canvasIntentCards = computed((): CanvasIntentCard[] => {
+  const ctx = readLiveWorkflowContext() as { canvasIntents?: CanvasIntentCard[] };
+  return Array.isArray(ctx.canvasIntents) ? ctx.canvasIntents : [];
+});
+
+const buildCanvasBriefLine = (): string => {
+  const cards = canvasIntentCards.value;
+  if (cards.length) {
+    return cards
+      .map((c) => `· [${c.mode}] ${c.nodeId}：${c.content}${c.meta ? `（${c.meta}）` : ''}`)
+      .join('\n');
+  }
+  const ctx = readLiveWorkflowContext() as { canvasBrief?: string; nodesCount?: number; edgesCount?: number };
+  if (typeof ctx.canvasBrief === 'string' && ctx.canvasBrief.trim()) return ctx.canvasBrief.trim();
+  return `画布共 ${ctx.nodesCount ?? 0} 个节点、${ctx.edgesCount ?? 0} 条连线`;
+};
+
+/** 发送给 Agent 的结构化正文：Skill + 意图卡片 + 用户需求（输入框本身保持干净） */
+const finalizeOutboundMessage = (userNeed: string): string => {
+  const parts: string[] = [];
+  if (selectedSkillIds.value.length) {
+    parts.push(`【Skill】${selectedSkillLabels.value.join('、') || '已选 Skill'}`);
+  }
+  const cards = canvasIntentCards.value;
+  if (cards.length) {
+    parts.push(
+      '【画布意图】',
+      ...cards.map((c) => `- ${c.mode}（${c.nodeId}）：${c.content}${c.meta ? `｜${c.meta}` : ''}`)
+    );
+  } else {
+    parts.push('【画布意图】', buildCanvasBriefLine());
+  }
+  parts.push('【需求】', userNeed.trim() || '按上方意图与 Skill 编排画布，完成后 propose_generate');
+  if (selectedSkillIds.value.length) {
+    parts.push('请 get_workflow_snapshot → 缺信息 ask_user → propose_generate，等我确认执行。');
+  }
+  return parts.join('\n');
+};
+
+const canSendMessage = computed(
+  () =>
+    Boolean(currentInput.value.trim()) ||
+    uploadedMedia.value.length > 0 ||
+    (selectedSkillIds.value.length > 0 && canvasIntentCards.value.length > 0)
+);
+
+watch(
+  selectedSkillIds,
+  (ids) => {
+    if (ids.length > 0) useAgentMode.value = true;
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.agentKickoff,
+  async (kick) => {
+    if (!kick?.skillId || !kick.nonce) return;
+    useAgentMode.value = true;
+    selectedSkillIds.value = [kick.skillId];
+    if (!isOpen.value) {
+      await loadSessionsFromServer();
+      isOpen.value = true;
+    }
+    const prefs = kick.generationPrefs;
+    const prefsLine = prefs
+      ? `请复用 generationPrefs：${JSON.stringify(prefs)}`
+      : '';
+    const nodeHint = kick.dreamNodeId
+      ? `优先使用节点 ${kick.dreamNodeId}，configure_node 后 propose_generate。`
+      : '';
+    currentInput.value =
+      kick.hint ||
+      [nodeHint, prefsLine, '请按已选 Skill 与上方画布意图编排。'].filter(Boolean).join('\n');
+    await nextTick();
+    await handleSend();
+  }
+);
 
 const messagesScrollRef = ref();
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -1667,9 +1806,24 @@ const emitGeminiCommand = (cmd: unknown) => {
 };
 
 const handleSend = async () => {
-  const content = currentInput.value;
-  if (!content && uploadedMedia.value.length === 0) return;
+  const rawContent = currentInput.value.trim();
+  const hasMedia = uploadedMedia.value.length > 0;
+  const canSkillOnly =
+    selectedSkillIds.value.length > 0 && canvasIntentCards.value.length > 0;
+  if (!rawContent && !hasMedia && !canSkillOnly) return;
   if (loading.value) return;
+
+  if (selectedSkillIds.value.length > 0) {
+    useAgentMode.value = true;
+  }
+
+  // 有 Skill 或画布意图时，把卡片摘要并进消息；输入框只保留用户自己写的需求
+  const content =
+    selectedSkillIds.value.length > 0 || canvasIntentCards.value.length > 0
+      ? finalizeOutboundMessage(
+          rawContent || (hasMedia ? '请结合上传媒体与上方画布意图编排' : '')
+        )
+      : rawContent || (hasMedia ? '分析上传的媒体内容' : '');
 
   ensureDefaultSession();
   if (!activeSession.value) {
@@ -1683,7 +1837,7 @@ const handleSend = async () => {
   const userMsg: ChatMessage = {
     id: `m_${Date.now()}_u`,
     role: 'user',
-    content: content || '',
+    content,
     createdAt: now,
     mediaUrls: [],
   };
@@ -1700,7 +1854,7 @@ const handleSend = async () => {
     session.messages.push(userMsg);
     session.updatedAt = now;
 
-    const titleSeed = content.trim() || '图片/视频分析';
+    const titleSeed = rawContent || (selectedSkillIds.value.length ? 'Skill 编排' : '图片/视频分析');
     if (!session.title || session.title === '新的会话') {
       session.title = titleSeed.slice(0, 20);
     }
@@ -1718,7 +1872,7 @@ const handleSend = async () => {
 
     const mediaUrls = [...uploadedTempUrls];
     const payload: GeminiChatRequest = {
-      message: content || '分析上传的媒体内容',
+      message: content,
       history: buildHistoryForRequest(session, true),
       workflowContext: buildWorkflowContext(),
       mediaUrls,
@@ -2725,6 +2879,65 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.chat-canvas-intents {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 8px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.chat-canvas-intents.is-empty {
+  font-size: 12px;
+  color: var(--text-muted, #909399);
+  padding-bottom: 8px;
+}
+.canvas-intent-card {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.intent-mode {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #1a1a1a;
+  background: #67c23a;
+}
+.canvas-intent-card:nth-child(2n) .intent-mode {
+  background: #409eff;
+  color: #fff;
+}
+.canvas-intent-card:nth-child(3n) .intent-mode {
+  background: #e6a23c;
+  color: #1a1a1a;
+}
+.intent-body {
+  min-width: 0;
+  flex: 1;
+}
+.intent-content {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-soft, #e5e5e5);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.intent-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted, #909399);
+}
+
 .chat-input-wrapper {
   position: relative;
   display: flex;
@@ -2869,6 +3082,21 @@ onUnmounted(() => {
     top: auto;
     transform: none;
   }
+}
+</style>
+
+<style>
+/* 聊天面板 z-index≈10049，默认 Select 浮层会被挡住，看起来像「没有选项」 */
+.workflow-chat-skill-popper {
+  z-index: 11000 !important;
+}
+.workflow-chat-skill-popper .skill-select-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.45;
+  max-width: 280px;
+  white-space: normal;
 }
 </style>
 

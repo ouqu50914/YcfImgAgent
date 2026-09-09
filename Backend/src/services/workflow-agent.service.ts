@@ -1,6 +1,8 @@
 import axios from "axios";
+import { mcpStatusForAgent } from "../mcp/mcp-registry";
 import {
     AGENT_MAX_TOOL_ROUNDS,
+    SKILL_ASSET_INJECT_MAX_CHARS,
     WORKFLOW_AGENT_SYSTEM_PROMPT,
     WORKFLOW_TOOLS_OPENAI,
     isWorkflowToolName,
@@ -43,7 +45,7 @@ export class GeminiControlProvider implements ControlModelProvider {
         if (!API_KEY) throw new Error("未配置 GEMINI_CHAT_API_KEY");
         if (!API_URL) throw new Error("未配置 GEMINI_CHAT_API_URL");
 
-        const payload = {
+        const payload: Record<string, unknown> = {
             model,
             messages: messages.map((m) => {
                 const base: Record<string, unknown> = { role: m.role, content: m.content };
@@ -58,10 +60,12 @@ export class GeminiControlProvider implements ControlModelProvider {
                 }
                 return base;
             }),
-            tools,
-            tool_choice: "auto",
             temperature: 0.2,
         };
+        if (tools?.length) {
+            payload.tools = tools;
+            payload.tool_choice = "auto";
+        }
 
         const resp = await axios.post(API_URL, payload, {
             headers: {
@@ -86,7 +90,7 @@ export class Gpt6ControlProvider implements ControlModelProvider {
         const model = (process.env.WORKFLOW_AGENT_GPT6_MODEL || "gpt-6-astra").trim();
         if (!API_KEY) throw new Error("未配置 WORKFLOW_AGENT_GPT6_API_KEY（或 API_KEY）");
 
-        const payload = {
+        const payload: Record<string, unknown> = {
             model,
             messages: messages.map((m) => {
                 const base: Record<string, unknown> = { role: m.role, content: m.content };
@@ -101,10 +105,12 @@ export class Gpt6ControlProvider implements ControlModelProvider {
                 }
                 return base;
             }),
-            tools,
-            tool_choice: "auto",
             temperature: 0.2,
         };
+        if (tools?.length) {
+            payload.tools = tools;
+            payload.tool_choice = "auto";
+        }
 
         const resp = await axios.post(`${API_BASE}/chat/completions`, payload, {
             headers: {
@@ -191,8 +197,17 @@ export class WorkflowAgentService {
             for (const id of params.skillIds.slice(0, 5)) {
                 try {
                     const row = await this.skillService.getForUser(params.userId, id);
+                    const assets = await this.skillService.listAssets(params.userId, id);
+                    const assetHint = assets.length
+                        ? `\n附件（按需 load_skill_asset）：\n${assets.map((a) => `- ${a.path}`).join("\n")}`
+                        : "";
                     parts.push(
-                        `### Skill ${row.name} (id=${row.id})\n${this.skillService.truncateBody(row.body_md)}`
+                        `### Skill ${row.name} (id=${row.id}) grade=${row.compat_grade || "?"}\n` +
+                            `${this.skillService.truncateRuntimeBody(row)}` +
+                            (row.compat_report_json
+                                ? `\n\n[compat_gaps]\n${JSON.stringify((row.compat_report_json as any).gaps || []).slice(0, 2000)}`
+                                : "") +
+                            assetHint
                     );
                 } catch {
                     /* skip inaccessible */
@@ -240,12 +255,31 @@ export class WorkflowAgentService {
         if (name === "load_skill") {
             const skillId = Number(args.skillId);
             const row = await this.skillService.getForUser(userId, skillId);
+            const assets = await this.skillService.listAssets(userId, skillId);
             return JSON.stringify({
                 id: row.id,
                 name: row.name,
                 description: row.description,
-                body_md: this.skillService.truncateBody(row.body_md),
+                body_md: this.skillService.truncateRuntimeBody(row),
+                adapted: Boolean(row.adapted_body_md),
+                compat_grade: row.compat_grade,
+                compat_gaps: (row.compat_report_json as any)?.gaps || [],
+                assets,
             });
+        }
+        if (name === "list_skill_assets") {
+            const skillId = Number(args.skillId);
+            const assets = await this.skillService.listAssets(userId, skillId);
+            return JSON.stringify({ skillId, assets });
+        }
+        if (name === "load_skill_asset") {
+            const skillId = Number(args.skillId);
+            const path = String(args.path || "");
+            const file = await this.skillService.readAssetText(userId, skillId, path, SKILL_ASSET_INJECT_MAX_CHARS);
+            return JSON.stringify(file);
+        }
+        if (name === "mcp_status") {
+            return JSON.stringify(mcpStatusForAgent());
         }
         return null;
     }

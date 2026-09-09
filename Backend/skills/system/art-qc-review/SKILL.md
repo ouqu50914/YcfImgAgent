@@ -1,5 +1,6 @@
 ---
 name: art-qc-review
+title: 美术质检
 description: >
   美术质检流程：为已生成效果图创建 Review 节点并可选连接需求参考图。
   在用户提到质检、审核、打回、返工、评分时使用。
