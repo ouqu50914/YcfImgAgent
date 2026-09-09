@@ -373,6 +373,38 @@
                 </div>
               </div>
 
+              <div class="chat-skill-bar">
+                <el-select
+                  v-model="selectedSkillIds"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  clearable
+                  filterable
+                  size="small"
+                  placeholder="选用 Skill（可选）"
+                  class="chat-skill-select"
+                >
+                  <el-option-group label="全员">
+                    <el-option
+                      v-for="s in globalSkills"
+                      :key="'g-' + s.id"
+                      :label="s.name"
+                      :value="s.id"
+                    />
+                  </el-option-group>
+                  <el-option-group label="我的">
+                    <el-option
+                      v-for="s in mineSkills"
+                      :key="'m-' + s.id"
+                      :label="s.name"
+                      :value="s.id"
+                    />
+                  </el-option-group>
+                </el-select>
+                <el-switch v-model="useAgentMode" size="small" inline-prompt active-text="Agent" inactive-text="闲聊" />
+              </div>
+
               <div
                 class="chat-input-wrapper"
                 :class="{ 'is-input-resizing': isInputResizing }"
@@ -586,10 +618,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from 'vue';
 import { ElMessage, ElImageViewer } from 'element-plus';
 import { Plus, Close, VideoCamera, Rank, ChatLineRound, Fold, ArrowLeft, ArrowRight, Monitor, Delete } from '@element-plus/icons-vue';
 import { useUserStore } from '@/store/user';
+import { listSkills, runWorkflowAgentLoop } from '@/api/skill';
 import type { ChatHistoryItem, GeminiChatRequest } from '@/api/chat';
 import {
   sendGeminiChat,
@@ -633,6 +666,7 @@ const props = withDefaults(
   defineProps<{
     workflowContext?: unknown;
     mode?: 'embedded' | 'popup';
+    executeTool?: (call: { id: string; name: string; arguments: Record<string, unknown> }) => Promise<string>;
   }>(),
   { mode: 'embedded' },
 );
@@ -665,6 +699,22 @@ let scrollPending = false;
 const currentInput = ref('');
 const loading = ref(false);
 const errorMessage = ref('');
+const useAgentMode = ref(true);
+const selectedSkillIds = ref<number[]>([]);
+const skillOptions = ref<import('@/api/skill').SkillListItem[]>([]);
+const globalSkills = computed(() => skillOptions.value.filter((s) => s.visibility === 'global' || s.group === 'global'));
+const mineSkills = computed(() =>
+  skillOptions.value.filter((s) => s.group === 'mine' || s.visibility === 'private')
+);
+
+const loadSkillOptions = async () => {
+  try {
+    const res: any = await listSkills();
+    skillOptions.value = res?.data?.skills || [];
+  } catch {
+    skillOptions.value = [];
+  }
+};
 
 const messagesScrollRef = ref();
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -1685,28 +1735,75 @@ const handleSend = async () => {
     session.messages.push(assistantMsg);
     await scrollToBottom();
 
-    // 优先尝试真正的流式接口：每次拿到增量就直接拼接
-    try {
-      await sendGeminiChatStream(payload, async (delta) => {
-        assistantMsg.content += delta;
-        await scrollToBottom();
-      });
-    } catch (streamError) {
-      // 如果流式失败，回退到一次性接口，至少保证可用
-      const res = await sendGeminiChat(payload);
-      const raw: any = res.data ?? res;
-      const reply =
-        raw?.data?.reply ??
-        raw?.reply ??
-        raw?.choices?.[0]?.message?.content ??
-        raw?.choices?.[0]?.text ??
-        '';
-      if (!reply) {
-        const backendMsg = raw?.message || '未获得模型回复';
-        throw new Error(backendMsg);
+    const injectedExecute = inject<
+      ((call: { id: string; name: string; arguments: Record<string, unknown> }) => Promise<string>) | undefined
+    >('executeWorkflowTool', undefined);
+    const toolRunner = props.executeTool || injectedExecute;
+
+    if (useAgentMode.value && toolRunner) {
+      try {
+        await runWorkflowAgentLoop({
+          message: payload.message,
+          history: payload.history,
+          workflowContext: payload.workflowContext,
+          skillIds: selectedSkillIds.value,
+          mediaUrls: payload.mediaUrls,
+          executeTool: async (call) => {
+            const result = await toolRunner(call);
+            return result;
+          },
+          onTextDelta: async (text) => {
+            assistantMsg.content += text;
+            await scrollToBottom();
+          },
+          onAskUser: (q) => {
+            assistantMsg.content += (assistantMsg.content ? '\n' : '') + q;
+          },
+        });
+      } catch (agentErr: any) {
+        // Agent 失败回退闲聊
+        console.warn('[Agent] fallback to gemini-chat', agentErr);
+        assistantMsg.content = '';
+        try {
+          await sendGeminiChatStream(payload, async (delta) => {
+            assistantMsg.content += delta;
+            await scrollToBottom();
+          });
+        } catch {
+          const res = await sendGeminiChat(payload);
+          const raw: any = res.data ?? res;
+          assistantMsg.content =
+            raw?.data?.reply ??
+            raw?.reply ??
+            raw?.choices?.[0]?.message?.content ??
+            raw?.choices?.[0]?.text ??
+            (agentErr?.message || 'Agent 与闲聊均失败');
+        }
       }
-      assistantMsg.content = reply;
-      await scrollToBottom();
+    } else {
+      // 优先尝试真正的流式接口：每次拿到增量就直接拼接
+      try {
+        await sendGeminiChatStream(payload, async (delta) => {
+          assistantMsg.content += delta;
+          await scrollToBottom();
+        });
+      } catch (streamError) {
+        // 如果流式失败，回退到一次性接口，至少保证可用
+        const res = await sendGeminiChat(payload);
+        const raw: any = res.data ?? res;
+        const reply =
+          raw?.data?.reply ??
+          raw?.reply ??
+          raw?.choices?.[0]?.message?.content ??
+          raw?.choices?.[0]?.text ??
+          '';
+        if (!reply) {
+          const backendMsg = raw?.message || '未获得模型回复';
+          throw new Error(backendMsg);
+        }
+        assistantMsg.content = reply;
+        await scrollToBottom();
+      }
     }
 
     // 一轮回复结束后，立即强制持久化，避免刷新丢失最后一条内容
@@ -1836,6 +1933,7 @@ onMounted(() => {
   loadDockSettings();
   loadInputHeight();
   void loadSessionsFromServer();
+  void loadSkillOptions();
   window.addEventListener('beforeunload', () => {
     void saveActiveSessionToServer();
   });
@@ -2614,6 +2712,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.chat-skill-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 8px;
+}
+.chat-skill-select {
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-input-wrapper {

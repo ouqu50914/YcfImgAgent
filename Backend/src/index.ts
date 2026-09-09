@@ -26,7 +26,9 @@ import pixverseRoutes from "./routes/pixverse.routes";
 import mediaRoutes from "./routes/media.routes";
 import notificationRoutes from "./routes/notification.routes";
 import reviewRoutes from "./routes/review.routes";
+import skillRoutes from "./routes/skill.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
+import { seedSystemSkills } from "./skills/seed-system-skills";
 import { errorHandler } from "./middlewares/error.middleware";
 import { convertJsonTimesToBeijingIso } from "./utils/beijing-time";
 
@@ -141,6 +143,7 @@ app.use("/api/pixverse", pixverseRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/review", reviewRoutes);
+app.use("/api/skills", skillRoutes);
 
 // 静态资源 / 腾讯云 COS 预签名重定向
 // 注意：预签名默认约 1 小时过期。302 禁止被浏览器/CDN 长期缓存，否则会命中过期 Location →「图片已过期」。
@@ -248,6 +251,7 @@ AppDataSource.initialize()
     .then(async () => {
         console.log("✅ Data Source has been initialized!");
         await ensureApiConfigRecords();
+        await seedSystemSkills();
         startExpiredTemplatesJob();
         startExpiredChatMediaJob();
         startUploadOrphanCleanupJob();

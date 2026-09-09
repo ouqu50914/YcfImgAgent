@@ -365,8 +365,16 @@
         <!-- Gemini 聊天面板（包含右侧悬浮开关按钮） -->
         <WorkflowChatPanel
             :workflow-context="workflowContextForChat"
+            :execute-tool="executeWorkflowTool"
             @gemini-command="executeGeminiCommand"
         />
+
+        <el-drawer v-model="mySkillsVisible" title="Skill 库" size="480px" append-to-body>
+            <MySkillsPanel />
+        </el-drawer>
+        <el-button class="my-skills-fab" type="primary" size="small" @click="mySkillsVisible = true">
+            Skill
+        </el-button>
     </div>
 </template>
 
@@ -394,6 +402,9 @@ import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
 import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
+import MySkillsPanel from '@/components/MySkillsPanel.vue';
+import { createWorkflowToolExecutor } from '@/composables/useWorkflowToolExecutor';
+import { getSkill, listSkills } from '@/api/skill';
 import { useChatWindowBridge } from '@/composables/useChatWindowBridge';
 import { getUploadUrl } from '@/utils/image-loader';
 import { getMediaMetadataFromFile } from '@/utils/media-metadata';
@@ -1121,198 +1132,15 @@ watch(
     { deep: true, immediate: true },
 );
 
-/**
- * 解析 Gemini 输出的“画布执行命令”，自动新建节点并连线（但不触发生成）。
- * 生成仍由用户手动点击 DreamNode / VideoNode 的执行按钮。
- */
-const executeGeminiCommand = async (cmd: any) => {
-    try {
-        if (!cmd || typeof cmd !== 'object') return;
+const mySkillsVisible = ref(false);
 
-        // 你手动添加节点通常不会触发 fitView 的缩放变化；
-        // 这里保存当前缩放，fitView 仅用于移动视图居中，但节点视觉大小保持一致。
-        const prevZoom: number = (viewport.value as any)?.zoom ?? 0.8;
-
-        const intent: string | undefined = cmd.intent;
-        const promptTextRaw: unknown = cmd.promptText;
-        const promptText: string = typeof promptTextRaw === 'string' ? promptTextRaw.trim() : '';
-        if (!intent) return;
-        if (intent === 'create_image_pipeline' || intent === 'create_video_pipeline') {
-            if (!promptText) return;
-        }
-
-        if (intent === 'create_image_pipeline') {
-            const uiMessage = typeof (cmd?.ui as any)?.messageForUser === 'string' ? (cmd?.ui as any).messageForUser : '';
-            const promptId = `prompt_node_gemini_${Date.now()}`;
-            const dreamId = `dream_node_gemini_${Date.now()}`;
-
-            const promptPos = calculateOptimalPosition('prompt');
-            const dreamPreferred = {
-                x: promptPos.x + (NODE_DIMENSIONS.prompt?.width || 360) + HORIZONTAL_PADDING,
-                y: promptPos.y,
-            };
-            const dreamPos = calculateOptimalPosition('dream', dreamPreferred);
-
-            addNodes({
-                id: promptId,
-                type: 'prompt',
-                position: promptPos,
-                data: { text: promptText },
-            });
-
-            addNodes({
-                id: dreamId,
-                type: 'dream',
-                position: dreamPos,
-                data: {},
-            });
-
-            addEdges({
-                id: `edge_${promptId}_to_${dreamId}_${Date.now()}`,
-                source: promptId,
-                target: dreamId,
-                sourceHandle: 'prompt-source',
-                targetHandle: 'target',
-                type: 'default',
-                animated: true,
-            });
-
-            saveState();
-            void persistWorkflow();
-            await nextTick();
-            await fitView({ padding: 0.08 });
-            // 保持默认视觉大小（仅保持居中效果）
-            setViewport({ ...(viewport.value as any), zoom: prevZoom });
-
-            ElMessage.success(
-                uiMessage || '已自动创建并连接生图节点，请到生图节点手动点击执行生成。'
-            );
-            return;
-        }
-
-        if (intent === 'create_video_pipeline') {
-            const uiMessage = typeof (cmd?.ui as any)?.messageForUser === 'string' ? (cmd?.ui as any).messageForUser : '';
-            const promptId = `prompt_node_gemini_${Date.now()}`;
-            const videoId = `video_node_gemini_${Date.now()}`;
-
-            const promptPos = calculateOptimalPosition('prompt');
-            const videoPreferred = {
-                x: promptPos.x + (NODE_DIMENSIONS.prompt?.width || 360) + HORIZONTAL_PADDING,
-                y: promptPos.y,
-            };
-            const videoPos = calculateOptimalPosition('video', videoPreferred);
-
-            addNodes({
-                id: promptId,
-                type: 'prompt',
-                position: promptPos,
-                data: { text: promptText },
-            });
-
-            addNodes({
-                id: videoId,
-                type: 'video',
-                position: videoPos,
-                data: {},
-            });
-
-            addEdges({
-                id: `edge_${promptId}_to_${videoId}_${Date.now()}`,
-                source: promptId,
-                target: videoId,
-                sourceHandle: 'prompt-source',
-                targetHandle: 'target',
-                type: 'default',
-                animated: true,
-            });
-
-            // 如果画布上已有图片节点（通常来自你刚生成的 DreamNode），
-            // 则自动把“最近一次生成出来的那批图片”连到新建的 VideoNode 上。
-            // 连接：image-source -> target
-            const parseDreamTs = (nodeId: string): number => {
-                const m = nodeId.match(/^dream_node_(\d+)/);
-                return m ? Number(m[1]) : 0;
-            };
-            const parseImageTs = (nodeId: string): number => {
-                const m = nodeId.match(/^image_node_(\d+)_/);
-                return m ? Number(m[1]) : 0;
-            };
-
-            const allNodes = getNodes.value;
-            const allEdges = getEdges.value;
-
-            const dreamNodes = allNodes.filter((n) => n.type === 'dream');
-            const latestDream = dreamNodes.sort((a, b) => parseDreamTs(b.id) - parseDreamTs(a.id))[0];
-
-            const imageNodesToConnect = (() => {
-                // 优先用 fromNodeId 精确找到最新一批图片
-                if (latestDream?.id) {
-                    const imgs = allNodes.filter((n) => {
-                        if (n.type !== 'image') return false;
-                        const fromNodeId = (n.data as any)?.fromNodeId;
-                        const imageUrl = (n.data as any)?.imageUrl;
-                        return fromNodeId === latestDream.id && typeof imageUrl === 'string' && !!imageUrl;
-                    });
-                    if (imgs.length > 0) return imgs;
-                }
-
-                // 回退：找最近的 image_node 时间戳那一批
-                const imgs = allNodes.filter((n) => {
-                    if (n.type !== 'image') return false;
-                    const imageUrl = (n.data as any)?.imageUrl;
-                    return typeof imageUrl === 'string' && !!imageUrl;
-                });
-                const maxTs = Math.max(...imgs.map((n) => parseImageTs(n.id)), 0);
-                if (!maxTs) return [];
-                return imgs.filter((n) => parseImageTs(n.id) === maxTs);
-            })();
-
-            if (imageNodesToConnect.length > 0) {
-                const alreadyConnected = new Set(
-                    allEdges
-                        .filter((e) => e.target === videoId)
-                        .map((e) => `${e.source}::${e.target}`)
-                );
-
-                for (const img of imageNodesToConnect) {
-                    const key = `${img.id}::${videoId}`;
-                    if (alreadyConnected.has(key)) continue;
-
-                    addEdges({
-                        id: `edge_${img.id}_to_${videoId}_${Date.now()}`,
-                        source: img.id,
-                        target: videoId,
-                        sourceHandle: 'image-source',
-                        targetHandle: 'target',
-                        type: 'default',
-                        animated: true,
-                    });
-                }
-            }
-
-            saveState();
-            void persistWorkflow();
-            await nextTick();
-            await fitView({ padding: 0.08 });
-            // 保持默认视觉大小（仅保持居中效果）
-            setViewport({ ...(viewport.value as any), zoom: prevZoom });
-
-            ElMessage.success(
-                uiMessage || '已自动创建并连接视频节点，请到视频节点手动点击执行生成。'
-            );
-            return;
-        }
-    } catch (e) {
-        // 不要因为命令执行失败影响聊天本身
-        console.error('[executeGeminiCommand] failed:', e);
-    }
-};
-
-onChatBridgeMessage((msg) => {
-    if (msg.type === 'gemini-command') {
-        void executeGeminiCommand(msg.payload);
-    }
-});
+// 占位：工具执行器在 calculateOptimalPosition 定义后初始化
+let executeGeminiCommand: (cmd: any) => Promise<void> = async () => {};
+let executeWorkflowTool: (call: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+}) => Promise<string> = async () => JSON.stringify({ error: 'not ready' });
 
 // 截取画布作为封面图，上传后返回 URL；失败返回 null
 const captureCanvasCover = async (): Promise<string | null> => {
@@ -1490,6 +1318,41 @@ const calculateOptimalPosition = (
     // 如果所有位置都被占用，返回起始位置（用户需要手动调整）
     return { x: gridStartX, y: gridStartY };
 };
+
+const toolExecutor = createWorkflowToolExecutor({
+    getNodes: () => getNodes.value,
+    getEdges: () => getEdges.value,
+    addNodes: (n) => addNodes(n),
+    addEdges: (e) => addEdges(e),
+    calculateOptimalPosition,
+    NODE_DIMENSIONS,
+    HORIZONTAL_PADDING,
+    saveState,
+    persistWorkflow,
+    fitView,
+    setViewport,
+    getViewport: () => viewport.value,
+    listSkills: async () => {
+        const res: any = await listSkills();
+        return res?.data?.skills || [];
+    },
+    loadSkill: async (skillId: number) => {
+        const res: any = await getSkill(skillId);
+        return res?.data || res;
+    },
+});
+
+executeGeminiCommand = async (cmd: any) => {
+    await toolExecutor.executeGeminiCommand(cmd);
+};
+executeWorkflowTool = async (call) => toolExecutor.execute(call);
+provide('executeWorkflowTool', executeWorkflowTool);
+
+onChatBridgeMessage((msg) => {
+    if (msg.type === 'gemini-command') {
+        void executeGeminiCommand(msg.payload);
+    }
+});
 
 // 封装一次保存当前工作流的逻辑：离开编辑器页面时统一调用
 const saveCurrentWorkflowBeforeLeave = async (): Promise<boolean> => {
@@ -3947,5 +3810,12 @@ onUnmounted(() => {
     border: 1px solid #3b3d48;
     background-color: #393c45;
     color: #e0e0e0;
+}
+
+.my-skills-fab {
+    position: fixed;
+    left: 24px;
+    bottom: 24px;
+    z-index: 40;
 }
 </style>

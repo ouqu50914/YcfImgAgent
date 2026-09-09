@@ -204,6 +204,26 @@
           </el-select>
         </div>
 
+        <div class="param-item">
+          <div class="param-label">Skill（提示词增强）</div>
+          <el-select
+            v-model="selectedSkillId"
+            clearable
+            filterable
+            placeholder="可选"
+            size="small"
+            class="param-select nodrag nopan"
+            @change="persistSkillId"
+          >
+            <el-option-group label="全员">
+              <el-option v-for="s in globalSkillOptions" :key="'g'+s.id" :label="s.name" :value="s.id" />
+            </el-option-group>
+            <el-option-group label="我的">
+              <el-option v-for="s in mineSkillOptions" :key="'m'+s.id" :label="s.name" :value="s.id" />
+            </el-option-group>
+          </el-select>
+        </div>
+
         <el-button
           type="primary"
           size="default"
@@ -298,6 +318,7 @@ import {
 import { probeMediaUrl } from '@/api/media';
 import { useUserStore } from '@/store/user';
 import { notifyMediaGeneration } from '@/utils/browser-notification';
+import { getSkill, listSkills, type SkillListItem } from '@/api/skill';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
 import { translateErrorText } from '@/utils/error-toast';
@@ -309,6 +330,31 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } = useVueFlow();
 const userStore = useUserStore();
+
+const selectedSkillId = ref<number | null>((props.data as any)?.skillId ?? null);
+const skillOptions = ref<SkillListItem[]>([]);
+const globalSkillOptions = computed(() =>
+  skillOptions.value.filter((s) => s.visibility === 'global' || s.group === 'global')
+);
+const mineSkillOptions = computed(() =>
+  skillOptions.value.filter((s) => s.group === 'mine' || s.visibility === 'private')
+);
+const persistSkillId = () => {
+  const node = findNode(props.id);
+  if (node) node.data = { ...(node.data || {}), skillId: selectedSkillId.value };
+};
+const applySkillToPrompt = async (base: string): Promise<string> => {
+  if (!selectedSkillId.value) return base;
+  try {
+    const res: any = await getSkill(selectedSkillId.value);
+    const body = String(res?.data?.body_md || '').trim();
+    if (!body) return base;
+    const clipped = body.length > 8000 ? body.slice(0, 8000) + '\n…' : body;
+    return `[Skill]\n${clipped}\n\n[UserPrompt]\n${base}`;
+  } catch {
+    return base;
+  }
+};
 
 function notifyVideoGen(success: boolean, message: string) {
   if (success) {
@@ -1765,7 +1811,9 @@ const handleGenerate = async () => {
 
   try {
     if (provider.value === 'seedance') {
-      const basePrompt = connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。';
+      const basePrompt = await applySkillToPrompt(
+        connectedPrompt.value || '微距镜头对准树上鲜艳的花瓣，逐渐放大。'
+      );
 
       // 纯文生视频仍走简单接口
       if (seedanceMode.value === 'text') {
@@ -2239,7 +2287,7 @@ const handleGenerate = async () => {
         return;
       }
 
-      const basePrompt = connectedPrompt.value || '生成一个简短的视频';
+      const basePrompt = await applySkillToPrompt(connectedPrompt.value || '生成一个简短的视频');
 
       const normalizePixverseAspectRatio = (ar: string) => {
         if (ar === '9:16') return '9.16';
@@ -2491,9 +2539,10 @@ const handleGenerate = async () => {
 
     // Kling 流程
     markPendingBeforeRequest();
+    const klingPrompt = await applySkillToPrompt(connectedPrompt.value || '生成一个简短的视频');
     const body: any = {
       mode: mode.value,
-      prompt: connectedPrompt.value || '生成一个简短的视频',
+      prompt: klingPrompt,
       duration: durationAuto.value ? -1 : durationManual.value,
       resolution: resolution.value,
         aspectRatio: aspectRatio.value,
@@ -2658,6 +2707,13 @@ const downloadVideo = (url: string) => {
 };
 
 onMounted(() => {
+  void listSkills()
+    .then((res: any) => {
+      skillOptions.value = res?.data?.skills || [];
+    })
+    .catch(() => {
+      skillOptions.value = [];
+    });
   // 历史恢复场景：刷新后 workflow/节点可能是异步 setNodes，
   // 因此用有限重试确保拿到 videoResult 节点并启动轮询。
   let restoreTries = 0;

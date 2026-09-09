@@ -458,6 +458,32 @@
           </el-form>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane v-if="isSuperAdmin" label="Skill 管理" name="skills">
+        <div class="toolbar" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <el-upload :show-file-list="false" accept=".zip,.md" :http-request="onAdminSkillUpload">
+            <el-button type="primary" :loading="skillLoading">上传全局 Skill（默认 draft）</el-button>
+          </el-upload>
+          <el-button @click="loadAdminSkills" :loading="skillLoading">刷新</el-button>
+          <span style="color:#888;font-size:12px">设为「通用」后全员可用</span>
+        </div>
+        <el-table :data="adminSkills" border v-loading="skillLoading" style="margin-top: 16px">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="visibility" label="可见性" width="100" />
+          <el-table-column prop="status" label="状态" width="110" />
+          <el-table-column prop="owner_user_id" label="Owner" width="90" />
+          <el-table-column label="操作" width="300" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.visibility !== 'global'" size="small" type="success" @click="setSkillVis(row, 'global')">设为通用</el-button>
+              <el-button size="small" @click="setSkillVis(row, 'draft')">draft</el-button>
+              <el-button size="small" type="warning" @click="setSkillVis(row, 'disabled')">下架</el-button>
+              <el-button size="small" type="danger" @click="removeAdminSkill(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
 
     <!-- 创建用户对话框 -->
@@ -704,6 +730,13 @@ import {
   exportCreditUsage
 } from '@/api/admin';
 import {
+  adminDeleteSkill,
+  adminImportSkill,
+  adminListSkills,
+  adminSetSkillVisibility,
+  type SkillListItem,
+} from '@/api/skill';
+import {
   getAllCategories,
   createCategory,
   updateCategory,
@@ -721,6 +754,46 @@ const pageTitle = computed(() => (isSuperAdmin.value ? '管理后台' : '我的�
 const generationTabLabel = computed(() => (isSuperAdmin.value ? '生成记录' : '我的生成记录'));
 
 const activeTab = ref('users');
+const skillLoading = ref(false);
+const adminSkills = ref<SkillListItem[]>([]);
+
+const loadAdminSkills = async () => {
+  skillLoading.value = true;
+  try {
+    const res: any = await adminListSkills();
+    adminSkills.value = res?.data?.skills || [];
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e?.message || '加载 Skill 失败');
+  } finally {
+    skillLoading.value = false;
+  }
+};
+
+const onAdminSkillUpload = async (opt: any) => {
+  skillLoading.value = true;
+  try {
+    await adminImportSkill(opt.file as File);
+    ElMessage.success('已导入为 draft，请设为通用');
+    await loadAdminSkills();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e?.message || '导入失败');
+  } finally {
+    skillLoading.value = false;
+  }
+};
+
+const setSkillVis = async (row: SkillListItem, visibility: 'draft' | 'global' | 'disabled') => {
+  await adminSetSkillVisibility(row.id, visibility);
+  ElMessage.success('已更新');
+  await loadAdminSkills();
+};
+
+const removeAdminSkill = async (row: SkillListItem) => {
+  await ElMessageBox.confirm(`删除 Skill「${row.name}」？`, '确认', { type: 'warning' });
+  await adminDeleteSkill(row.id);
+  ElMessage.success('已删除');
+  await loadAdminSkills();
+};
 
 // Element Plus 的 el-table-column formatter 签名不同于普通函数，这里做一层适配
 const formatTableDateTime = (_row: any, _column: any, cellValue: unknown) => {
@@ -1336,6 +1409,7 @@ watch(activeTab, (tab) => {
   if (tab === 'creditApplications') loadCreditApplications();
   if (tab === 'system') loadHelpDocUrl();
   if (tab === 'generationRecords') void loadGenerationRecords();
+  if (tab === 'skills') void loadAdminSkills();
 });
 
 onMounted(async () => {
