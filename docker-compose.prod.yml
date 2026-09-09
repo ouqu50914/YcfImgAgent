@@ -55,6 +55,7 @@ services:
       DB_DATABASE: ${MYSQL_DATABASE:-ai_image_tool}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      QC_WEB_URL: http://qc_web:8082
       # 下面是你的 API Key 等配置，请确保由环境变量或 env_file 注入
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-}
@@ -65,6 +66,24 @@ services:
     depends_on:
       - mysql
       - redis
+      - qc_web
+    networks:
+      - ycf_network
+
+  # AI 质检侧车（仅内网；Backend 通过 QC_WEB_URL 访问）
+  qc_web:
+    build:
+      context: ./services/qc_web
+      dockerfile: Dockerfile
+    container_name: ycf_qc_web
+    restart: always
+    environment:
+      API_KEY: ${QC_API_KEY}
+      API_BASE: ${QC_API_BASE:-https://api.acedata.cloud/v1}
+      QC_HOST: 0.0.0.0
+      QC_PORT: 8082
+    volumes:
+      - ./data/qc_uploads:/app/uploads
     networks:
       - ycf_network
 

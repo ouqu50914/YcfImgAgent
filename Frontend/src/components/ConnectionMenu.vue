@@ -19,12 +19,19 @@
             <el-icon><VideoCamera /></el-icon>
             <span>生成视频</span>
         </div>
+        <div 
+            class="menu-item"
+            @click="handleReview"
+        >
+            <el-icon><CircleCheck /></el-icon>
+            <span>审核</span>
+        </div>
     </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch, nextTick } from 'vue';
-import { Picture, VideoCamera } from '@element-plus/icons-vue';
+import { Picture, VideoCamera, CircleCheck } from '@element-plus/icons-vue';
 
 interface Position {
     x: number;
@@ -39,6 +46,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     generateImage: [];
     generateVideo: [];
+    review: [];
     close: [];
 }>();
 
@@ -49,6 +57,11 @@ const handleGenerateImage = () => {
 
 const handleGenerateVideo = () => {
     emit('generateVideo');
+    emit('close');
+};
+
+const handleReview = () => {
+    emit('review');
     emit('close');
 };
 

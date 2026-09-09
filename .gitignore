@@ -50,6 +50,16 @@ data/redis/
 Backend/uploads/
 Backend/temp/
 
+### qc_web 侧车 ###
+services/qc_web/uploads/
+services/qc_web/__pycache__/
+services/qc_web/*.pyc
+services/qc_web/*.log
+services/qc_web/.venv/
+services/qc_web/.qc_web.pid
+services/qc_web/qc_web.dev.log
+data/qc_uploads/
+
 ### 备份脚本（含服务器配置，不提交） ###
 scripts/backup_mysql_to_cos.sh
 

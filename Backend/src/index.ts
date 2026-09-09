@@ -25,6 +25,7 @@ import seedanceRoutes from "./routes/seedance.routes";
 import pixverseRoutes from "./routes/pixverse.routes";
 import mediaRoutes from "./routes/media.routes";
 import notificationRoutes from "./routes/notification.routes";
+import reviewRoutes from "./routes/review.routes";
 import { isCosEnabled, getSignedUrl, pathToKey } from "./services/cos.service";
 import { errorHandler } from "./middlewares/error.middleware";
 import { convertJsonTimesToBeijingIso } from "./utils/beijing-time";
@@ -139,6 +140,7 @@ app.use("/api/seedance", seedanceRoutes);
 app.use("/api/pixverse", pixverseRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/review", reviewRoutes);
 
 // 静态资源 / 腾讯云 COS 预签名重定向
 // 注意：预签名默认约 1 小时过期。302 禁止被浏览器/CDN 长期缓存，否则会命中过期 Location →「图片已过期」。

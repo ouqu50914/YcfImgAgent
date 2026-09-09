@@ -59,6 +59,13 @@
             <span>插入图层分离节点</span>
             <span class="shortcut">L</span>
         </div>
+        <div 
+            class="menu-item"
+            @click="handleInsertReview"
+        >
+            <el-icon><CircleCheck /></el-icon>
+            <span>插入质检节点</span>
+        </div>
         <div class="menu-divider"></div>
         <div 
             class="menu-item"
@@ -72,7 +79,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { EditPen, Picture, VideoPlay, VideoCamera, Folder, KnifeFork, Grid } from '@element-plus/icons-vue';
+import { EditPen, Picture, VideoPlay, VideoCamera, Folder, KnifeFork, Grid, CircleCheck } from '@element-plus/icons-vue';
 
 interface Position {
     x: number;
@@ -92,6 +99,7 @@ const emit = defineEmits<{
     insertVideoRef: [];
     insertAudioRef: [];
     insertLayerSeparation: [];
+    insertReview: [];
     addGroup: [];
     close: [];
 }>();
@@ -128,6 +136,11 @@ const handleInsertAudioRef = () => {
 
 const handleInsertLayerSeparation = () => {
     emit('insertLayerSeparation');
+    emit('close');
+};
+
+const handleInsertReview = () => {
+    emit('insertReview');
     emit('close');
 };
 

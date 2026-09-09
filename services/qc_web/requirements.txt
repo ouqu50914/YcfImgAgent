@@ -1,0 +1,5 @@
+flask>=2.3
+numpy>=1.24
+pillow>=10.0
+# 可选：完整 L0 清晰度预检需要 opencv（体积大，可后装）
+# opencv-python>=4.8

@@ -230,6 +230,7 @@
                 @insert-video-ref="insertVideoRefNode"
                 @insert-audio-ref="insertAudioRefNode"
                 @insert-layer-separation="insertLayerSeparationNode"
+                @insert-review="insertReviewNode"
                 @add-group="handleAddGroup"
                 @close="contextMenuVisible = false"
             />
@@ -237,6 +238,7 @@
             <!-- 连接菜单 -->
             <ConnectionMenu :visible="connectionMenuVisible" :position="connectionMenuPosition"
                 @generate-image="handleConnectToImage" @generate-video="handleConnectToVideo"
+                @review="handleConnectToReview"
                 @close="connectionMenuVisible = false" />
         </div>
 
@@ -414,6 +416,7 @@ import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
 import VideoRefNode from '@/components/nodes/VideoRefNode.vue';
 import AudioRefNode from '@/components/nodes/AudioRefNode.vue';
 import VideoResultNode from '@/components/nodes/VideoResultNode.vue';
+import ReviewNode from '@/components/nodes/ReviewNode.vue';
 
 // 注册节点类型
 const nodeTypes = {
@@ -428,6 +431,7 @@ const nodeTypes = {
     videoRef: markRaw(VideoRefNode),
     audioRef: markRaw(AudioRefNode),
     videoResult: markRaw(VideoResultNode),
+    review: markRaw(ReviewNode),
 };
 
 // Element Plus 的 el-table-column formatter 签名适配
@@ -1373,6 +1377,7 @@ const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
     'videoRef': { width: 260, height: 220 },
     'audioRef': { width: 260, height: 220 },
     'videoResult': { width: 320, height: 280 },
+    'review': { width: 360, height: 520 },
 };
 
 // 间距配置
@@ -1746,6 +1751,31 @@ const isValidConnection = (connection: Connection) => {
             return false;
         }
 
+        return true;
+    }
+
+    // AI 质检节点：效果图 1 张 + 需求图最多 5 张（仅图片节点）
+    if (targetNode.type === 'review') {
+        if (sourceNode.type !== 'image') {
+            ElMessage.warning('质检节点只接受图片节点作为输入');
+            return false;
+        }
+        const handle = connection.targetHandle || 'target';
+        const existingEdges = getEdges.value.filter(edge => edge.target === connection.target);
+        if (handle === 'req') {
+            const reqCount = existingEdges.filter(e => e.targetHandle === 'req').length;
+            if (reqCount >= 5) {
+                ElMessage.warning('需求图最多连接 5 张');
+                return false;
+            }
+            return true;
+        }
+        // 默认效果图接点
+        const effectCount = existingEdges.filter(e => !e.targetHandle || e.targetHandle === 'target').length;
+        if (effectCount >= 1) {
+            ElMessage.warning('效果图只能连接一张，需求图请连到蓝色接点');
+            return false;
+        }
         return true;
     }
 
@@ -2278,6 +2308,30 @@ const insertLayerSeparationNode = () => {
     });
 };
 
+const insertReviewNode = () => {
+    const position = screenToFlowCoordinate({
+        x: contextMenuPosition.value.x,
+        y: contextMenuPosition.value.y
+    });
+
+    const nodeId = `review_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'review',
+        position,
+        data: {
+            imageUrl: '',
+            effectImageUrl: '',
+            reqImageUrls: [] as string[],
+        }
+    });
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（插入质检节点）:', error);
+    });
+};
+
 const insertVideoRefNode = () => {
     const position = screenToFlowCoordinate({
         x: contextMenuPosition.value.x,
@@ -2649,6 +2703,102 @@ const handleConnectToVideo = () => {
     saveState();
     persistWorkflow().catch((error: any) => {
         console.error('关键操作保存失败（拖线创建视频节点）:', error);
+    });
+};
+
+// 连接到 AI 质检节点
+const handleConnectToReview = () => {
+    if (!pendingConnection.value) return;
+
+    const sourceNode = findNode(pendingConnection.value.source);
+    if (!sourceNode || sourceNode.type !== 'image') {
+        ElMessage.warning('请从图片节点拖出连线后再选择「审核」');
+        pendingConnection.value = null;
+        return;
+    }
+
+    const mousePosition = pendingConnection.value.position;
+    const dimensions = NODE_DIMENSIONS['review'] || { width: 360, height: 420 };
+    const checkCollisionAtPosition = (x: number, y: number): boolean => {
+        const newNodeRect = {
+            left: x,
+            top: y,
+            right: x + dimensions.width,
+            bottom: y + dimensions.height
+        };
+        for (const node of getNodes.value) {
+            if (node.id === pendingConnection.value!.source) continue;
+            const nodeDim = NODE_DIMENSIONS[node.type || 'dream'] || { width: 300, height: 400 };
+            const nodeRect = {
+                left: node.position.x,
+                top: node.position.y,
+                right: node.position.x + nodeDim.width,
+                bottom: node.position.y + nodeDim.height
+            };
+            const padding = 20;
+            if (
+                newNodeRect.left < nodeRect.right + padding &&
+                newNodeRect.right > nodeRect.left - padding &&
+                newNodeRect.top < nodeRect.bottom + padding &&
+                newNodeRect.bottom > nodeRect.top - padding
+            ) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    let position: { x: number; y: number };
+    if (!checkCollisionAtPosition(mousePosition.x, mousePosition.y)) {
+        position = mousePosition;
+    } else {
+        const sourceNodeDim = NODE_DIMENSIONS[sourceNode.type || 'image'] || { width: 240, height: 300 };
+        position = {
+            x: sourceNode.position.x + sourceNodeDim.width + 100,
+            y: sourceNode.position.y
+        };
+        if (checkCollisionAtPosition(position.x, position.y)) {
+            position = calculateOptimalPosition('review', mousePosition);
+        }
+    }
+
+    const pickUrl = (data: any): string => {
+        if (!data) return '';
+        if (data.imageUrl) return String(data.imageUrl);
+        if (data.image_url) return String(data.image_url);
+        if (Array.isArray(data.imageUrls) && data.imageUrls[0]) return String(data.imageUrls[0]);
+        return '';
+    };
+    const imageUrl = pickUrl(sourceNode.data);
+
+    const nodeId = `review_node_${Date.now()}`;
+    addNodes({
+        id: nodeId,
+        type: 'review',
+        position,
+        data: {
+            imageUrl,
+            effectImageUrl: imageUrl,
+            reqImageUrls: [] as string[],
+        }
+    });
+
+    addEdges({
+        id: `edge-${pendingConnection.value.source}-${nodeId}-${Date.now()}`,
+        source: pendingConnection.value.source,
+        target: nodeId,
+        sourceHandle: pendingConnection.value.sourceHandle || 'image-source',
+        targetHandle: 'target',
+        type: 'default',
+        animated: true
+    });
+
+    pendingConnection.value = null;
+    ElMessage.success('已创建质检节点并建立连接');
+
+    saveState();
+    persistWorkflow().catch((error: any) => {
+        console.error('关键操作保存失败（拖线创建质检节点）:', error);
     });
 };
 
