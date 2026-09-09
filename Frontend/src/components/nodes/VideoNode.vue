@@ -1,19 +1,11 @@
 <template>
   <div class="video-node">
-    <div class="node-header">
-      <el-icon><VideoCamera /></el-icon>
-      <span>视频生成节点</span>
-      <el-tag size="small" class="model-tag" effect="dark">
-        {{ providerLabel }}
-      </el-tag>
-    </div>
-
     <div class="node-content">
-      <!-- 上半部分：参数表单（nodrag：避免点击控件时触发节点拖拽） -->
-      <div class="params-section nodrag">
+      <!-- 仅交互控件 nodrag，标签/空白可拖节点 -->
+      <div class="params-section">
         <div class="param-item">
           <div class="param-label">模型</div>
-          <el-select v-model="provider" size="small" class="param-select">
+          <el-select v-model="provider" size="small" class="param-select nodrag nopan">
             <!-- Kling 目前作为历史兼容分支存在：前端不允许新建选择 -->
             <el-option label="Seedance" value="seedance" />
             <el-option label="PixVerse" value="pixverse" />
@@ -23,7 +15,7 @@
 
         <div v-if="provider === 'seedance'" class="param-item">
           <div class="param-label">Seedance 类型</div>
-          <el-select v-model="seedanceMode" size="small" class="param-select">
+          <el-select v-model="seedanceMode" size="small" class="param-select nodrag nopan">
             <el-option label="文生视频" value="text" />
             <el-option label="图生视频-首帧" value="image_first_frame" />
             <el-option label="图生视频-首尾帧" value="image_first_last" />
@@ -34,7 +26,7 @@
         <!-- PixVerse 生成类型：文生 / 图生 / 首尾帧 / 多主体（不支持多模态参考） -->
         <div v-if="provider === 'pixverse'" class="param-item">
           <div class="param-label">PixVerse 类型</div>
-          <el-select v-model="pixverseMode" size="small" class="param-select">
+          <el-select v-model="pixverseMode" size="small" class="param-select nodrag nopan">
             <el-option label="文生视频" value="text_to_video" />
             <el-option label="图生视频" value="image_to_video_first_only" />
             <el-option label="首尾帧生视频" value="image_to_video_first_last" />
@@ -44,7 +36,7 @@
 
         <div v-if="provider === 'kling'" class="param-item">
           <div class="param-label">模式</div>
-          <el-select v-model="mode" size="small" class="param-select">
+          <el-select v-model="mode" size="small" class="param-select nodrag nopan">
             <el-option label="文生视频" value="text_to_video" />
             <el-option label="图生视频" value="image_to_video" />
           </el-select>
@@ -53,7 +45,7 @@
         <!-- 图生视频子模式 -->
         <div v-if="mode === 'image_to_video' && provider === 'kling'" class="param-item">
           <div class="param-label">图生类型</div>
-          <el-select v-model="imageSubType" size="small" class="param-select">
+          <el-select v-model="imageSubType" size="small" class="param-select nodrag nopan">
             <el-option label="仅首帧" value="first_only" />
             <el-option label="首尾帧（一镜到底）" value="first_last" />
             <el-option label="多图多镜头" value="multi_shot" />
@@ -131,7 +123,7 @@
         <div class="param-item">
           <div class="param-label">时长(秒)</div>
           <!-- Seedance：支持自动(-1) 或 4-15 手动，避免数值跳动 -->
-          <div style="display: flex; align-items: center; gap: 6px;">
+          <div class="duration-controls nodrag nopan" style="display: flex; align-items: center; gap: 6px;">
             <el-switch
               v-if="provider !== 'pixverse'"
               v-model="durationAuto"
@@ -171,7 +163,7 @@
 
         <div class="param-item">
           <div class="param-label">分辨率</div>
-          <el-select v-model="resolution" size="small" class="param-select">
+          <el-select v-model="resolution" size="small" class="param-select nodrag nopan">
             <template v-if="provider === 'seedance'">
               <el-option label="480p" value="480p" />
               <el-option label="720p" value="720p" />
@@ -192,7 +184,7 @@
 
         <div class="param-item">
           <div class="param-label">比例</div>
-          <el-select v-model="aspectRatio" size="small" class="param-select">
+          <el-select v-model="aspectRatio" size="small" class="param-select nodrag nopan">
             <template v-if="provider === 'pixverse'">
               <el-option label="16:9" value="16:9" />
               <el-option label="9:16" value="9:16" />
@@ -215,7 +207,7 @@
         <el-button
           type="primary"
           size="default"
-          class="execute-btn"
+          class="execute-btn nodrag nopan"
           :loading="loading"
           :disabled="!canExecute || loading || generationInFlight || generationCooldownLeftSec > 0 || hasActiveGeneration"
           @click="handleGenerate"
@@ -286,7 +278,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick, type Ref } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
-import { VideoCamera } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { createVideoTask, getVideoTask, type VideoMode, type ImageSubType } from '@/api/video';
 import { getUploadUrl } from '@/utils/image-loader';
@@ -899,10 +890,6 @@ const durationAuto = ref(false);
 const durationManual = ref<number>(4);
 const resolution = ref<'480p' | '540p' | '720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
-
-const providerLabel = computed(() =>
-  provider.value === 'pixverse' ? 'PixVerse' : provider.value === 'kling' ? 'Kling' : 'Seedance'
-);
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -2848,7 +2835,7 @@ onUnmounted(() => {
 .video-node {
   background: #2d2d2d;
   border: 1px solid #404040;
-  border-radius: 30px;
+  border-radius: 5px;
   width: 360px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
   font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -2864,22 +2851,6 @@ onUnmounted(() => {
 .video-node:hover :deep(.vue-flow__handle) {
   opacity: 1;
   pointer-events: auto;
-}
-
-.node-header {
-  background: #3a3a3f;
-  border-bottom: 1px solid #404040;
-  padding: 8px 12px;
-  font-size: 14px;
-  font-weight: bold;
-  color: #e0e0e0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.model-tag {
-  margin-left: auto;
 }
 
 .node-content {
@@ -2907,6 +2878,14 @@ onUnmounted(() => {
   font-size: 12px;
   color: #b0b0b0;
   min-width: 72px;
+  flex: 1 1 auto;
+  cursor: grab;
+  user-select: none;
+  padding: 6px 0;
+}
+
+.param-label:active {
+  cursor: grabbing;
 }
 
 .param-select {

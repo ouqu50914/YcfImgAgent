@@ -1,18 +1,13 @@
 <template>
     <div class="dream-node">
-        <!-- 顶部标题（与参考图一致） -->
-        <div class="node-header">
-            <span>模型参数</span>
-        </div>
-        <!-- 内容区域 -->
+        <!-- 内容区域：仅交互控件 nodrag，标签/空白可拖节点 -->
         <div class="node-content">
-            <!-- nodrag：避免在控件上按下鼠标时触发节点拖拽，导致按钮点不到 -->
-            <div class="params-section nodrag">
+            <div class="params-section">
                 
                 <!-- 模型选择 -->
                 <div class="param-item">
                     <div class="param-label">模型</div>
-                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select">
+                    <el-select v-model="selectedModel" placeholder="选择模型" size="small" class="param-select model-select nodrag nopan">
                         <el-option
                             v-for="option in availableModelOptions"
                             :key="option.value"
@@ -25,7 +20,7 @@
                 <!-- 生成数量 -->
                 <div class="param-item">
                     <div class="param-label">生成数量</div>
-                    <el-select v-model="numImages" placeholder="生成数量" size="small" class="param-select">
+                    <el-select v-model="numImages" placeholder="生成数量" size="small" class="param-select nodrag nopan">
                         <el-option label="1" :value="1" />
                         <el-option label="2" :value="2" />
                         <el-option label="3" :value="3" />
@@ -40,7 +35,7 @@
                         v-model="quality" 
                         placeholder="画质" 
                         size="small" 
-                        class="param-select" 
+                        class="param-select nodrag nopan" 
                         :disabled="!availableResolutions.length || isGemini3ProModel"
                     >
                         <el-option 
@@ -59,7 +54,7 @@
                         v-model="aspectRatio" 
                         placeholder="比例" 
                         size="small" 
-                        class="param-select"
+                        class="param-select nodrag nopan"
                     >
                         <el-option 
                             v-for="ratio in availableAspectRatios" 
@@ -72,7 +67,7 @@
 
                 <!-- 执行按钮（禁用原因多为积分/参考图；提示词在点击后校验，见 executeBlockedHint） -->
                 <el-tooltip :content="executeBlockedHint" placement="top" :disabled="canExecute">
-                    <span class="execute-btn-tooltip-anchor">
+                    <span class="execute-btn-tooltip-anchor nodrag nopan">
                         <el-button
                             type="primary"
                             size="default"
@@ -1534,7 +1529,7 @@ const saveWorkflowImmediately = () => {
 .dream-node {
     background: #2d2d2d;
     border: 1px solid #404040;
-    border-radius: 30px;
+    border-radius: 5px;
     width: 280px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     overflow: visible;
@@ -1552,16 +1547,6 @@ const saveWorkflowImmediately = () => {
 .dream-node:hover :deep(.vue-flow__handle) {
     opacity: 1;
     pointer-events: auto;
-}
-
-.node-header {
-    background: #3a3a3f;
-    color: #e0e0e0;
-    padding: 10px 14px;
-    font-size: 14px;
-    font-weight: 600;
-    border-bottom: 1px solid #404040;
-    border-radius: 30px 30px 0 0;
 }
 
 .node-content {
@@ -1615,8 +1600,15 @@ const saveWorkflowImmediately = () => {
 .param-label {
     font-size: 12px;
     color: #b0b0b0;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-width: 72px;
+    cursor: grab;
+    user-select: none;
+    padding: 6px 0;
+}
+
+.param-label:active {
+    cursor: grabbing;
 }
 
 .param-select {

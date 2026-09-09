@@ -165,7 +165,7 @@ const copyToClipboard = async () => {
 .prompt-optimize-node {
     background: white;
     border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    border-radius: 5px;
     width: 280px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow: hidden;

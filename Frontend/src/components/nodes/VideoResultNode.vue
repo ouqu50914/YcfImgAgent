@@ -4,33 +4,41 @@
     @mouseenter="showActions = true"
     @mouseleave="showActions = false"
   >
-    <div class="node-header">
-      <el-icon><VideoCamera /></el-icon>
-      <span>视频结果</span>
-    </div>
-    <div class="node-content">
-      <div class="status-row">
-        <span class="status-label">状态</span>
-        <span class="status-value" :class="`status-${status}`">
-          {{ statusText }}
-        </span>
-        <el-tag v-if="progress != null" size="small" effect="dark">
-          {{ progress }}%
-        </el-tag>
+    <!-- 名称 + 尺寸/状态：显示在媒体上方（可拖拽节点） -->
+    <div class="media-meta">
+      <div class="meta-left">
+        <el-icon class="meta-icon"><VideoCamera /></el-icon>
+        <span class="meta-name">视频结果</span>
+        <span class="meta-status" :class="`status-${status}`">{{ statusText }}</span>
       </div>
+      <span v-if="dimensionText" class="meta-size">{{ dimensionText }}</span>
+      <el-tag v-else-if="progress != null" size="small" effect="dark" class="meta-progress">
+        {{ progress }}%
+      </el-tag>
+    </div>
 
+    <!-- 媒体本体（无外壳） -->
+    <div class="media-frame">
       <div v-if="effectiveVideoUrl" class="player-wrapper">
         <video
           :src="effectiveVideoUrl"
           controls
-          class="video-player"
-          @click.stop="handleVideoClick($event, effectiveVideoUrl)"
+          class="video-player nodrag"
+          draggable="false"
+          @loadedmetadata="handleVideoMeta"
           @error="handleVideoError"
+        />
+        <!-- 透明拖拽层：盖住画面，底部留给原生控件 -->
+        <div
+          class="drag-surface drag-surface--video"
+          @mousedown="onDragSurfaceMouseDown"
+          @click="onDragSurfaceClick"
         />
         <transition name="fade">
           <div
             v-if="showActions"
-            class="action-menu"
+            class="action-menu nodrag nopan"
+            @click.stop
           >
             <el-tooltip content="全屏查看" placement="top" :show-after="300">
               <el-button
@@ -55,16 +63,16 @@
           </div>
         </transition>
       </div>
-      <div v-if="errorMessage" class="error-row">
+      <div v-else-if="errorMessage" class="placeholder error-row">
         {{ errorMessage }}
       </div>
       <div
         v-else-if="isFailedLikeWithoutVideo"
-        class="error-row"
+        class="placeholder error-row"
       >
         生成失败，请重试或稍后刷新任务状态。
       </div>
-      <div v-else-if="!videoUrl" class="placeholder">
+      <div v-else class="placeholder">
         视频生成中或排队中…
       </div>
     </div>
@@ -107,7 +115,6 @@
         border: '2px solid white',
         borderRadius: '50%',
         cursor: 'crosshair',
-        top: '50%'
       }"
     />
   </div>
@@ -125,6 +132,7 @@ const props = defineProps<NodeProps>();
 const showActions = ref(false);
 const showFullscreen = ref(false);
 const fullscreenUrl = ref<string | null>(null);
+const naturalSize = ref<{ w: number; h: number } | null>(null);
 
 const { updateNodeData } = useVueFlow();
 
@@ -154,6 +162,18 @@ const effectiveVideoUrl = computed(() => {
   // cache-bust：避免命中 CDN 的 404 负缓存
   return base.includes('?') ? `${base}&_v=${n}` : `${base}?_v=${n}`;
 });
+
+const dimensionText = computed(() => {
+  if (!naturalSize.value) return '';
+  return `${naturalSize.value.w} × ${naturalSize.value.h}`;
+});
+
+const handleVideoMeta = (e: Event) => {
+  const el = e?.target as HTMLVideoElement | null;
+  if (el?.videoWidth && el?.videoHeight) {
+    naturalSize.value = { w: el.videoWidth, h: el.videoHeight };
+  }
+};
 
 const status = computed(() => {
   const s = (props.data as any)?.status as string | undefined;
@@ -254,20 +274,20 @@ const handleCloseFullscreen = () => {
   fullscreenUrl.value = null;
 };
 
-const handleVideoClick = (event: MouseEvent, url: string) => {
-  if (!url) return;
-  const target = event.currentTarget as HTMLVideoElement | null;
-  if (!target) return;
-  const rect = target.getBoundingClientRect();
-  const controlHeight = 48;
-  if (event.clientY < rect.bottom - controlHeight) {
-    event.preventDefault();
-    event.stopPropagation();
-    try {
-      target.pause();
-    } catch {}
-    handleOpenFullscreen(url);
+// 拖拽层点击：拖动后不打开全屏；底部控件区域不被覆盖
+let dragSurfaceDownPos: { x: number; y: number } | null = null;
+const onDragSurfaceMouseDown = (e: MouseEvent) => {
+  dragSurfaceDownPos = { x: e.clientX, y: e.clientY };
+};
+const onDragSurfaceClick = (e: MouseEvent) => {
+  if (!effectiveVideoUrl.value) return;
+  if (dragSurfaceDownPos) {
+    const dx = Math.abs(e.clientX - dragSurfaceDownPos.x);
+    const dy = Math.abs(e.clientY - dragSurfaceDownPos.y);
+    dragSurfaceDownPos = null;
+    if (dx > 5 || dy > 5) return;
   }
+  handleOpenFullscreen(effectiveVideoUrl.value);
 };
 
 const statusText = computed(() => {
@@ -296,19 +316,22 @@ onUnmounted(() => {
 
 <style scoped>
 .video-result-node {
-  background: #2d2d2d;
-  border: 1px solid #404040;
-  border-radius: 20px;
+  --media-meta-h: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   width: 320px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   font-family: 'Helvetica Neue', Arial, sans-serif;
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
 }
 
 .video-result-node :deep(.vue-flow__handle) {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
+  top: calc(var(--media-meta-h) + (100% - var(--media-meta-h)) / 2) !important;
 }
 
 .video-result-node:hover :deep(.vue-flow__handle) {
@@ -316,39 +339,61 @@ onUnmounted(() => {
   pointer-events: auto;
 }
 
-.node-header {
-  background: #3a3a3f;
-  border-bottom: 1px solid #404040;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #e0e0e0;
+.media-meta {
+  height: 26px;
+  margin-bottom: 6px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-}
-
-.node-content {
-  padding: 10px 12px 12px;
-  color: #e0e0e0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  padding: 0 2px;
+  color: #c8c8c8;
   font-size: 12px;
+  line-height: 1.2;
+  user-select: none;
+  cursor: grab;
 }
 
-.status-label {
-  color: #b0b0b0;
+.media-meta:active {
+  cursor: grabbing;
 }
 
-.status-value {
+.meta-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta-icon {
+  font-size: 14px;
+  color: #a8a8a8;
+  flex-shrink: 0;
+}
+
+.meta-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 500;
+  color: #e0e0e0;
+}
+
+.meta-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.meta-size {
+  flex-shrink: 0;
+  color: #9a9a9a;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta-progress {
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .status-pending,
@@ -369,29 +414,56 @@ onUnmounted(() => {
   color: #909399;
 }
 
-.error-row {
-  font-size: 12px;
-  color: #f56c6c;
-  background: rgba(245, 108, 108, 0.1);
-  border-radius: 6px;
-  padding: 4px 6px;
+.media-frame {
+  position: relative;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #1a1a1a;
+  cursor: grab;
+}
+
+.media-frame:active {
+  cursor: grabbing;
 }
 
 .player-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  position: relative;
+  display: block;
+  min-height: 40px;
+}
+
+.drag-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: grab;
+  background: transparent;
+}
+
+.drag-surface:active {
+  cursor: grabbing;
+}
+
+/* 底部留给 video controls，避免挡住进度条/音量 */
+.drag-surface--video {
+  bottom: 44px;
 }
 
 .action-menu {
   position: absolute;
-  top: 8px;
-  right: 12px;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: row;
   gap: 6px;
   align-items: center;
-  z-index: 10;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 5px 8px;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+  cursor: default;
 }
 
 .action-icon-btn {
@@ -419,14 +491,40 @@ onUnmounted(() => {
 
 .video-player {
   width: 100%;
-  border-radius: 10px;
+  display: block;
+  border-radius: 5px;
   background: #000;
-  max-height: 220px;
+  max-height: 360px;
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 .placeholder {
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
   font-size: 12px;
   color: #999;
+  text-align: center;
+  border-radius: 5px;
+  background: #25262b;
+}
+
+.error-row {
+  color: #f56c6c;
+  background: rgba(245, 108, 108, 0.12);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* 全屏视频预览样式（与 VideoNode 保持一致） */
@@ -483,14 +581,11 @@ onUnmounted(() => {
   align-items: center !important;
   justify-content: center !important;
   cursor: pointer;
-  position: relative;
-  overflow: hidden !important;
 }
 
 .fullscreen-video {
   max-width: 95vw !important;
   max-height: 95vh !important;
-  background: #000;
+  object-fit: contain !important;
 }
 </style>
-

@@ -179,7 +179,7 @@ const handleSelectFile = () => {
 .audio-ref-node {
   background: #2d2d2d;
   border: 1px solid #404040;
-  border-radius: 20px;
+  border-radius: 5px;
   width: 260px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
   font-family: 'Helvetica Neue', Arial, sans-serif;

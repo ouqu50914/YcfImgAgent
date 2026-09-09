@@ -376,9 +376,13 @@ export class ImageService {
         const hasValidUserId = Number.isFinite(normalizedUserId) && normalizedUserId > 0;
         const isAdmin = hasValidUserId ? await this.creditService.isAdmin(normalizedUserId) : false;
         // 将旧 preview 模型名归一到正式版，避免调用已下线模型
-        const normalizedModel = (normalizeAnyfastGeminiModel(params.model) || params.model) as GenerateParams["model"];
-        if (normalizedModel !== params.model) {
-            params = { ...params, model: normalizedModel };
+        // exactOptionalPropertyTypes: 不能把 undefined 显式赋给可选的 model
+        const normalizedModel = normalizeAnyfastGeminiModel(params.model) || params.model;
+        if (normalizedModel !== undefined && normalizedModel !== params.model) {
+            params = {
+                ...params,
+                model: normalizedModel as NonNullable<GenerateParams["model"]>,
+            };
         }
         const isAnyfastProRequest = isAnyfastGeminiProModel(params.model);
         const isGptImage2Request = params.model === "gpt-image-2" || params.model === "gpt-image-2-c";

@@ -83,8 +83,18 @@
 
         <div ref="canvasWrapperRef" class="canvas-wrapper" @dragover.prevent="handleDragOver" @drop.prevent="handleDrop"
             @contextmenu.prevent="handleCanvasContextMenu">
+            <!-- 左侧工具栏显隐开关（默认隐藏，点击或按 \ 显示） -->
+            <el-tooltip :content="sideToolbarVisible ? '隐藏工具栏 (\\)' : '显示工具栏 (\\)'" placement="right">
+                <el-button circle class="side-toolbar-toggle" @click="sideToolbarVisible = !sideToolbarVisible">
+                    <el-icon>
+                        <ArrowLeft v-if="sideToolbarVisible" />
+                        <ArrowRight v-else />
+                    </el-icon>
+                </el-button>
+            </el-tooltip>
+
             <!-- 左侧功能图标栏 -->
-            <div class="side-toolbar">
+            <div v-show="sideToolbarVisible" class="side-toolbar">
                 <div class="side-group side-group-primary">
                     <el-tooltip content="添加提示词节点" placement="right">
                         <el-button circle class="side-btn" @click="addPromptNodeFromToolbar">
@@ -371,7 +381,7 @@ import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowLeft, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid, VideoCamera, Headset } from '@element-plus/icons-vue';
+import { ArrowLeft, ArrowRight, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid, VideoCamera, Headset } from '@element-plus/icons-vue';
 import { saveTemplate, getTemplates, getTemplate, updateTemplate, deleteTemplate, autoSaveHistory, getHistoryList, getHistory, deleteHistory as deleteHistoryApi, getCreativeSquareFork, type WorkflowTemplate, type WorkflowHistory } from '@/api/workflow';
 import { notifyWorkflowListChanged } from '@/utils/workflow-list-events';
 import { getActiveCategories, type WorkflowCategory } from '@/api/category';
@@ -1622,6 +1632,9 @@ const selectionKeyCode = ref<boolean | null>(true);
 
 // 记录鼠标在画布上的最后位置，用于粘贴图片时确定节点位置
 const lastMousePosition = ref<{ x: number; y: number } | null>(null);
+
+// 左侧工具栏默认隐藏，可通过左侧小按钮或快捷键 \ 切换
+const sideToolbarVisible = ref(false);
 
 // 右键菜单状态
 const contextMenuVisible = ref(false);
@@ -3087,6 +3100,12 @@ const handleKeyDown = (event: KeyboardEvent) => {
         insertLayerSeparationNode();
     }
 
+    // 快捷键：\ - 切换左侧工具栏显隐
+    if (event.key === '\\' && !isInputElement) {
+        event.preventDefault();
+        sideToolbarVisible.value = !sideToolbarVisible.value;
+    }
+
     // Ctrl+V：节点粘贴由 paste 事件优先处理；若 paste 未触发（如画布焦点问题），则延迟兜底执行节点粘贴
     if ((event.ctrlKey || event.metaKey) && event.key === 'v' && !isInputElement) {
         if (copiedSelection.value && copiedSelection.value.nodes.length > 0) {
@@ -3641,9 +3660,14 @@ onUnmounted(() => {
     position: relative;
 }
 
+/* 外层（vue-flow 节点壳）与内层（各节点根容器）圆角统一为 5px */
+.canvas-wrapper :deep(.vue-flow__node) {
+    border-radius: 5px;
+}
+
 .canvas-wrapper :deep(.vue-flow__node.selected) {
     box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(37, 99, 235, 0.75);
-    border-radius: 8px;
+    border-radius: 5px;
 }
 
 .canvas-wrapper :deep(.vue-flow__selection) {
@@ -3702,10 +3726,33 @@ onUnmounted(() => {
     fill: #212228;
 }
 
+.side-toolbar-toggle {
+    position: absolute;
+    top: 50%;
+    left: 8px;
+    transform: translateY(-50%);
+    z-index: 21;
+    width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    border-radius: 50%;
+    border: 1px solid #404040;
+    background-color: #393c45;
+    color: #c8c8c8;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.side-toolbar-toggle:hover {
+    color: #fff;
+    border-color: #5a5c68;
+    background-color: #454854;
+}
+
 .side-toolbar {
     position: absolute;
     top: 50%;
-    left: 16px;
+    left: 44px;
     transform: translateY(-50%);
     display: flex;
     flex-direction: column;

@@ -227,7 +227,7 @@ const handleCardClick = () => {
 .layer-node {
     background: #2d2d2d;
     border: 1px solid #404040;
-    border-radius: 30px;
+    border-radius: 5px;
     width: 240px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow: visible;

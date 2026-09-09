@@ -1,12 +1,7 @@
 <template>
     <div class="prompt-node" :style="{ width: promptWidth + 'px' }">
-        <div class="node-header">
-            <el-icon><EditPen /></el-icon>
-            <span>提示词输入</span>
-        </div>
-
         <div class="node-content">
-            <div v-if="editor" class="prompt-toolbar nodrag">
+            <div v-if="editor" class="prompt-toolbar nodrag nopan">
                 <button
                     type="button"
                     class="tb-btn"
@@ -29,7 +24,7 @@
                 </button>
             </div>
 
-            <div class="prompt-content nodrag">
+            <div class="prompt-content nodrag nopan">
                 <div class="prompt-input-wrap" @wheel.stop>
                     <EditorContent v-if="editor" :editor="editor" class="prompt-editor-host" />
 
@@ -69,11 +64,11 @@
                 </div>
             </div>
 
-            <div class="prompt-meta nodrag">
+            <div class="prompt-meta">
                 <span class="char-count">{{ plainCharCount }} / {{ MAX_PLAIN_CHARS }}</span>
             </div>
 
-            <div class="prompt-actions nodrag">
+            <div class="prompt-actions nodrag nopan">
                 <el-button
                     size="small"
                     type="primary"
@@ -150,7 +145,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, inject, nextTick } from 'vue';
 import { Handle, Position, type NodeProps, useVueFlow } from '@vue-flow/core';
-import { EditPen } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
@@ -767,7 +761,7 @@ onUnmounted(() => {
 .prompt-node {
     background: #2d2d2d;
     border: 1px solid #404040;
-    border-radius: 30px;
+    border-radius: 5px;
     width: 360px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
     font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -789,30 +783,18 @@ onUnmounted(() => {
     pointer-events: auto;
 }
 
-.node-header {
-    background: #3a3a3f;
-    border-bottom: 1px solid #404040;
-    padding: 8px 12px;
-    font-size: 14px;
-    font-weight: bold;
-    color: #e0e0e0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-}
-
 .node-content {
     padding: 10px 16px 14px;
     color: #e0e0e0;
 }
 
 .prompt-toolbar {
-    display: flex;
+    display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 4px;
+    width: fit-content;
+    max-width: 100%;
     margin-bottom: 8px;
 }
 
@@ -927,6 +909,13 @@ onUnmounted(() => {
     display: flex;
     justify-content: flex-end;
     margin-top: 6px;
+    padding: 8px 0;
+    cursor: grab;
+    user-select: none;
+}
+
+.prompt-meta:active {
+    cursor: grabbing;
 }
 
 .char-count {
@@ -983,7 +972,10 @@ onUnmounted(() => {
 .prompt-actions {
     display: flex;
     justify-content: flex-end;
+    width: fit-content;
+    max-width: 100%;
     margin-top: 10px;
+    margin-left: auto;
 }
 
 .save-prompt-btn {

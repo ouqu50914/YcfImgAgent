@@ -5,22 +5,22 @@
         @mouseleave="handleMouseLeave"
     >
 
-        <!-- 图片展示区域（类似参考图样式） -->
-        <div 
-            class="image-content"
-        >
-            <div class="section-title">
-                <span class="title-dot"></span>
-                <span>{{ displayAlias }}</span>
+        <!-- 名称 + 尺寸：显示在媒体上方（可拖拽节点） -->
+        <div class="media-meta">
+            <div class="meta-left">
+                <el-icon class="meta-icon"><Picture /></el-icon>
+                <span class="meta-name">{{ displayAlias }}</span>
             </div>
-            <!-- 加载中占位 -->
+            <span v-if="dimensionText" class="meta-size">{{ dimensionText }}</span>
+        </div>
+
+        <!-- 媒体本体（无外壳） -->
+        <div class="media-frame">
             <div v-if="isLoading" class="image-slot loading-slot"></div>
-            <!-- 生成失败占位 -->
             <div v-else-if="isError" class="image-slot image-slot-error">
                 <span>生成失败</span>
                 <span class="image-slot-hint">请重试或检查上游节点</span>
             </div>
-            <!-- 实际图片（取消 lazy，避免缩放画布时被误判离开视口而不渲染） -->
             <el-image 
                 v-else
                 :src="imageUrl" 
@@ -28,7 +28,8 @@
                 class="img-preview"
                 :preview-src-list="[]"
                 :hide-on-click-modal="false"
-                @click="handleImageClick"
+                draggable="false"
+                @load="handleImageLoad"
             >
                 <template #error>
                     <div class="image-slot image-slot-error">
@@ -38,11 +39,19 @@
                 </template>
             </el-image>
 
-            <!-- 功能菜单（鼠标悬停显示） -->
+            <!-- 透明拖拽层：覆盖非功能区域，保证整图可拖节点 -->
+            <div
+                class="drag-surface"
+                @mousedown="onDragSurfaceMouseDown"
+                @click="onDragSurfaceClick"
+            />
+
+            <!-- 功能按钮组：媒体顶部水平居中；nodrag 避免点按钮时拖动节点 -->
             <transition name="fade">
                 <div
-                    v-if="showActionMenu"
-                    class="action-menu"
+                    v-if="showActionMenu && !isLoading && !isError"
+                    class="action-menu nodrag nopan"
+                    @click.stop
                     @mouseenter="handleMenuMouseEnter"
                     @mouseleave="handleMenuMouseLeave"
                 >
@@ -172,7 +181,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, inject } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
-import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download } from '@element-plus/icons-vue';
+import { ZoomIn, FullScreen, Refresh, CopyDocument, Grid, Close, Download, Picture } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { getUploadUrl, getDisplayImageUrl, toPersistableImageUrl } from '@/utils/image-loader';
 import request from '@/utils/request';
@@ -212,6 +221,36 @@ const isLoading = ref(!!props.data?.isLoading);
 const showActionMenu = ref(false);
 const creatingLayerNode = ref(false);
 const showFullscreenPreview = ref(false);
+const naturalSize = ref<{ w: number; h: number } | null>(null);
+
+const dimensionText = computed(() => {
+    if (!naturalSize.value) return '';
+    return `${naturalSize.value.w} × ${naturalSize.value.h}`;
+});
+
+const handleImageLoad = (e: Event) => {
+    const el = e?.target as HTMLImageElement | null;
+    if (el?.naturalWidth && el?.naturalHeight) {
+        naturalSize.value = { w: el.naturalWidth, h: el.naturalHeight };
+    }
+};
+
+const probeImageSize = (url: string) => {
+    if (!url) {
+        naturalSize.value = null;
+        return;
+    }
+    const img = new Image();
+    img.onload = () => {
+        if (img.naturalWidth && img.naturalHeight) {
+            naturalSize.value = { w: img.naturalWidth, h: img.naturalHeight };
+        }
+    };
+    img.onerror = () => {
+        // 保留已有尺寸，避免闪烁清空
+    };
+    img.src = url;
+};
 
 const imageAliasStore = inject<ImageAliasStore | null>('imageAliasStore', null);
 const imageAlias = ref<string>(props.data?.imageAlias || '');
@@ -279,6 +318,9 @@ watch(
                 ensureAliasFromStore();
             }
             syncLoadingState();
+            probeImageSize(imageUrl.value);
+        } else {
+            naturalSize.value = null;
         }
     }
 );
@@ -344,6 +386,7 @@ onMounted(() => {
     ensureAliasFromStore();
     ensureEdgeFromSource();
     syncLoadingState();
+    if (imageUrl.value) probeImageSize(imageUrl.value);
 });
 
 let menuTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -504,7 +547,21 @@ const handleSplitLayer = async () => {
 // 获取完整图片URL（支持 CDN 域名）
 const getImageUrl = (url: string) => getUploadUrl(url);
 
-// 点击图片预览
+// 点击图片预览（拖拽后不触发）
+let dragSurfaceDownPos: { x: number; y: number } | null = null;
+const onDragSurfaceMouseDown = (e: MouseEvent) => {
+    dragSurfaceDownPos = { x: e.clientX, y: e.clientY };
+};
+const onDragSurfaceClick = (e: MouseEvent) => {
+    if (dragSurfaceDownPos) {
+        const dx = Math.abs(e.clientX - dragSurfaceDownPos.x);
+        const dy = Math.abs(e.clientY - dragSurfaceDownPos.y);
+        dragSurfaceDownPos = null;
+        if (dx > 5 || dy > 5) return;
+    }
+    handleImageClick();
+};
+
 const handleImageClick = () => {
     if (imageUrl.value) {
         showFullscreenPreview.value = true;
@@ -547,15 +604,15 @@ const handleDownloadOriginal = async () => {
 
 <style scoped>
 .image-node {
-    background: #2d2d2d;
-    border: 1px solid #404040;
-    border-radius: 30px;
+    --media-meta-h: 32px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     width: 240px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
-    transition: all 0.2s;
 }
 
 /* 默认隐藏所有 handle，hover 时显示（更接近参考图交互） */
@@ -563,6 +620,8 @@ const handleDownloadOriginal = async () => {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
+    /* 相对媒体区域垂直居中（跳过上方 meta） */
+    top: calc(var(--media-meta-h) + (100% - var(--media-meta-h)) / 2) !important;
 }
 
 .image-node:hover :deep(.vue-flow__handle) {
@@ -580,70 +639,115 @@ const handleDownloadOriginal = async () => {
     width: 180px;
 }
 
-/* 节点标题已移除，保留样式以防其他地方使用 */
-
-.section-title {
-    font-size: 13px;
-    color: #e0e0e0;
-    margin-bottom: 8px;
-    font-weight: 500;
+.media-meta {
+    height: 26px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    padding: 0 2px;
+    margin-bottom: 6px;
+    color: #c8c8c8;
+    font-size: 12px;
+    line-height: 1.2;
+    user-select: none;
+    cursor: grab;
 }
 
-.section-title .title-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #67c23a;
+.media-meta:active {
+    cursor: grabbing;
+}
+
+.meta-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.meta-icon {
+    font-size: 14px;
+    color: #a8a8a8;
     flex-shrink: 0;
 }
 
-.image-content {
-    padding: 14px 16px;
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    cursor: pointer;
-    transition: all 0.2s;
+.meta-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: #e0e0e0;
 }
 
-.image-content:hover {
-    background: transparent;
+.meta-size {
+    flex-shrink: 0;
+    color: #9a9a9a;
+    font-variant-numeric: tabular-nums;
+}
+
+.media-frame {
+    position: relative;
+    border-radius: 5px;
+    overflow: hidden;
+    cursor: grab;
+    background: #1a1a1a;
+}
+
+.media-frame:active {
+    cursor: grabbing;
 }
 
 .img-preview {
     width: 100%;
     display: block;
-    border-radius: 8px;
-    border: 1px solid #404040;
+    border-radius: 5px;
     object-fit: contain;
-    transition: transform 0.2s, box-shadow 0.2s;
+    -webkit-user-drag: none;
+    user-select: none;
+    pointer-events: none;
 }
 
-.image-content:hover .img-preview {
-    transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+.img-preview :deep(*) {
+    pointer-events: none !important;
+    -webkit-user-drag: none !important;
+    user-select: none;
+}
+
+.img-preview :deep(img) {
+    border-radius: 5px;
+    display: block;
+    width: 100%;
+}
+
+/* 覆盖媒体非功能区域，保证任意位置都能启动节点拖拽 */
+.drag-surface {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    cursor: grab;
+    background: transparent;
+}
+
+.drag-surface:active {
+    cursor: grabbing;
 }
 
 .action-menu {
     position: absolute;
-    top: 6px;              /* 与标题行垂直对齐 */
-    right: 12px;           /* 与图片右侧边缘更贴齐 */
-    transform: none;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
     display: flex;
-    flex-direction: row;   /* 横向排列按钮 */
+    flex-direction: row;
     gap: 6px;
     align-items: center;
-    background: transparent;
-    padding: 0;
-    border-radius: 0;
-    box-shadow: none;
-    z-index: 99999;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 5px 8px;
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    z-index: 20;
     pointer-events: auto;
-    visibility: visible;
-    opacity: 1;
+    cursor: default;
 }
 
 .action-icon-btn {
@@ -688,8 +792,7 @@ const handleDownloadOriginal = async () => {
     width: 100%;
     min-height: 150px;
     background: #25262b;
-    border-radius: 8px;
-    border: 1px solid #404040;
+    border-radius: 5px;
 }
 
 .image-slot.image-slot-error {
@@ -708,8 +811,7 @@ const handleDownloadOriginal = async () => {
     background: linear-gradient(90deg, #25262b 0%, #2d2e34 50%, #25262b 100%);
     background-size: 200% 100%;
     animation: shimmer 1.2s ease-in-out infinite;
-    border-radius: 8px;
-    border: 1px solid #404040;
+    border-radius: 5px;
 }
 
 @keyframes shimmer {
@@ -744,7 +846,7 @@ const handleDownloadOriginal = async () => {
 
 .layer-item {
     border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    border-radius: 5px;
     padding: 12px;
     display: flex;
     flex-direction: column;
