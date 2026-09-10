@@ -229,7 +229,7 @@ const handleCardClick = () => {
     border: 1px solid #404040;
     border-radius: 5px;
     width: 240px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;

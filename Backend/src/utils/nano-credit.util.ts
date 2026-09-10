@@ -91,7 +91,7 @@ export function getCreditUsageApiTypeLabel(apiType: string): string {
         dream: 'Dream(文生图)',
         nano: 'Nano(通用)',
         midjourney: 'Midjourney',
-        'img2.5': 'GPT Image 2.5(AnyFast)',
+        'img2.5': 'GPT Image 2.5 pro(AnyFast)',
         'img2.5-fast': 'GPT Image 2.5-Fast(AnyFast)',
         'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
         'gpt-image-2-af': 'GPT Image 2(AnyFast)',

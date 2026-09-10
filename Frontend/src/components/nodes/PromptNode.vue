@@ -763,7 +763,7 @@ onUnmounted(() => {
     border: 1px solid #404040;
     border-radius: 5px;
     width: 360px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
 }
@@ -931,7 +931,7 @@ onUnmounted(() => {
     background: #252525;
     border: 1px solid #404040;
     border-radius: 6px;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+    box-shadow: none;
     z-index: 1000;
     max-height: 240px;
     overflow-y: auto;

@@ -51,6 +51,37 @@ def parse_boxes(text):
     return boxes
 
 
+# 标注框调色板（每框一色，循环使用）
+BOX_COLORS = [
+    (230, 60, 60),    # 红
+    (37, 99, 235),    # 蓝
+    (234, 179, 8),    # 黄
+    (34, 197, 94),    # 绿
+    (168, 85, 247),   # 紫
+    (249, 115, 22),   # 橙
+    (20, 184, 166),   # 青
+    (236, 72, 153),   # 粉
+]
+BOX_COLORS_CSS = [
+    "#e63c3c",
+    "#2563eb",
+    "#eab308",
+    "#22c55e",
+    "#a855f7",
+    "#f97316",
+    "#14b8a6",
+    "#ec4899",
+]
+
+
+def _box_color(idx):
+    return BOX_COLORS[idx % len(BOX_COLORS)]
+
+
+def _box_color_css(idx):
+    return BOX_COLORS_CSS[idx % len(BOX_COLORS_CSS)]
+
+
 def annotate_image(im_path, issues_text, main_box_idx=0):
     im = Image.open(im_path).convert("RGB")
     W, H = im.size
@@ -60,9 +91,8 @@ def annotate_image(im_path, issues_text, main_box_idx=0):
     boxes = parse_boxes(issues_text)
     if not boxes:
         return im, 0
-    RED, ORANGE = (230, 60, 60), (240, 150, 40)
     for i, (x1, y1, x2, y2) in enumerate(boxes):
-        color = RED if i == main_box_idx else ORANGE
+        color = _box_color(i)
         b1 = (int(W * x1 / 100), int(H * y1 / 100))
         b2 = (int(W * x2 / 100), int(H * y2 / 100))
         draw.rectangle([b1, b2], outline=color, width=max(6, int(W * 0.004)))
@@ -104,24 +134,241 @@ def _split_text_compliance(text_check):
 
 
 def _strip_num_prefix(s):
-    """去掉文本开头的数字序号，如 '1. '、'2、'、'3) '"""
-    return re.sub(r'^\s*\d+\s*[\.、\)\:：]\s*', '', s).strip()
+    """去掉文本开头的数字序号，如 '1. '、'2、'、'3) '、'1|'"""
+    return re.sub(r'^\s*\d+\s*[\.、\)\:：\|]\s*', '', s).strip()
+
+
+# 9 维评分英文 key → 中文展示名
+SCORE_LABELS_ZH = {
+    "composition": "构图",
+    "color": "色彩",
+    "lighting": "光影",
+    "subject": "主体",
+    "craft": "完成度",
+    "text_typo": "文字排版",
+    "selling_point": "卖点传达",
+    "creativity": "创意",
+    "persp_prop": "透视比例",
+}
+
+
+def _score_label_zh(key):
+    return SCORE_LABELS_ZH.get(str(key), str(key))
+
+
+# 画面标注坐标：23%,35%,93%,84% / 坐标23%,35%,93%,84%（仅用于画框，不对用户展示）
+_COORD_PCT_RE = re.compile(
+    r"(?:\|\s*)?(?:坐标\s*[：:]?\s*)?"
+    r"\d{1,3}(?:\.\d+)?%\s*[,，]\s*"
+    r"\d{1,3}(?:\.\d+)?%\s*[,，]\s*"
+    r"\d{1,3}(?:\.\d+)?%\s*[,，]\s*"
+    r"\d{1,3}(?:\.\d+)?%"
+)
+
+
+def _strip_coords(text):
+    """去掉文案中的画面坐标百分比，保留可读分析内容。"""
+    if not text:
+        return ""
+    s = _COORD_PCT_RE.sub("", str(text))
+    s = re.sub(r"(?:\|\s*)?坐标\s*[：:]?\s*[\d\.%,，\s]+", "", s)
+    s = re.sub(r"\s*\|\s*$", "", s.strip())
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip()
+
+
+# 明确不合格判定词 / 其余负面词（展示时标红，需避开否定语境）
+FAIL_VERDICT_RE = re.compile(r"(不符合|不正确|不合格)")
+BAD_KW_RE = re.compile(
+    r"(不符合|不正确|不合格|有问题|缺失|错误|乱码|异常|返工|打回|未达成|偏离)"
+)
+NEG_BEFORE_RE = re.compile(r"(?:没有|并无|并非|不是|不会|不存在|无明显|没有明显|无|未)$")
+
+
+def _check_item_verdict(text):
+    """对照条目：冒号后「符合」为通过；出现不符合等为不通过。"""
+    t = text or ""
+    if FAIL_VERDICT_RE.search(t):
+        return "fail"
+    if re.search(r"[：:]\s*符合", t):
+        return "pass"
+    return "unknown"
+
+
+def _split_numbered_segments(text):
+    """按 1. / 2、 / 3) 等序号把整段文案拆成多条。"""
+    text = _strip_coords(text or "").strip()
+    if not text:
+        return []
+    # 已有换行且多数行自带序号 → 按行
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    numbered_lines = [l for l in lines if re.match(r"^\d+\s*[\.、\)\:：]", l)]
+    if len(numbered_lines) >= 2:
+        # 把「综合判定」等非序号行并入末条或单独成条
+        segs = []
+        for l in lines:
+            if re.match(r"^\d+\s*[\.、\)\:：]", l) or l.startswith("综合判定"):
+                segs.append(l)
+            elif segs:
+                segs[-1] = segs[-1] + " " + l
+            else:
+                segs.append(l)
+        return segs
+    # 同一段内连写：1. …2. …3. …
+    parts = re.split(r"(?=\d+\s*[\.、\)\:：])", text)
+    segs = [p.strip() for p in parts if p.strip()]
+    if len(segs) >= 2:
+        # 末尾综合判定：若粘在最后一条里，再拆一次
+        out = []
+        for s in segs:
+            m = re.search(r"(综合判定[：:].*)$", s)
+            if m and m.start() > 0:
+                out.append(s[: m.start()].strip())
+                out.append(m.group(1).strip())
+            else:
+                out.append(s)
+        return out
+    if "综合判定" in text:
+        m = re.search(r"(综合判定[：:].*)", text)
+        if m:
+            head = text[: m.start()].strip()
+            return ([head] if head else []) + [m.group(1).strip()]
+    return [text] if text else []
+
+
+def _mark_bad_html(escaped_text, verdict="unknown"):
+    """
+    标红规则：
+    - 通过条目（：符合）：不标红，避免「没有偏离」误伤
+    - 不通过条目：从首个「不符合/不正确/不合格」起整段标红
+    - 其它文本：关键字标红，但跳过否定前缀（没有/并非/无…）
+    """
+    text = escaped_text or ""
+    if verdict == "pass":
+        return text
+    if verdict == "fail":
+        m = FAIL_VERDICT_RE.search(text)
+        if m:
+            i = m.start()
+            return text[:i] + f'<span class="bad-kw">{text[i:]}</span>'
+
+    def _repl(m):
+        word = m.group(1)
+        if word in ("不符合", "不正确", "不合格", "未达成"):
+            return f'<span class="bad-kw">{word}</span>'
+        before = text[max(0, m.start() - 8) : m.start()]
+        if NEG_BEFORE_RE.search(before):
+            return word
+        return f'<span class="bad-kw">{word}</span>'
+
+    return BAD_KW_RE.sub(_repl, text)
+
+
+def _format_text_body_html(text, esc):
+    """分段 + 红字，输出 checklist HTML。"""
+    segs = _split_numbered_segments(text)
+    if not segs:
+        return '<div class="text-body">（无）</div>'
+    if len(segs) == 1 and not re.match(r"^\d+\s*[\.、\)\:：]", segs[0]):
+        v = _check_item_verdict(segs[0])
+        return f'<div class="text-body">{_mark_bad_html(esc(segs[0]), v).replace(chr(10), "<br>")}</div>'
+    items = "".join(
+        f'<div class="check-item">{_mark_bad_html(esc(s), _check_item_verdict(s))}</div>'
+        for s in segs
+    )
+    return f'<div class="check-list">{items}</div>'
+
+
+def _parse_issue_items(issues_text):
+    """解析问题清单，支持：
+    1) 管道格式：序号|位置|原因|改法|坐标%
+    2) 标注格式：位置：… / 原因：… / 改法：…
+    返回 [{pos, reason, fix, raw}, ...]；坐标字段不会进入展示字段。
+    """
+    text = (issues_text or "").strip()
+    if not text:
+        return []
+    chunks = re.split(r'(?m)(?=^\s*\d+\s*[\.、\|\:：\)])', text)
+    items = []
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        pipe_parts = [x.strip() for x in chunk.split("|")]
+        if len(pipe_parts) >= 4 and re.match(r"^\d+$", pipe_parts[0] or ""):
+            # 第 5 段及以后多为坐标，丢弃；前几段再兜底去坐标
+            pos = _strip_coords(pipe_parts[1])
+            reason = _strip_coords(pipe_parts[2])
+            fix = _strip_coords(pipe_parts[3])
+            items.append({
+                "pos": pos,
+                "reason": reason,
+                "fix": fix,
+                "raw": _strip_coords(chunk),
+            })
+            continue
+        p = _strip_coords(_strip_num_prefix(chunk))
+        if not p:
+            continue
+        pos_m = re.search(r"位置[：:]\s*([^|\n]+)", p)
+        reason_m = re.search(r"原因[：:]\s*([^|\n]+)", p)
+        fix_m = re.search(r"改法[：:]\s*([^|\n]+)", p)
+        items.append({
+            "pos": _strip_coords(pos_m.group(1)) if pos_m else "",
+            "reason": _strip_coords(reason_m.group(1)) if reason_m else "",
+            "fix": _strip_coords(fix_m.group(1)) if fix_m else "",
+            "raw": p,
+        })
+    return items
 
 # ========== 合成图生成（标注图+文字质检单合一） ==========
 NOTO_REG = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 NOTO_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 WQY_ZEN = "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"
-FONT_CANDIDATES_REG = [NOTO_REG, WQY_ZEN, "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
-FONT_CANDIDATES_BOLD = [NOTO_BOLD, WQY_ZEN, "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"]
+# macOS 本地常见中文字体（合成图乱码多因缺字体回退到默认 bitmap）
+MAC_HEITI_LIGHT = "/System/Library/Fonts/STHeiti Light.ttc"
+MAC_HEITI_MED = "/System/Library/Fonts/STHeiti Medium.ttc"
+MAC_HIRAGINO = "/System/Library/Fonts/Hiragino Sans GB.ttc"
+MAC_SONGTI = "/System/Library/Fonts/Supplemental/Songti.ttc"
+MAC_ARIAL_UNI = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
+FONT_CANDIDATES_REG = [
+    WQY_ZEN,
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    NOTO_REG,
+    MAC_HEITI_LIGHT,
+    MAC_HIRAGINO,
+    MAC_SONGTI,
+    MAC_ARIAL_UNI,
+    "/Library/Fonts/Arial Unicode.ttf",
+]
+FONT_CANDIDATES_BOLD = [
+    WQY_ZEN,
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    NOTO_BOLD,
+    MAC_HEITI_MED,
+    MAC_HIRAGINO,
+    MAC_SONGTI,
+    MAC_ARIAL_UNI,
+    "/Library/Fonts/Arial Unicode.ttf",
+]
 
 
 def _load_font(size, bold=False):
     paths = FONT_CANDIDATES_BOLD if bold else FONT_CANDIDATES_REG
     for p in paths:
+        if not os.path.exists(p):
+            continue
+        # .ttc 可能有多个 face，依次尝试
+        for idx in (0, 1, 2):
+            try:
+                return ImageFont.truetype(p, size, index=idx)
+            except Exception:
+                continue
         try:
             return ImageFont.truetype(p, size)
         except Exception:
             continue
+    print("[WARN] 未找到可用中文字体，合成图中文将显示为方框。请安装 fonts-wqy-zenhei 或系统中文字体。")
     return ImageFont.load_default()
 
 def _wrap_text(draw, text, font, max_w):
@@ -197,7 +444,11 @@ def generate_summary_image(report, annotated_path, output_path):
     for sec in sections_data:
         y += 40
         for item in sec["items"]:
-            y = _draw_text_block(d, margin+20, y, item, f_body, body_c, content_w-40) + 8
+            if isinstance(item, dict):
+                # 结构化问题：预估约 4 行
+                y += int(f_body.size * 1.6) * 4 + 12
+            else:
+                y = _draw_text_block(d, margin+20, y, item, f_body, body_c, content_w-40) + 8
         y += 10
 
     total_h = y + margin
@@ -222,8 +473,12 @@ def generate_summary_image(report, annotated_path, output_path):
         y += ann_resized.height + 30
 
     # 结果概览卡片
-    score = report.get("score", 0)
-    conclusion = report.get("conclusion", "")
+    score = report.get("score", 0) or report.get("weighted_total", 0) or 0
+    try:
+        score = float(score)
+    except Exception:
+        score = 0.0
+    conclusion = report.get("conclusion", "") or report.get("verdict", "")
     card_h = 100
     draw.rounded_rectangle([margin, y, W-margin, y+card_h], radius=10, fill=card_bg)
     # 分数
@@ -231,33 +486,74 @@ def generate_summary_image(report, annotated_path, output_path):
     draw.text((margin+30, y+20), f"{score:.2f}", font=f_score, fill=score_color)
     draw.text((margin+30, y+75), "综合评分", font=f_small, fill=dim_c)
     # 结论
-    concl_color = ok_c if "通过" in conclusion or "合格" in conclusion else bad_c
-    draw.text((margin+200, y+30), conclusion, font=f_section, fill=concl_color)
+    concl_color = ok_c if "通过" in str(conclusion) or "合格" in str(conclusion) else bad_c
+    draw.text((margin+200, y+30), str(conclusion), font=f_section, fill=concl_color)
     # 语种
     langs = report.get("languages", "")
     if langs:
-        draw.text((margin+200, y+65), f"语种：{langs}", font=f_small, fill=dim_c)
+        lang_s = langs if isinstance(langs, str) else "、".join(langs)
+        draw.text((margin+200, y+65), f"语种：{lang_s}", font=f_small, fill=dim_c)
     y += card_h + 25
+
+    def _item_color(text):
+        t = str(text)
+        if any(k in t for k in ["不符合", "不正确", "不合格", "有问题", "返工", "打回", "错误"]):
+            return bad_c
+        return body_c
 
     # 各维度
     for sec in sections_data:
         if not sec["items"]:
             continue
-        # 维度标题
         draw.text((margin, y), sec["title"], font=f_section, fill=section_c)
         y += 32
-        # 内容卡片
         card_top = y
+        # 先量高度
+        yy = y
         for item in sec["items"]:
-            y = _draw_text_block(draw, margin+20, y, item, f_body, body_c, content_w-40) + 6
-        card_bottom = y + 10
+            if isinstance(item, dict):
+                yy += int(f_body.size * 1.6) * (4 if item.get("raw") is None else 2) + 14
+            else:
+                yy = _draw_text_block(draw, margin+20, yy, str(item), f_body, body_c, content_w-40) + 6
+        card_bottom = yy + 10
         draw.rounded_rectangle([margin, card_top-8, W-margin, card_bottom], radius=8, fill=card_bg)
-        # 重新绘制文字（因为矩形覆盖了）
         yy = card_top
         for item in sec["items"]:
-            item_color = bad_c if any(k in item for k in ["有问题","不合格","错误","乱码","缺失","异常","返工","不合格"]) else body_c
-            yy = _draw_text_block(draw, margin+20, yy, item, f_body, item_color, content_w-40) + 6
-        y = card_bottom + 15
+            if isinstance(item, dict):
+                color = item.get("color") or bad_c
+                idx = item.get("idx", 0)
+                # 色块与编号垂直居中对齐
+                sw = 12
+                line_h = int(getattr(f_small, "size", 14) * 1.6)
+                sw_y = yy + max(0, (line_h - sw) // 2)
+                draw.rounded_rectangle([margin + 20, sw_y, margin + 20 + sw, sw_y + sw], radius=2, fill=color)
+                draw.text((margin + 20 + sw + 8, yy), f"#{idx}", font=f_small, fill=color)
+                yy += line_h + 4
+                if item.get("raw"):
+                    yy = _draw_text_block(draw, margin + 20, yy, item["raw"], f_body, _item_color(item["raw"]), content_w - 40) + 10
+                else:
+                    for label, key, col in (
+                        ("位置", "pos", title_c),
+                        ("问题描述", "reason", bad_c),
+                        ("解决方案", "fix", accent_c),
+                    ):
+                        val = item.get(key) or ""
+                        if not val:
+                            continue
+                        # 位置行带色块，与文案垂直对齐
+                        if key == "pos":
+                            lh = int(getattr(f_body, "size", 16) * 1.6)
+                            sy = yy + max(0, (lh - sw) // 2)
+                            draw.rounded_rectangle([margin + 20, sy, margin + 20 + sw, sy + sw], radius=2, fill=color)
+                            line = f"{label}：{val}"
+                            yy = _draw_text_block(draw, margin + 20 + sw + 8, yy, line, f_body, col, content_w - 40 - sw - 8) + 2
+                        else:
+                            line = f"{label}：{val}"
+                            yy = _draw_text_block(draw, margin + 20, yy, line, f_body, col, content_w - 40) + 2
+                    yy += 10
+            else:
+                yy = _draw_text_block(draw, margin + 20, yy, str(item), f_body, _item_color(item), content_w - 40) + 6
+        y = max(card_bottom, yy) + 15
 
     img.save(output_path, "JPEG", quality=88)
     return output_path
@@ -273,22 +569,35 @@ def _collect_sections(report):
         if und_items:
             sections.append({"title": "参考图/需求图理解", "items": und_items[:15]})
 
-    # 需求对照
+    # 需求对照 — 按序号分段，与节点报告一致
     req_check = report.get("req_check", "")
-    req_items = [l.strip() for l in req_check.split("\n") if l.strip() and "有问题" in l]
+    req_segs = _split_numbered_segments(req_check)
+    req_items = [s for s in req_segs if s and ("有问题" in s or "不符合" in s or re.match(r"^\d+", s) or s.startswith("综合判定"))]
+    if not req_items:
+        req_items = [l.strip() for l in req_check.split("\n") if l.strip() and "有问题" in l]
     if req_items:
-        sections.append({"title": "需求对照核验", "items": [_strip_num_prefix(i) for i in req_items]})
+        sections.append({"title": "需求对照核验", "items": req_items, "kind": "checklist"})
 
-    # 问题详解
+    # 问题详解 — 结构化，与节点卡片一致
     issues = report.get("issues", "")
     issue_items = []
-    parts = re.split(r'(?=\d+[\.、])', issues)
-    for p in parts:
-        p = _strip_num_prefix(p)
-        if p:
-            issue_items.append(p)
+    for i, item in enumerate(_parse_issue_items(issues)):
+        pos = item.get("pos") or ""
+        reason = item.get("reason") or ""
+        fix = item.get("fix") or ""
+        color = _box_color(i)
+        if pos or reason or fix:
+            issue_items.append({
+                "idx": i + 1,
+                "color": color,
+                "pos": pos,
+                "reason": reason,
+                "fix": fix,
+            })
+        elif item.get("raw"):
+            issue_items.append({"idx": i + 1, "color": color, "raw": item["raw"]})
     if issue_items:
-        sections.append({"title": "问题详解", "items": issue_items})
+        sections.append({"title": "问题详解", "items": issue_items, "kind": "issues"})
 
     # 美术审美
     aes = report.get("aesthetic_check", "")
@@ -296,7 +605,9 @@ def _collect_sections(report):
     for line in aes.split("\n"):
         line = line.strip()
         if "有问题" in line and not line.startswith("综合"):
-            aes_items.append(_strip_num_prefix(line))
+            cleaned = _strip_coords(_strip_num_prefix(line))
+            if cleaned:
+                aes_items.append(cleaned)
     if aes_items:
         sections.append({"title": "美术审美", "items": aes_items})
 
@@ -306,20 +617,22 @@ def _collect_sections(report):
     for line in persp.split("\n"):
         line = line.strip()
         if "有问题" in line and not line.startswith("综合"):
-            persp_items.append(_strip_num_prefix(line))
+            cleaned = _strip_coords(_strip_num_prefix(line))
+            if cleaned:
+                persp_items.append(cleaned)
     if persp_items:
         sections.append({"title": "人物 / 透视 / 比例 / 空间位置", "items": persp_items})
 
     # 文字检查
-    text_check = report.get("text_check", "")
+    text_check = _strip_coords(report.get("text_check", ""))
     text_part, comp_part = _split_text_compliance(text_check)
     if text_part.strip():
-        text_items = [l.strip() for l in text_part.split("\n") if l.strip()]
+        text_items = [_strip_coords(l.strip()) for l in text_part.split("\n") if l.strip()]
         sections.append({"title": "文字检查", "items": text_items})
 
     # 合规检查
     if comp_part.strip():
-        comp_items = [l.strip() for l in comp_part.split("\n") if l.strip()]
+        comp_items = [_strip_coords(l.strip()) for l in comp_part.split("\n") if l.strip()]
         sections.append({"title": "合规检查", "items": comp_items})
 
     return sections
@@ -328,94 +641,98 @@ def report_to_html(report):
     def esc(s):
         return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     def nl2br(s):
-        return esc(s).replace("\n", "<br>")
+        return _mark_bad_html(esc(_strip_coords(s))).replace("\n", "<br>")
     def ok_tip():
         return '<div class="ok-tip">✓ 综合判定 - 合格</div>'
 
     langs_html = "".join(f'<span class="lang-tag">{esc(l)}</span>' for l in report.get("languages", [])) or "（未识别到文字）"
 
-    req_check = report.get("req_check", "")
+    req_check = _strip_coords(report.get("req_check", ""))
     req_ok = not _has_problem(req_check, PROBLEM_KW) and req_check.strip() and "未提供" not in req_check
     # 参考图深度理解结果
-    req_understanding = report.get("req_understanding", "") or ""
+    req_understanding = _strip_coords(report.get("req_understanding", "") or "")
     req_understanding_html = ""
     if req_understanding and "调用失败" not in req_understanding:
-        req_understanding_html = f'<div class="req-understanding"><div class="req-und-title">📋 参考图/需求图理解</div><div class="text-body req-und-body">{nl2br(req_understanding)}</div></div>'
-    req_html = req_understanding_html + f'<div class="text-body">{nl2br(req_check)}</div>' + (ok_tip() if req_ok else "")
+        req_understanding_html = (
+            f'<div class="req-understanding"><div class="req-und-title">📋 参考图/需求图理解</div>'
+            f'{_format_text_body_html(req_understanding, esc)}</div>'
+        )
+    req_html = req_understanding_html + _format_text_body_html(req_check, esc) + (ok_tip() if req_ok else "")
 
     scores = report.get("scores", {})
     score_html = ""
     for k, v in scores.items():
         low = "low" if v < 6 else ""
         score_html += f'''<div class="score-item">
-            <div class="score-top"><span class="score-name">{esc(k)}</span><span class="score-val {low}">{v}</span></div>
+            <div class="score-top"><span class="score-name">{esc(_score_label_zh(k))}</span><span class="score-val {low}">{v}</span></div>
             <div class="score-bar"><div class="score-fill {low}" style="width:{v*10}%"></div></div></div>'''
 
     issues_text = report.get("issues", "")
     issue_cards = ""
-    parts = re.split(r'(?=\d+[\.、])', issues_text)
+    issue_items = _parse_issue_items(issues_text)
     idx = 0
-    for p in parts:
-        p = _strip_num_prefix(p)
-        if not p:
-            continue
+    for item in issue_items:
         idx += 1
-        pos_m = re.search(r'位置[：:]\s*([^|\n]+)', p)
-        reason_m = re.search(r'原因[：:]\s*([^|\n]+)', p)
-        fix_m = re.search(r'改法[：:]\s*([^|\n]+)', p)
-        pos = pos_m.group(1).strip() if pos_m else ""
-        reason = reason_m.group(1).strip() if reason_m else ""
-        fix = fix_m.group(1).strip() if fix_m else ""
+        pos = item.get("pos") or ""
+        reason = item.get("reason") or ""
+        fix = item.get("fix") or ""
+        raw = item.get("raw") or ""
+        color = _box_color_css(idx - 1)
+        swatch = f'<span class="issue-swatch" style="background:{color};border-color:{color}" title="标注框{idx}"></span>'
         if not pos and not reason and not fix:
-            issue_cards += f'<div class="issue-card"><div class="issue-body"><div class="issue-text">{nl2br(p)}</div></div></div>'
+            issue_cards += (
+                f'<div class="issue-card">'
+                f'<div class="issue-idx" style="color:{color}">#{idx}</div>'
+                f'<div class="issue-body"><div class="issue-text">{nl2br(raw)}</div></div></div>'
+            )
         else:
             issue_cards += f'''<div class="issue-card">
+                <div class="issue-idx" style="color:{color}">#{idx}</div>
                 <div class="issue-body">
-                    <div class="issue-row"><span class="issue-label">位置</span><span class="issue-value"><b>{esc(pos)}</b></span></div>
-                    <div class="issue-row"><span class="issue-label">原因</span><span class="issue-value">{esc(reason)}</span></div>
-                    <div class="issue-row"><span class="issue-label">改法</span><span class="issue-value fix">{esc(fix)}</span></div>
+                    <div class="issue-row"><span class="issue-label">位置</span><span class="issue-value">{swatch}<b>{esc(pos)}</b></span></div>
+                    <div class="issue-row"><span class="issue-label">问题描述</span><span class="issue-value reason">{_mark_bad_html(esc(reason))}</span></div>
+                    <div class="issue-row"><span class="issue-label">解决方案</span><span class="issue-value fix">{esc(fix)}</span></div>
                 </div></div>'''
     if idx == 0:
         issue_cards = ok_tip()
 
-    aesthetic = report.get("aesthetic_check", "") or ""
+    aesthetic = _strip_coords(report.get("aesthetic_check", "") or "")
     aes_problems, aes_summary = [], ""
     for line in aesthetic.split("\n"):
         line = line.strip()
         if not line: continue
         if line.startswith("综合判定"): aes_summary = line
-        elif "有问题" in line and not line.startswith("综合"): aes_problems.append(_strip_num_prefix(line))
+        elif "有问题" in line and not line.startswith("综合"): aes_problems.append(_strip_coords(_strip_num_prefix(line)))
     if aes_problems:
-        aes_items = "".join(f'<div class="prob-item">{esc(p)}</div>' for p in aes_problems)
-        if aes_summary: aes_items += f'<div class="prob-summary bad">{esc(aes_summary)}</div>'
+        aes_items = "".join(f'<div class="prob-item">{_mark_bad_html(esc(p))}</div>' for p in aes_problems)
+        if aes_summary: aes_items += f'<div class="prob-summary bad">{_mark_bad_html(esc(aes_summary))}</div>'
     else:
         aes_items = ok_tip()
 
-    persp = report.get("persp_check", "") or ""
+    persp = _strip_coords(report.get("persp_check", "") or "")
     persp_problems, persp_summary = [], ""
     for line in persp.split("\n"):
         line = line.strip()
         if not line: continue
         if line.startswith("综合判定"): persp_summary = line
-        elif "有问题" in line and not line.startswith("综合"): persp_problems.append(_strip_num_prefix(line))
+        elif "有问题" in line and not line.startswith("综合"): persp_problems.append(_strip_coords(_strip_num_prefix(line)))
     if persp_problems:
-        persp_items = "".join(f'<div class="prob-item">{esc(p)}</div>' for p in persp_problems)
-        if persp_summary: persp_items += f'<div class="prob-summary bad">{esc(persp_summary)}</div>'
+        persp_items = "".join(f'<div class="prob-item">{_mark_bad_html(esc(p))}</div>' for p in persp_problems)
+        if persp_summary: persp_items += f'<div class="prob-summary bad">{_mark_bad_html(esc(persp_summary))}</div>'
     else:
         persp_items = ok_tip() + '<div class="detected-list">已检测：人物（头身比/人体结构/角色尺度/手指肢体/脚部接触/姿态行为/重心）· 空间透视（视平线/近大远小/地面透视/空间位置/结构完整/光影逻辑）</div>'
 
-    text_check = report.get("text_check", "")
+    text_check = _strip_coords(report.get("text_check", ""))
     text_part, comp_part = _split_text_compliance(text_check)
     text_ok = not _has_problem(text_part, ["乱码", "错误", "无法确认", "异常", "模糊"]) and text_part.strip()
-    comp_ok = not comp_part.strip()
-    text_html = f'<div class="text-body">{nl2br(text_part)}</div>' + (ok_tip() if text_ok else "")
-    comp_html = f'<div class="text-body">{nl2br(comp_part)}</div>' if comp_part.strip() else ok_tip()
+    text_html = _format_text_body_html(text_part, esc) + (ok_tip() if text_ok else "")
+    comp_html = _format_text_body_html(comp_part, esc) if comp_part.strip() else ok_tip()
 
     pf = report.get("precheck", {})
     precheck_html = ""
     if pf.get("fails") or pf.get("warns"):
         items = ""
-        if pf.get("fails"): items += "".join(f'<div class="alert bad">🚫 {esc(f)}</div>' for f in pf["fails"])
+        if pf.get("fails"): items += "".join(f'<div class="alert bad">🚫 {_mark_bad_html(esc(f))}</div>' for f in pf["fails"])
         if pf.get("warns"): items += "".join(f'<div class="alert warn">⚠️ {esc(w)}</div>' for w in pf["warns"])
         if not report.get("_req_provided", True): items += '<div class="alert info">ℹ️ 未提供需求图，需求对照已跳过</div>'
         precheck_html = f'<div class="qc-section"><div class="section-title">L0 程序化预检</div>{items}</div>'
@@ -753,15 +1070,21 @@ html,body{height:100%;overflow:hidden;background:#18181c;font-family:'PingFang S
 .ok-tip{font-size:10.5px;color:#6adf9a;background:#101a12;border:1px solid #1a2a1e;border-radius:4px;padding:6px 10px;margin-top:6px;text-align:center}
 .detected-list{font-size:10px;color:#555;padding:6px 10px;line-height:1.7;margin-top:4px;text-align:center}
 .issues-list{display:flex;flex-direction:column;gap:12px}
-.issue-card{display:flex;gap:12px;background:#252528;border:1px solid #3a3a40;border-radius:6px;padding:14px 16px}
+.issue-card{display:flex;gap:12px;background:#252528;border:1px solid #3a3a40;border-radius:6px;padding:14px 16px;align-items:flex-start}
+.issue-idx{flex-shrink:0;font-size:12px;font-weight:700;padding-top:2px;min-width:28px}
+.issue-swatch{display:inline-flex;width:10px;height:10px;border-radius:2px;border:1px solid;margin-right:8px;vertical-align:middle;flex-shrink:0;align-self:center}
 .issue-num{flex-shrink:0;width:24px;height:24px;background:#333;color:#ccc;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
 .issue-body{flex:1;display:flex;flex-direction:column;gap:8px}
 .issue-row{display:flex;gap:10px;align-items:flex-start}
-.issue-label{flex-shrink:0;font-size:10px;color:#888;min-width:36px;padding-top:3px;font-weight:600}
-.issue-value{font-size:12px;color:#ccc;flex:1;line-height:1.9}
+.issue-label{flex-shrink:0;font-size:10px;color:#888;min-width:56px;padding-top:3px;font-weight:600}
+.issue-value{font-size:12px;color:#ccc;flex:1;line-height:1.9;display:inline-flex;align-items:center;flex-wrap:wrap;gap:0;min-width:0}
+.issue-value.reason{color:#ff8a8a}
 .issue-value.fix{color:#8bc8ea;font-weight:500}
 .issue-value b{color:#fff;font-weight:600}
 .issue-text{font-size:12px;color:#ccc;line-height:2.0}
+.check-list{display:flex;flex-direction:column;gap:8px}
+.check-item{font-size:11.5px;color:#aaa;line-height:1.8;background:#252528;padding:10px 14px;border-radius:5px;border:1px solid #3a3a40;word-break:break-word}
+.bad-kw{color:#ff8a8a;font-weight:600}
 .score-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .score-item{background:#252528;border:1px solid #3a3a40;border-radius:5px;padding:10px 12px}
 .score-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}

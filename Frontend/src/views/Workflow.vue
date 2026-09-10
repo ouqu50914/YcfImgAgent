@@ -84,17 +84,17 @@
         <div ref="canvasWrapperRef" class="canvas-wrapper" @dragover.prevent="handleDragOver" @drop.prevent="handleDrop"
             @contextmenu.prevent="handleCanvasContextMenu">
             <!-- 左侧工具栏显隐开关（默认隐藏，点击或按 \ 显示） -->
-            <el-tooltip :content="sideToolbarVisible ? '隐藏工具栏 (\\)' : '显示工具栏 (\\)'" placement="right">
+            <!-- <el-tooltip :content="sideToolbarVisible ? '隐藏工具栏 (\\)' : '显示工具栏 (\\)'" placement="right">
                 <el-button circle class="side-toolbar-toggle" @click="sideToolbarVisible = !sideToolbarVisible">
                     <el-icon>
                         <ArrowLeft v-if="sideToolbarVisible" />
                         <ArrowRight v-else />
                     </el-icon>
                 </el-button>
-            </el-tooltip>
+            </el-tooltip> -->
 
             <!-- 左侧功能图标栏 -->
-            <div v-show="sideToolbarVisible" class="side-toolbar">
+            <!-- <div v-show="sideToolbarVisible" class="side-toolbar">
                 <div class="side-group side-group-primary">
                     <el-tooltip content="添加提示词节点" placement="right">
                         <el-button circle class="side-btn" @click="addPromptNodeFromToolbar">
@@ -198,10 +198,11 @@
                         </el-button>
                     </el-tooltip>
                 </div>
-            </div>
+            </div> -->
 
-            <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any" :edge-options="{ animated: true }"
-                :connection-line-style="{ stroke: 'var(--color-primary)', strokeWidth: 2, strokeDasharray: '5,5' }" :connection-radius="20"
+            <VueFlow ref="vueFlowRef" :nodes="nodes" :edges="edges" :node-types="nodeTypes as any"
+                :default-edge-options="{ animated: true, style: { stroke: '#484848', strokeWidth: 1.5 } }"
+                :connection-line-style="{ stroke: '#484848', strokeWidth: 1.5, strokeDasharray: '5,5' }" :connection-radius="20"
                 :snap-to-grid="true" :snap-grid="[15, 15]" :nodes-connectable="true" :edges-updatable="true"
                 :nodes-draggable="!isSpacePressed" :select-nodes-on-drag="!isSpacePressed"
                 :elements-selectable="true"
@@ -215,7 +216,6 @@
                 @node-drag-stop="handleNodeDragStop"
                 @pane-contextmenu="handlePaneContextMenu">
                 <Background pattern-color="#2d2e36" :gap="8" />
-                <Controls />
                 <MiniMap mask-color="#212228" node-color="#191a1e" />
             </VueFlow>
 
@@ -380,7 +380,6 @@ import { getUserRoleFromInfo } from '@/utils/user-role';
 import { formatIsoToYmdHms } from '@/utils/date';
 import { VueFlow, useVueFlow, type Connection } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
-import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowLeft, ArrowRight, RefreshLeft, RefreshRight, Picture, ZoomIn, FullScreen, Collection, FolderOpened, Clock, EditPen, MagicStick, KnifeFork, Grid, VideoCamera, Headset } from '@element-plus/icons-vue';
@@ -401,7 +400,6 @@ import { requestNotificationPermissionFromUser } from '@/utils/browser-notificat
 
 // 引入默认样式
 import '@vue-flow/core/dist/style.css';
-import '@vue-flow/controls/dist/style.css';
 import '@vue-flow/minimap/dist/style.css';
 
 // 引入自定义节点
@@ -1377,7 +1375,7 @@ const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
     'videoRef': { width: 260, height: 220 },
     'audioRef': { width: 260, height: 220 },
     'videoResult': { width: 320, height: 280 },
-    'review': { width: 360, height: 520 },
+    'review': { width: 648, height: 520 },
 };
 
 // 间距配置
@@ -2718,7 +2716,7 @@ const handleConnectToReview = () => {
     }
 
     const mousePosition = pendingConnection.value.position;
-    const dimensions = NODE_DIMENSIONS['review'] || { width: 360, height: 420 };
+    const dimensions = NODE_DIMENSIONS['review'] || { width: 648, height: 420 };
     const checkCollisionAtPosition = (x: number, y: number): boolean => {
         const newNodeRect = {
             left: x,
@@ -3818,6 +3816,22 @@ onUnmounted(() => {
 .canvas-wrapper :deep(.vue-flow__node.selected) {
     box-shadow: 0 0 0 2px var(--color-primary), 0 0 12px rgba(37, 99, 235, 0.75);
     border-radius: 5px;
+}
+
+/* 连线颜色贴近节点边框，避免过亮 */
+.canvas-wrapper :deep(.vue-flow__edge-path) {
+    stroke: #484848 !important;
+    stroke-width: 1.5;
+}
+
+.canvas-wrapper :deep(.vue-flow__edge.selected .vue-flow__edge-path),
+.canvas-wrapper :deep(.vue-flow__edge:focus .vue-flow__edge-path),
+.canvas-wrapper :deep(.vue-flow__edge:hover .vue-flow__edge-path) {
+    stroke: #6a6a6a !important;
+}
+
+.canvas-wrapper :deep(.vue-flow__connection-path) {
+    stroke: #484848 !important;
 }
 
 .canvas-wrapper :deep(.vue-flow__selection) {

@@ -100,12 +100,55 @@ fi
 
 echo "[qc_web] 启动中 → http://127.0.0.1:${QC_PORT}"
 echo "[qc_web] API_BASE=${API_BASE}  Key=${API_KEY:0:6}…"
-python3 qc_web.py >>"$QC_DIR/qc_web.dev.log" 2>&1 &
-echo $! >"$PID_FILE"
+
+# 双 fork 守护化：避免 Cursor/SSH 会话结束后进程被 SIGHUP 杀掉
+PY_BIN="$(command -v python3)"
+if [[ -x "$QC_DIR/.venv/bin/python3" ]]; then
+  PY_BIN="$QC_DIR/.venv/bin/python3"
+fi
+"$PY_BIN" - <<'PY' "$QC_DIR" "$PID_FILE"
+import os, sys, time
+qc_dir, pid_file = sys.argv[1], sys.argv[2]
+log_path = os.path.join(qc_dir, "qc_web.dev.log")
+script = os.path.join(qc_dir, "qc_web.py")
+py = sys.executable
+
+def daemon():
+    # first fork
+    if os.fork() > 0:
+        return
+    os.setsid()
+    # second fork
+    if os.fork() > 0:
+        os._exit(0)
+    os.chdir(qc_dir)
+    fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    os.close(fd)
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+    with open(pid_file, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    os.execve(py, [py, "-u", script], os.environ.copy())
+
+daemon()
+# parent: wait briefly for pid file
+for _ in range(40):
+    if os.path.exists(pid_file):
+        try:
+            pid = int(open(pid_file).read().strip())
+            os.kill(pid, 0)
+            break
+        except Exception:
+            pass
+    time.sleep(0.1)
+PY
 
 for _ in $(seq 1 40); do
   if lsof -nP -iTCP:"$QC_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "[qc_web] 就绪 (pid $(cat "$PID_FILE"))"
+    echo "[qc_web] 就绪 (pid $(cat "$PID_FILE" 2>/dev/null || echo '?'))"
     exit 0
   fi
   sleep 0.25

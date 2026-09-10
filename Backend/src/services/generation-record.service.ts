@@ -75,7 +75,7 @@ export class GenerationRecordService {
         const provider = (modelProvider || "").trim().toLowerCase();
         if (name && provider && name !== provider) {
             if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
-            if (name === "gpt-image-2.5-sunburst") return "GPT Image 2.5(AnyFast)";
+            if (name === "gpt-image-2.5-sunburst") return "GPT Image 2.5 pro(AnyFast)";
             if (name === "gpt-image-2.5-flare") return "GPT Image 2.5-Fast(AnyFast)";
             if (name === "gpt-image-2" && provider === "anyfast") return "GPT Image 2(AnyFast)";
             if (name === "gpt-image-2" && provider === "ace") return "GPT Image 2(Ace)";
@@ -86,7 +86,7 @@ export class GenerationRecordService {
         }
         if (name) {
             if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
-            if (name === "gpt-image-2.5-sunburst") return "GPT Image 2.5(AnyFast)";
+            if (name === "gpt-image-2.5-sunburst") return "GPT Image 2.5 pro(AnyFast)";
             if (name === "gpt-image-2.5-flare") return "GPT Image 2.5-Fast(AnyFast)";
             return name;
         }

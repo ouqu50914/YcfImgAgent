@@ -323,7 +323,7 @@ const previewLayer = (url: string) => {
     border: 1px solid #404040;
     border-radius: 5px;
     width: 280px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
     overflow: hidden;
     font-family: 'Helvetica Neue', Arial, sans-serif;
 }

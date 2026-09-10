@@ -122,9 +122,27 @@ export class AnyfastNanoAdapter implements AiProvider {
         return { mimeType: detected.mime, data: buffer.toString("base64") };
     }
 
-    private mapQuality(quality?: string): "1K" | "2K" | "4K" {
-        if (quality === "2K" || quality === "4K") return quality;
+    private mapQuality(quality?: string): "512" | "1K" | "2K" | "4K" {
+        if (quality === "512" || quality === "1K" || quality === "2K" || quality === "4K") return quality;
+        // 历史/前端可能传 standard 等，默认按文档 1K
         return "1K";
+    }
+
+    /** AnyFast Gemini 支持的宽高比；不在列表内则回退 1:1 */
+    private mapAspectRatio(aspectRatio?: string): string {
+        const allowed = new Set(["1:1", "4:3", "3:4", "16:9", "9:16"]);
+        const raw = typeof aspectRatio === "string" ? aspectRatio.trim() : "";
+        if (allowed.has(raw)) return raw;
+        // 兼容前端更多比例：就近映射到文档支持集
+        const approx: Record<string, string> = {
+            "2:3": "3:4",
+            "3:2": "4:3",
+            "4:5": "3:4",
+            "5:4": "4:3",
+            "21:9": "16:9",
+        };
+        if (raw && approx[raw]) return approx[raw];
+        return "1:1";
     }
 
     private extractImagesFromResponse(data: any): Buffer[] {
@@ -220,10 +238,18 @@ export class AnyfastNanoAdapter implements AiProvider {
                 });
             }
 
+            const imageSize = this.mapQuality(params.quality);
+            const aspectRatio = this.mapAspectRatio(params.aspectRatio);
             const body = {
                 contents: [{ role: "user", parts }],
                 generationConfig: {
                     responseModalities: ["TEXT", "IMAGE"],
+                    // 文档要求：generationConfig.imageConfig.{aspectRatio,imageSize}
+                    // 此前未下发，导致 4K/竖图等选择无效（默认约 1K、比例跟随参考图或横向）
+                    imageConfig: {
+                        aspectRatio,
+                        imageSize,
+                    },
                 },
             };
 
@@ -234,8 +260,9 @@ export class AnyfastNanoAdapter implements AiProvider {
                     model,
                     prompt: params.prompt || "生成图片",
                     reference_image_count: refs.length,
-                    quality: this.mapQuality(params.quality),
-                    aspect_ratio: params.aspectRatio || "1:1",
+                    quality: imageSize,
+                    aspect_ratio: aspectRatio,
+                    aspect_ratio_raw: params.aspectRatio || null,
                     max_retries: ANYFAST_MAX_RETRIES,
                 });
                 let res: any;

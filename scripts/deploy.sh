@@ -119,15 +119,21 @@ while kill -0 "\$pid" 2>/dev/null; do sleep 2; done
 sleep 2
 kill "\$tail_pid" 2>/dev/null || true
 wait "\$tail_pid" 2>/dev/null || true
-# 检查退出码：从日志末尾粗判
-if grep -qE 'Error|ERROR|failed to|exit code' "\$logfile" && ! docker ps --format '{{.Names}}' | grep -q '^ycf_backend\$'; then
-  echo '[deploy] 构建可能失败，请检查日志末尾'
-  tail -n 40 "\$logfile" || true
+# 检查退出码：compose 失败时日志会有 ERROR / failed to solve
+if grep -qE 'ERROR:|failed to solve|exit code: [1-9]|##\[error\]' "\$logfile"; then
+  echo '[deploy] 构建失败，请检查日志末尾'
+  tail -n 60 "\$logfile" || true
   exit 1
 fi
 echo '[deploy] 容器状态：'
 docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'ycf_|NAMES' || docker ps
 EOF
 
-echo "[deploy] 完成 ✓"
-echo "[deploy] 建议检查：ssh $DEPLOY_SSH 'docker logs ycf_qc_web --tail 30'"
+if ! ssh "${SSH_OPTS[@]}" "$DEPLOY_SSH" "grep -qE 'ERROR:|failed to solve|exit code: [1-9]' '$REMOTE_LOG'" 2>/dev/null; then
+  echo "[deploy] 完成 ✓"
+  echo "[deploy] 建议检查：ssh $DEPLOY_SSH 'docker logs ycf_qc_web --tail 30'"
+else
+  echo "[deploy] 失败 ✗（远端构建报错，旧容器可能仍在运行）"
+  echo "[deploy] 查看日志：ssh $DEPLOY_SSH 'tail -n 80 $REMOTE_LOG'"
+  exit 1
+fi

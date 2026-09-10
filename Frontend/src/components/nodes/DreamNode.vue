@@ -181,17 +181,16 @@ const GPT_IMAGE2_ANYFAST_C_MODEL = 'gpt-image-2-c:anyfast';
 const GPT_IMAGE25_SUNBURST_MODEL = 'gpt-image-2.5-sunburst:anyfast';
 const GPT_IMAGE25_FLARE_MODEL = 'gpt-image-2.5-flare:anyfast';
 const ALL_MODEL_OPTIONS = [
-    { label: 'Seedream', value: 'dream' },
-    { label: 'Midjourney', value: 'midjourney' },
     // （low:10/张，medium:14/张，high:18/张）
     { label: 'GPT Image 2(ace)', value: GPT_IMAGE2_ACE_MODEL },
     { label: 'GPT Image 2(anyfast)', value: GPT_IMAGE2_ANYFAST_MODEL },
-    { label: 'GPT Image 2.5(anyfast)', value: GPT_IMAGE25_SUNBURST_MODEL },
+    { label: 'GPT Image 2.5 pro(anyfast)', value: GPT_IMAGE25_SUNBURST_MODEL },
     { label: 'GPT Image 2.5-Fast(anyfast)', value: GPT_IMAGE25_FLARE_MODEL },
     { label: 'NanoBanana2(ace)（6/张）', value: 'nano:nano-banana-2' },
     { label: 'NanoBanana Pro(ace)（6/张）', value: 'nano:nano-banana-pro' },
     { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image' },
     { label: 'NanoBanana Pro(anyfast)（2K:15/张，4K:20/张）', value: ANYFAST_PRO_MODEL },
+    { label: 'Midjourney', value: 'midjourney' },
 ] as const;
 const availableModelOptions = computed(() => {
     if (isSuperAdmin.value) return ALL_MODEL_OPTIONS;
@@ -304,7 +303,8 @@ const initialSelectedModel = (() => {
         // 默认走 AnyFast（若用户未显式选择）
         return 'anyfast:gemini-3.1-flash-image';
     }
-    return (props.data?.apiType || 'dream') as string;
+    // Seedream 已从选项中移除，历史 dream / 未指定节点回退到默认可用模型
+    return DEFAULT_ALLOWED_NANO_MODEL;
 })();
 // 从节点数据初始化本地状态，保证从历史/模板加载时能恢复
 const selectedModel = ref<string>(initialSelectedModel);
@@ -1549,7 +1549,7 @@ const saveWorkflowImmediately = () => {
     border: 1px solid #404040;
     border-radius: 5px;
     width: 280px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
     overflow: visible;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
