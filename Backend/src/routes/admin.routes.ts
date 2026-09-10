@@ -27,6 +27,16 @@ import {
     updateCategory,
     deleteCategory
 } from "../controllers/category.controller";
+import {
+    adminAdaptSkill,
+    adminDeleteSkill,
+    adminDownloadSkillPackage,
+    adminImportSkill,
+    adminListSkills,
+    adminReassessSkillCompat,
+    adminSetSkillVisibility,
+    skillUpload,
+} from "../controllers/skill.controller";
 
 const router = Router();
 
@@ -69,5 +79,14 @@ router.get("/categories", getAllCategories);
 router.post("/categories", createCategory);
 router.put("/categories/:id", updateCategory);
 router.delete("/categories/:id", deleteCategory);
+
+// Skill 全局库
+router.get("/skills", adminListSkills);
+router.post("/skills/import", skillUpload, adminImportSkill);
+router.post("/skills/:id/compat/reassess", adminReassessSkillCompat);
+router.post("/skills/:id/adapt", adminAdaptSkill);
+router.patch("/skills/:id/visibility", adminSetSkillVisibility);
+router.delete("/skills/:id", adminDeleteSkill);
+router.get("/skills/:id/package", adminDownloadSkillPackage);
 
 export default router;

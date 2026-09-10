@@ -65,6 +65,11 @@
                     </el-select>
                 </div>
 
+                <div v-if="proposeGenerateHint" class="propose-hint nodrag nopan">
+                    {{ proposeGenerateHint }}
+                    <el-button size="small" text type="primary" @click="clearProposeHint">知道了</el-button>
+                </div>
+
                 <!-- 执行按钮（禁用原因多为积分/参考图；提示词在点击后校验，见 executeBlockedHint） -->
                 <el-tooltip :content="executeBlockedHint" placement="top" :disabled="canExecute">
                     <span class="execute-btn-tooltip-anchor nodrag nopan">
@@ -149,7 +154,6 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { createImageGenerationKey } from '@/utils/generation-key';
-
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -174,6 +178,23 @@ const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
 const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image';
+const proposeGenerateHint = computed(() => {
+    const d = props.data as any;
+    if (!d?.proposeGenerate) return '';
+    return typeof d.proposeMessage === 'string' && d.proposeMessage
+        ? d.proposeMessage
+        : 'Agent 建议在此节点确认后执行生成（不会自动扣费）';
+});
+const clearProposeHint = () => {
+    const node = findNode(props.id);
+    if (node) {
+        const next = { ...(node.data || {}) };
+        delete next.proposeGenerate;
+        delete next.proposeMessage;
+        node.data = next;
+    }
+};
+
 const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image';
 const GPT_IMAGE2_ACE_MODEL = 'gpt-image-2:ace';
 const GPT_IMAGE2_ANYFAST_MODEL = 'gpt-image-2:anyfast';
@@ -487,8 +508,44 @@ watch(selectedModel, (newModel) => {
         ? newModel.split(':')[0]
         : (isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined));
     (props.data as any).providerHint = (isNano || isGptImage2) ? providerHint.value : undefined;
+    // 保留选择器 value（dream / gpt-image-2:anyfast 等）供 Agent 回写对照
+    (props.data as any).selectedModel = newModel;
 }, { immediate: true });
 
+// Agent configure_node 可能回写 data
+watch(
+    () => (props.data as any)?.selectedModel || (props.data as any)?.model,
+    (m) => {
+        if (typeof m !== 'string' || !m) return;
+        // model 字段可能是短名；优先 selectedModel
+        const cand = (props.data as any)?.selectedModel || m;
+        if (typeof cand === 'string' && cand && cand !== selectedModel.value) {
+            // 短名 gpt-image-2 → 尽量映射到当前下拉值
+            if (cand === 'gpt-image-2' || cand === 'gpt-image-2-c') return;
+            if (ALL_MODEL_OPTIONS.some((o) => o.value === cand)) selectedModel.value = cand;
+            else if (cand === 'dream' || cand === 'midjourney') selectedModel.value = cand;
+        }
+    }
+);
+watch(
+    () => (props.data as any)?.aspectRatio,
+    (r) => {
+        if (typeof r === 'string' && r && r !== aspectRatio.value) aspectRatio.value = r;
+    }
+);
+watch(
+    () => (props.data as any)?.quality,
+    (q) => {
+        if (typeof q === 'string' && q && q !== quality.value) quality.value = q;
+    }
+);
+watch(
+    () => (props.data as any)?.numImages,
+    (n) => {
+        const v = Number(n);
+        if (Number.isFinite(v) && v >= 1 && v !== numImages.value) numImages.value = v;
+    }
+);
 // 将本地参数同步到节点数据，确保自动保存能带上这些配置
 watch(quality, (val) => {
     (props.data as any).quality = val;
@@ -569,9 +626,7 @@ const imagesReady = computed(() => {
     return s.ready === s.total;
 });
 
-const canExecute = computed(() => {
-    return canExecuteCredits.value && imagesReady.value;
-});
+const canExecute = computed(() => canExecuteCredits.value && imagesReady.value);
 
 /** 按钮禁用时悬停说明（与「有无提示词」无关；提示词在点击后再校验） */
 const executeBlockedHint = computed(() => {
@@ -800,7 +855,7 @@ const startCosSyncWatcher = (generationKey: string, initialRawImages: string[], 
 
 
 
-// 生成图片
+// 生成图片（Skill 仅在右侧 Agent 发送时注入；此处直接生成）
 const handleGenerate = async () => {
     if (!canExecute.value) {
         // 优先提示“图片未就绪”，其次才是积分不足
@@ -831,6 +886,7 @@ const handleGenerate = async () => {
         }
         return;
     }
+    clearProposeHint();
     loading.value = true;
     let generationKey = '';
     const requestStartMs = performance.now();
@@ -1696,6 +1752,20 @@ const saveWorkflowImmediately = () => {
 
 .execute-btn {
     width: 100%;
+}
+
+.propose-hint {
+    font-size: 12px;
+    color: #f0c674;
+    background: #2a2618;
+    border: 1px solid #5a4a20;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 }
 
 .executed-status {

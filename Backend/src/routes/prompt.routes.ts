@@ -25,6 +25,7 @@ import {
     bulkUpsertChatSessions,
     deleteChatSession,
 } from "../controllers/chat-session.controller";
+import { agentChatContinue, agentChatStream } from "../controllers/agent.controller";
 
 const router = Router();
 
@@ -46,6 +47,10 @@ router.post("/gemini-chat", authenticateToken, geminiChat);
 
 // Gemini 聊天接口（流式，SSE，需要登录）
 router.post("/gemini-chat/stream", authenticateToken, geminiChatStream);
+
+// 工作流 Skill Agent（SSE + 客户端执行工具）
+router.post("/agent/stream", authenticateToken, agentChatStream);
+router.post("/agent/continue", authenticateToken, agentChatContinue);
 
 // Gemini 错误文案翻译接口（需要登录）
 router.post("/translate-error", authenticateToken, translateErrorMessage);

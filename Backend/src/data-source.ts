@@ -16,6 +16,7 @@ import { SystemConfig } from "./entities/SystemConfig";
 import { VideoTask } from "./entities/VideoTask";
 import { ChatMedia } from "./entities/ChatMedia";
 import { ChatSessionRecord } from "./entities/ChatSessionRecord";
+import { SkillDefinition } from "./entities/SkillDefinition";
 
 dotenv.config();
 // 本地环境配置：只在非生产环境启用 .env.local 覆盖
@@ -33,7 +34,7 @@ export const AppDataSource = new DataSource({
     synchronize: true,
     logging: false,
     // 这里显式引入实体类，比用字符串路径更稳定，且避免打包后的路径问题
-    entities: [User, ApiConfig, ImageResult, OperationLog, UserDailyQuota, WorkflowTemplate, WorkflowHistory, PromptTemplate, WorkflowCategory, UserCreditApplication, CreditUsageLog, SystemConfig, VideoTask, ChatMedia, ChatSessionRecord],
+    entities: [User, ApiConfig, ImageResult, OperationLog, UserDailyQuota, WorkflowTemplate, WorkflowHistory, PromptTemplate, WorkflowCategory, UserCreditApplication, CreditUsageLog, SystemConfig, VideoTask, ChatMedia, ChatSessionRecord, SkillDefinition],
     subscribers: [],
     migrations: [],
 });

@@ -204,6 +204,11 @@
           </el-select>
         </div>
 
+        <div v-if="proposeGenerateHint" class="propose-hint nodrag nopan">
+          {{ proposeGenerateHint }}
+          <el-button size="small" text type="primary" @click="clearProposeHint">知道了</el-button>
+        </div>
+
         <el-button
           type="primary"
           size="default"
@@ -309,6 +314,23 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } = useVueFlow();
 const userStore = useUserStore();
+
+const proposeGenerateHint = computed(() => {
+  const d = props.data as any;
+  if (!d?.proposeGenerate) return '';
+  return typeof d.proposeMessage === 'string' && d.proposeMessage
+    ? d.proposeMessage
+    : 'Agent 建议在此节点确认后执行生成（不会自动扣费）';
+});
+const clearProposeHint = () => {
+  const node = findNode(props.id);
+  if (node) {
+    const next = { ...(node.data || {}) };
+    delete next.proposeGenerate;
+    delete next.proposeMessage;
+    node.data = next;
+  }
+};
 
 function notifyVideoGen(success: boolean, message: string) {
   if (success) {
@@ -890,6 +912,50 @@ const durationAuto = ref(false);
 const durationManual = ref<number>(4);
 const resolution = ref<'480p' | '540p' | '720p' | '1080p' | '4k'>('720p');
 const aspectRatio = ref<string>('adaptive');
+
+// Agent configure_node 回写 data 时同步到本地控件
+watch(
+  () => (props.data as any)?.provider,
+  (v) => {
+    if (v === 'kling' || v === 'seedance' || v === 'pixverse') provider.value = v;
+  }
+);
+watch(
+  () => (props.data as any)?.resolution,
+  (v) => {
+    if (typeof v === 'string' && v && v !== resolution.value) resolution.value = v as any;
+  }
+);
+watch(
+  () => (props.data as any)?.aspectRatio,
+  (v) => {
+    if (typeof v === 'string' && v && v !== aspectRatio.value) aspectRatio.value = v;
+  }
+);
+watch(
+  () => (props.data as any)?.durationManual ?? (props.data as any)?.durationSeconds,
+  (v) => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) durationManual.value = n;
+  }
+);
+// 本地参数写入节点，供 snapshot / Agent 复用
+watch(
+  [provider, resolution, aspectRatio, durationManual],
+  () => {
+    const node = findNode(props.id);
+    if (!node) return;
+    node.data = {
+      ...(node.data || {}),
+      provider: provider.value,
+      resolution: resolution.value,
+      aspectRatio: aspectRatio.value,
+      durationManual: durationManual.value,
+      durationSeconds: durationManual.value,
+    };
+  },
+  { deep: false }
+);
 
 const normalizeImageUrl = (url: string | null | undefined): string => {
   if (!url) return '';
@@ -1706,6 +1772,7 @@ const startPollingPixverse = (videoId: number, opts?: { silent?: boolean }) => {
 };
 
 const handleGenerate = async () => {
+  // Skill 仅在右侧 Agent 发送时注入；节点执行直接生成
   // 互斥：避免同一节点在 UI 尚未刷新时被重复点击触发多次创建
   if (generationInFlight.value) return;
   // 冷却：若上一次创建命中 429（带 retryAfter），冷却期内不允许再次创建
@@ -1741,6 +1808,7 @@ const handleGenerate = async () => {
     }
   }
 
+  clearProposeHint();
   generationInFlight.value = true;
   loading.value = true;
   errorMessage.value = null;
@@ -2491,9 +2559,10 @@ const handleGenerate = async () => {
 
     // Kling 流程
     markPendingBeforeRequest();
+    const klingPrompt = connectedPrompt.value || '生成一个简短的视频';
     const body: any = {
       mode: mode.value,
-      prompt: connectedPrompt.value || '生成一个简短的视频',
+      prompt: klingPrompt,
       duration: durationAuto.value ? -1 : durationManual.value,
       resolution: resolution.value,
         aspectRatio: aspectRatio.value,
@@ -2943,6 +3012,20 @@ onUnmounted(() => {
 .execute-btn {
   width: 100%;
   margin-top: 4px;
+}
+
+.propose-hint {
+  font-size: 12px;
+  color: #f0c674;
+  background: #2a2618;
+  border: 1px solid #5a4a20;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .result-section {
