@@ -306,6 +306,7 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { isImageNodeReady, summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { allocPixverseRefName, parseImageFigureNumberFromAlias } from '@/utils/pixverse-ref-name';
 import { translateErrorText } from '@/utils/error-toast';
+import { useAgentAuthorizedRun } from '@/composables/useAgentAuthorizedRun';
 
 defineEmits<{
   updateNodeInternals: [];
@@ -314,13 +315,18 @@ defineEmits<{
 const props = defineProps<NodeProps>();
 const { getEdges, findNode, addNodes, addEdges, getNodes, updateNodeInternals } = useVueFlow();
 const userStore = useUserStore();
+const authRun = useAgentAuthorizedRun();
+let pendingAuthConsume = false;
 
 const proposeGenerateHint = computed(() => {
   const d = props.data as any;
+  if (d?.autoExecuteOnce && authRun.canAutoExecute()) {
+    return '授权回合内，正在自动执行生成…';
+  }
   if (!d?.proposeGenerate) return '';
   return typeof d.proposeMessage === 'string' && d.proposeMessage
     ? d.proposeMessage
-    : 'Agent 建议在此节点确认后执行生成（不会自动扣费）';
+    : 'Agent 已编排完成，请在聊天中点击「确认并生成」';
 });
 const clearProposeHint = () => {
   const node = findNode(props.id);
@@ -328,8 +334,10 @@ const clearProposeHint = () => {
     const next = { ...(node.data || {}) };
     delete next.proposeGenerate;
     delete next.proposeMessage;
+    delete next.autoExecuteOnce;
     node.data = next;
   }
+  authRun.removePendingPropose(String(props.id));
 };
 
 function notifyVideoGen(success: boolean, message: string) {
@@ -1813,6 +1821,17 @@ const handleGenerate = async () => {
   loading.value = true;
   errorMessage.value = null;
 
+  if (pendingAuthConsume) {
+    pendingAuthConsume = false;
+    const consumed = authRun.consumeGenerate(1);
+    if (!consumed.ok) {
+      ElMessage.warning(consumed.reason || '授权额度不足');
+      loading.value = false;
+      generationInFlight.value = false;
+      return;
+    }
+  }
+
   // 富文本提示词就地更新 data.text 时，兜底再读一次连线（与 dreamUpstreamSig / watch 一致）
   connectedPrompt.value = readConnectedPromptFromEdges();
 
@@ -2657,6 +2676,28 @@ const handleGenerate = async () => {
     generationInFlight.value = false;
   }
 };
+
+/** 授权回合内：autoExecuteOnce 才自动执行，并扣减额度 */
+watch(
+  () => Boolean((props.data as any)?.autoExecuteOnce),
+  async (want) => {
+    if (!want) return;
+    const node = findNode(props.id);
+    if (node?.data) {
+      const next = { ...(node.data as any) };
+      delete next.autoExecuteOnce;
+      node.data = next;
+    }
+    if (!authRun.canAutoExecute()) {
+      return;
+    }
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 120));
+    if (loading.value || generationInFlight.value) return;
+    pendingAuthConsume = true;
+    await handleGenerate();
+  }
+);
 
 const manualRefresh = async () => {
   if (!taskId.value) return;

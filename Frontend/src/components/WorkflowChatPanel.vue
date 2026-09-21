@@ -332,6 +332,54 @@
             </el-scrollbar>
 
             <footer class="chat-input-area">
+              <div class="agent-auth-bar">
+                <div class="agent-auth-text">
+                  <template v-if="agentAuthPendingCount > 0 && !agentAuthRun.active">
+                    待确认生成 {{ agentAuthPendingCount }} 项（确认后开始扣费出图）
+                  </template>
+                  <template v-else-if="agentAuthRun.active">
+                    {{ agentAuthStatusLine }}
+                  </template>
+                  <template v-else-if="agentAuthRun.exhaustedReason">
+                    {{ agentAuthRun.exhaustedReason }}
+                  </template>
+                  <template v-else>
+                    {{ fullAutoGenerate ? '全自动已开启：propose 后立即出图' : '出图前需确认；可开启全自动' }}
+                  </template>
+                </div>
+                <div class="agent-auth-actions">
+                  <el-switch
+                    v-model="fullAutoGenerate"
+                    size="small"
+                    inline-prompt
+                    active-text="全自动"
+                    inactive-text="需确认"
+                    @change="onFullAutoChange"
+                  />
+                  <el-button
+                    v-if="agentAuthPendingCount > 0 && !agentAuthRun.active"
+                    type="primary"
+                    size="small"
+                    @click="onConfirmAndGenerate"
+                  >
+                    确认并生成
+                  </el-button>
+                  <el-button
+                    v-if="agentAuthPendingCount > 0 && !agentAuthRun.active"
+                    size="small"
+                    @click="clearAgentAuthPending"
+                  >
+                    清除待确认
+                  </el-button>
+                  <el-button
+                    v-if="agentAuthRun.active"
+                    size="small"
+                    @click="endAgentAuthRun"
+                  >
+                    结束本轮
+                  </el-button>
+                </div>
+              </div>
               <!-- 已上传媒体列表 -->
               <div v-if="uploadedMedia.length > 0" class="uploaded-media-list">
                 <div
@@ -393,16 +441,18 @@
                     <el-option
                       v-for="s in globalSkills"
                       :key="'g-' + s.id"
-                      :label="skillDisplayLabel(s)"
+                      :label="skillOptionLabel(s)"
                       :value="s.id"
+                      :disabled="!skillAgentSelectable(s)"
                     />
                   </el-option-group>
                   <el-option-group v-if="mineSkills.length" label="我的">
                     <el-option
                       v-for="s in mineSkills"
                       :key="'m-' + s.id"
-                      :label="skillDisplayLabel(s)"
+                      :label="skillOptionLabel(s)"
                       :value="s.id"
+                      :disabled="!skillAgentSelectable(s)"
                     />
                   </el-option-group>
                   <template v-if="!skillOptionsLoading && !globalSkills.length && !mineSkills.length" #empty>
@@ -646,7 +696,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from '
 import { ElMessage, ElImageViewer } from 'element-plus';
 import { Plus, Close, VideoCamera, Rank, ChatLineRound, Fold, ArrowLeft, ArrowRight, Monitor, Delete } from '@element-plus/icons-vue';
 import { useUserStore } from '@/store/user';
-import { listSkills, runWorkflowAgentLoop, skillDisplayLabel, type AgentSkillKickoff } from '@/api/skill';
+import { listSkills, runWorkflowAgentLoop, skillDisplayLabel, skillAgentSelectable, type AgentSkillKickoff } from '@/api/skill';
 import type { ChatHistoryItem, GeminiChatRequest } from '@/api/chat';
 import {
   sendGeminiChat,
@@ -667,6 +717,7 @@ import {
   subscribeChatBridge,
   type ChatBridgeMessage,
 } from '@/composables/useChatWindowBridge';
+import { useAgentAuthorizedRun } from '@/composables/useAgentAuthorizedRun';
 
 const chatRobotIconUrl = `${import.meta.env.BASE_URL}icon_robot.png`;
 
@@ -713,6 +764,37 @@ const emit = defineEmits<{
 }>();
 
 const userStore = useUserStore();
+const authRunApi = useAgentAuthorizedRun();
+const agentAuthPendingCount = authRunApi.pendingCount;
+const agentAuthRun = authRunApi.run;
+const agentAuthStatusLine = authRunApi.statusLine;
+const fullAutoGenerate = authRunApi.fullAutoGenerate;
+
+const onFullAutoChange = (val: string | number | boolean) => {
+  authRunApi.setFullAutoGenerate(Boolean(val));
+  if (val) {
+    ElMessage.success('已开启全自动：挂起任务将立即出图');
+  } else {
+    ElMessage.info('已关闭全自动：出图前需点「确认并生成」');
+  }
+};
+
+const onConfirmAndGenerate = () => {
+  const res = authRunApi.confirmAndGenerate();
+  if (!res.ok) {
+    ElMessage.warning(res.message);
+    return;
+  }
+  ElMessage.success(res.message);
+};
+
+const clearAgentAuthPending = () => {
+  authRunApi.clearPendingProposes();
+};
+
+const endAgentAuthRun = () => {
+  authRunApi.endRun('已手动结束授权回合');
+};
 
 const isOpen = ref(props.mode === 'popup');
 const sessions = ref<ChatSession[]>([]);
@@ -739,6 +821,17 @@ const mineSkills = computed(() =>
       s.visibility === 'disabled'
   )
 );
+
+const skillOptionLabel = (s: import('@/api/skill').SkillListItem) => {
+  const base = skillDisplayLabel(s);
+  const g = s.compat_grade ? ` [${s.compat_grade}]` : '';
+  if (!skillAgentSelectable(s)) {
+    if (String(s.compat_grade).toUpperCase() === 'C') return `${base}${g}（C级不可选）`;
+    if (String(s.compat_grade).toUpperCase() === 'B' && !s.has_adapted) return `${base}${g}（待适配）`;
+    return `${base}${g}（不可选）`;
+  }
+  return `${base}${g}`;
+};
 
 const loadSkillOptions = async () => {
   skillOptionsLoading.value = true;
@@ -808,9 +901,12 @@ const finalizeOutboundMessage = (userNeed: string): string => {
   } else {
     parts.push('【画布意图】', buildCanvasBriefLine());
   }
-  parts.push('【需求】', userNeed.trim() || '按上方意图与 Skill 编排画布，完成后 propose_generate');
+  parts.push('【需求】', userNeed.trim() || '按上方意图与 Skill 编排画布，完成后 propose_generate（仅挂起，等我点「确认并生成」）');
+  parts.push(authRunApi.authContextForAgent());
   if (selectedSkillIds.value.length) {
-    parts.push('请 get_workflow_snapshot → 缺信息 ask_user → propose_generate，等我确认执行。');
+    parts.push(
+      '请 get_workflow_snapshot → 缺信息 ask_user → 明确执行时再 propose_generate；疑问句只回答不要 propose；勿连环重试。'
+    );
   }
   return parts.join('\n');
 };
@@ -826,6 +922,14 @@ watch(
   selectedSkillIds,
   (ids) => {
     if (ids.length > 0) useAgentMode.value = true;
+    // 去掉不可选（C / 未适配 B）
+    const allowed = ids.filter((id) => {
+      const s = skillOptions.value.find((x) => x.id === id);
+      return s ? skillAgentSelectable(s) : false;
+    });
+    if (allowed.length !== ids.length) {
+      selectedSkillIds.value = allowed;
+    }
   },
   { deep: true }
 );
@@ -845,7 +949,7 @@ watch(
       ? `请复用 generationPrefs：${JSON.stringify(prefs)}`
       : '';
     const nodeHint = kick.dreamNodeId
-      ? `优先使用节点 ${kick.dreamNodeId}，configure_node 后 propose_generate。`
+      ? `优先使用节点 ${kick.dreamNodeId}，configure_node 后 propose_generate（挂起等我确认并生成）。`
       : '';
     currentInput.value =
       kick.hint ||
@@ -1815,6 +1919,19 @@ const handleSend = async () => {
 
   if (selectedSkillIds.value.length > 0) {
     useAgentMode.value = true;
+    const bad = selectedSkillIds.value
+      .map((id) => skillOptions.value.find((s) => s.id === id))
+      .filter((s) => s && !skillAgentSelectable(s));
+    if (bad.length) {
+      ElMessage.warning(
+        `以下 Skill 不可用于 Agent：${bad.map((s) => skillDisplayLabel(s!)).join('、')}（C 级或未适配）`
+      );
+      return;
+    }
+    // 轻量预检：有 Skill 但画布几乎空时提示（不阻断）
+    if (!canvasIntentCards.value.length) {
+      ElMessage.info('当前画布暂无生图/视频链路，Agent 可能会先向你确认或新建节点');
+    }
   }
 
   // 有 Skill 或画布意图时，把卡片摘要并进消息；输入框只保留用户自己写的需求
@@ -2829,6 +2946,32 @@ onUnmounted(() => {
   border-top: 1px solid var(--app-border-color);
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.agent-auth-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(64, 158, 255, 0.12);
+  border: 1px solid rgba(64, 158, 255, 0.35);
+}
+
+.agent-auth-text {
+  flex: 1;
+  min-width: 160px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-primary-light-3, #cde3ff);
+}
+
+.agent-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

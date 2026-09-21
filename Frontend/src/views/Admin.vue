@@ -465,43 +465,62 @@
             <el-button type="primary" :loading="skillLoading">上传skill</el-button>
           </el-upload>
           <el-button @click="loadAdminSkills" :loading="skillLoading">刷新</el-button>
-          <span style="color:#888;font-size:12px">上传后自动体检评级；可「生成适配版」。设为通用后全员可用</span>
+          <span style="color:#888;font-size:12px">上传后自动评级适配：A 完美适配；B 不完全适配；C 仅存档，不可用。管理员可手动设为公用</span>
         </div>
-        <el-table :data="adminSkills" border v-loading="skillLoading" style="margin-top: 16px">
-          <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column label="名称" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ skillDisplayLabel(row) }}</template>
-          </el-table-column>
-          <el-table-column prop="name" label="标识" min-width="120" show-overflow-tooltip />
-          <el-table-column label="评级" width="100">
+        <el-table
+          class="admin-skills-table"
+          :data="adminSkills"
+          border
+          v-loading="skillLoading"
+          style="margin-top: 16px; width: 100%"
+          :row-key="(row: SkillListItem) => row.id"
+        >
+          <el-table-column prop="id" label="ID" width="56" align="center" header-align="center" />
+          <el-table-column label="名称" width="108" align="center" header-align="center">
             <template #default="{ row }">
-              <el-tag v-if="row.compat_grade" size="small" :type="compatGradeTagType(row.compat_grade)">
-                {{ row.compat_grade }} {{ row.compat_report?.grade_label || '' }}
-              </el-tag>
-              <span v-else style="color:#999">—</span>
+              <span class="skill-cell-full">{{ skillDisplayLabel(row) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="适配版" width="80">
+          <el-table-column label="标识" width="118" align="center" header-align="center">
+            <template #default="{ row }">
+              <span class="skill-cell-full skill-cell-mono">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="评级" width="64" align="center" header-align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.compat_grade" size="small" :type="compatGradeTagType(row.compat_grade)">
+                {{ row.compat_grade }}
+              </el-tag>
+              <span v-else class="skill-muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="适配" width="72" align="center" header-align="center">
             <template #default="{ row }">{{ row.has_adapted ? '有' : '无' }}</template>
           </el-table-column>
-          <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="visibility" label="可见性" width="90" />
-          <el-table-column prop="status" label="状态" width="100" />
-          <el-table-column prop="owner_user_id" label="Owner" width="80" />
-          <el-table-column label="操作" width="420" fixed="right">
+          <el-table-column label="描述" min-width="160" header-align="center">
             <template #default="{ row }">
-              <el-button size="small" @click="showSkillCompat(row)">缺口</el-button>
-              <el-button size="small" type="primary" :loading="adaptLoadingId === row.id" @click="runAdminAdapt(row)">
-                生成适配版
-              </el-button>
-              <el-button v-if="row.visibility !== 'global'" size="small" type="success" @click="setSkillVis(row, 'global')">设为通用</el-button>
-              <el-button
-                v-if="row.visibility !== 'private'"
-                size="small"
-                @click="setSkillVis(row, 'private')"
-              >仅上传人</el-button>
-              <el-button size="small" type="warning" @click="setSkillVis(row, 'disabled')">下架</el-button>
-              <el-button size="small" type="danger" @click="removeAdminSkill(row)">删除</el-button>
+              <div class="skill-desc-wrap">{{ row.description || '—' }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="visibility" label="可见性" width="80" align="center" header-align="center" />
+          <el-table-column prop="status" label="状态" width="72" align="center" header-align="center" />
+          <el-table-column prop="owner_user_id" label="Owner" width="64" align="center" header-align="center" />
+          <el-table-column label="操作" width="300" align="center" header-align="center">
+            <template #default="{ row }">
+              <div class="skill-ops">
+                <el-button size="small" @click="showSkillCompat(row)">缺口详情</el-button>
+                <el-button size="small" type="primary" :loading="adaptLoadingId === row.id" @click="runAdminAdapt(row)">
+                  生成适配版
+                </el-button>
+                <el-button v-if="row.visibility !== 'global'" size="small" type="success" @click="setSkillVis(row, 'global')">设为通用</el-button>
+                <el-button
+                  v-if="row.visibility !== 'private'"
+                  size="small"
+                  @click="setSkillVis(row, 'private')"
+                >仅上传人</el-button>
+                <el-button size="small" type="warning" @click="setSkillVis(row, 'disabled')">下架</el-button>
+                <el-button size="small" type="danger" @click="removeAdminSkill(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -795,6 +814,13 @@ const loadAdminSkills = async () => {
   }
 };
 
+const severityLabel = (s: string) => {
+  if (s === 'blocker') return '阻断';
+  if (s === 'major') return '重要';
+  if (s === 'minor') return '次要';
+  return s || '未知';
+};
+
 const showSkillCompat = (row: SkillListItem) => {
   const gaps = row.compat_report?.gaps || [];
   const lines = [
@@ -802,10 +828,12 @@ const showSkillCompat = (row: SkillListItem) => {
     row.compat_report?.summary || '',
     row.has_adapted ? '已有 ARTN 适配版（Agent 优先使用）' : '尚未生成适配版',
     '',
-    ...gaps.map((g) => `• [${g.severity}] ${g.message}`),
-  ].filter(Boolean);
+    gaps.length ? '缺口明细：' : '缺口明细：无',
+    ...gaps.map((g) => `• [${severityLabel(g.severity)}] ${g.code || ''} ${g.message}`.replace(/\s+/g, ' ').trim()),
+  ].filter((x) => x !== undefined && x !== null);
   ElMessageBox.alert(lines.join('\n') || '暂无报告', `Skill 适配：${skillDisplayLabel(row)}`, {
     confirmButtonText: '知道了',
+    customClass: 'skill-compat-alert',
   });
 };
 
@@ -1016,10 +1044,13 @@ const getStatsApiTypeLabel = (apiType: string) => {
     dream: '即梦',
     nano: 'Nano(通用)',
     midjourney: 'Midjourney',
+    'gpt-image-2': 'GPT Image 2(Ace)',
     'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
     'gpt-image-2-af': 'GPT Image 2(AnyFast)',
-    'img2.5': 'GPT Image 2.5 pro(AnyFast)',
-    'img2.5-fast': 'GPT Image 2.5-Fast(AnyFast)',
+    'img2.5': 'GPT2.5 pro(Ace)',
+    'img2.5-fast': 'GPT2.5(Ace)',
+    'img2.5-af': 'GPT2.5 pro(AnyFast)',
+    'img2.5f-af': 'GPT2.5(AnyFast)',
     'gemini-3-pro': 'NanoBanana Pro(AnyFast)',
     'gemini-3.1-fl': 'NanoBanana2(AnyFast)',
     'nano-ace': 'Nano(Ace)',
@@ -1788,6 +1819,75 @@ onMounted(async () => {
 }
 .gen-result-copy {
   flex-shrink: 0;
+}
+
+.admin-skills-table {
+  width: 100%;
+}
+.admin-skills-table :deep(.el-table__body-wrapper),
+.admin-skills-table :deep(.el-table__header-wrapper) {
+  overflow-x: hidden !important;
+}
+.admin-skills-table :deep(.el-table__cell) {
+  vertical-align: middle;
+}
+.admin-skills-table :deep(.cell) {
+  line-height: 1.45;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.admin-skills-table :deep(.el-table__header th .cell) {
+  text-align: center;
+  white-space: nowrap;
+}
+.skill-cell-full {
+  display: block;
+  width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.4;
+}
+.skill-cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted, #a0a0a0);
+}
+.skill-desc-wrap {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  font-size: 12px;
+  text-align: left;
+}
+.skill-muted {
+  color: #888;
+  font-size: 12px;
+}
+.skill-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+.skill-ops :deep(.el-button) {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+</style>
+
+<style>
+.skill-compat-alert .el-message-box__message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
 }
 </style>
 

@@ -6,12 +6,18 @@
         <el-button size="small" type="primary" :loading="loading">上传（仅自己可见）</el-button>
       </el-upload>
     </div>
-    <p class="hint">支持市场 zip / SKILL.md。上传后自动评级；建议对 B/C 级点「生成适配版」后再用。</p>
-    <el-table :data="mine" size="small" v-loading="loading" max-height="320">
-      <el-table-column label="名称" min-width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ skillDisplayLabel(row) }}</template>
+    <p class="hint">
+      支持市场 zip / SKILL.md。上传后自动评级：A 可直接用；B 自动生成适配版；C 仅存档不可进 Agent。超管导入也先私有，需手动设为全员。
+    </p>
+    <el-table :data="mine" size="small" v-loading="loading" max-height="360" class="my-skills-table">
+      <el-table-column label="名称" width="120">
+        <template #default="{ row }">
+          <el-tooltip :content="skillDisplayLabel(row)" placement="top">
+            <span class="ellip">{{ skillDisplayLabel(row) }}</span>
+          </el-tooltip>
+        </template>
       </el-table-column>
-      <el-table-column label="评级" width="88">
+      <el-table-column label="评级" width="56" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.compat_grade" size="small" :type="compatGradeTagType(row.compat_grade)">
             {{ row.compat_grade }}
@@ -19,13 +25,28 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column label="适配" width="56">
+      <el-table-column label="适配" width="48" align="center">
         <template #default="{ row }">{{ row.has_adapted ? '有' : '无' }}</template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="80" />
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="缺口" min-width="140">
         <template #default="{ row }">
-          <el-button link size="small" @click="showCompat(row)">缺口</el-button>
+          <div class="gap-snip" @click="showCompat(row)">
+            <template v-if="(row.compat_report?.gaps || []).length">
+              <div v-for="(g, i) in (row.compat_report?.gaps || []).slice(0, 2)" :key="i" class="gap-line">
+                · {{ g.message }}
+              </div>
+              <div v-if="(row.compat_report?.gaps || []).length > 2" class="gap-more">
+                +{{ (row.compat_report?.gaps || []).length - 2 }} 项…
+              </div>
+            </template>
+            <span v-else class="muted">无 / 点看详情</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="status" label="状态" width="72" />
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button link size="small" @click="showCompat(row)">详情</el-button>
           <el-button link type="primary" size="small" :loading="adaptId === row.id" @click="onAdapt(row)">
             适配
           </el-button>
@@ -89,6 +110,13 @@ const refresh = async () => {
   }
 };
 
+const severityLabel = (s: string) => {
+  if (s === 'blocker') return '阻断';
+  if (s === 'major') return '重要';
+  if (s === 'minor') return '次要';
+  return s || '未知';
+};
+
 const showCompat = (row: SkillListItem) => {
   const gaps = row.compat_report?.gaps || [];
   const lines = [
@@ -96,9 +124,13 @@ const showCompat = (row: SkillListItem) => {
     row.compat_report?.summary || '',
     row.has_adapted ? '已有适配版（Agent 优先使用）' : '尚未生成适配版',
     '',
-    ...gaps.map((g) => `• [${g.severity}] ${g.message}`),
-  ].filter(Boolean);
-  ElMessageBox.alert(lines.join('\n') || '暂无报告', skillDisplayLabel(row), { confirmButtonText: '知道了' });
+    gaps.length ? '缺口明细：' : '缺口明细：无',
+    ...gaps.map((g) => `• [${severityLabel(g.severity)}] ${g.message}`),
+  ];
+  ElMessageBox.alert(lines.join('\n') || '暂无报告', skillDisplayLabel(row), {
+    confirmButtonText: '知道了',
+    customClass: 'skill-compat-alert',
+  });
 };
 
 const onAdapt = async (row: SkillListItem) => {
@@ -179,5 +211,33 @@ onMounted(() => {
   margin: 14px 0 8px;
   font-size: 13px;
   color: #aaa;
+}
+.ellip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gap-snip {
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #b8b8b8;
+  white-space: normal;
+  word-break: break-word;
+}
+.gap-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gap-more {
+  color: #888;
+  margin-top: 2px;
+}
+.muted {
+  color: #777;
 }
 </style>

@@ -128,6 +128,13 @@ const handleOptimize = async () => {
             if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
                 workflowPersistence.saveImmediately();
             }
+        } else if (res.data?.data?.optimized) {
+            optimizedPrompt.value = res.data.data.optimized;
+            props.data.text = res.data.data.optimized;
+            ElMessage.success('提示词优化成功！');
+            if (workflowPersistence && typeof workflowPersistence.saveImmediately === 'function') {
+                workflowPersistence.saveImmediately();
+            }
         } else {
             ElMessage.warning('优化成功，但未获取到结果');
         }

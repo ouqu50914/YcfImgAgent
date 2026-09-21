@@ -119,15 +119,20 @@ function writeSseOpenAiStyleDeltas(res: Response, fullText: string) {
 export const optimizePrompt = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { prompt, apiType, style } = req.body;
+        const { prompt, apiType, style, imageAliases } = req.body;
 
         if (!prompt) {
             return res.status(400).json({ message: "提示词不能为空" });
         }
 
-        const optimizedPrompt = await promptService.optimizePrompt(prompt, {
+        const aliases = Array.isArray(imageAliases)
+            ? imageAliases.map((a: unknown) => String(a || "").trim()).filter(Boolean)
+            : [];
+
+        const optimizedResult = await promptService.optimizePrompt(prompt, {
             apiType: apiType || 'dream',
-            style
+            style,
+            imageAliases: aliases,
         });
 
         // 记录操作日志
@@ -136,7 +141,14 @@ export const optimizePrompt = async (req: Request, res: Response) => {
             details?: any;
             ipAddress?: string;
         } = {
-            details: { originalPrompt: prompt, optimizedPrompt, apiType, style }
+            details: {
+                originalPrompt: prompt,
+                optimizedPrompt: optimizedResult.optimized,
+                negativePrompt: optimizedResult.negative,
+                apiType,
+                style,
+                imageAliases: aliases,
+            }
         };
         
         if (ipAddressRaw) {
@@ -154,7 +166,9 @@ export const optimizePrompt = async (req: Request, res: Response) => {
             message: "提示词优化成功",
             data: {
                 original: prompt,
-                optimized: optimizedPrompt
+                optimized: optimizedResult.optimized,
+                negative: optimizedResult.negative,
+                raw: optimizedResult.raw,
             }
         });
     } catch (error: any) {

@@ -38,8 +38,8 @@ export class ImageService {
     private static nanoPolicyRequestSeq = 0;
     private static imageSyncInFlight = new Set<number>();
 
-    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "anyfast") as "ace" | "anyfast";
-    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "ace") as "ace" | "anyfast";
+    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "ace") as "ace" | "anyfast";
+    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "anyfast") as "ace" | "anyfast";
     private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "1"));
     private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY === "true";
     private readonly anyfastCircuitFailureThreshold = Math.max(1, Number(process.env.NANO_ANYFAST_CIRCUIT_FAILURE_THRESHOLD || "3"));
@@ -334,15 +334,21 @@ export class ImageService {
     }
 
     /**
-     * AnyFast 模型在回退到 Ace 时需要映射到 Ace 可识别的模型名。
-     * - gemini-3-pro-image -> nano-banana-2
-     * - gemini-3.1-flash-image -> nano-banana-pro
+     * 跨通道模型映射：
+     * - Ace Nano ↔ AnyFast Gemini（产品线 Nano2 / Nano Pro）
+     * - GPT Image 系列同名跨通道（Ace 侧由 adapter 转为 :official）
      */
     private mapModelForProvider(provider: "ace" | "anyfast", model?: GenerateParams["model"]): GenerateParams["model"] {
-        if (provider !== "ace" || !model) return model;
+        if (!model) return model;
         const normalized = normalizeAnyfastGeminiModel(model) || model;
-        if (normalized === "gemini-3-pro-image") return "nano-banana-2";
-        if (normalized === "gemini-3.1-flash-image") return "nano-banana-pro";
+        if (provider === "ace") {
+            if (normalized === "gemini-3.1-flash-image") return "nano-banana-2";
+            if (normalized === "gemini-3-pro-image") return "nano-banana-pro";
+            return model;
+        }
+        // anyfast
+        if (normalized === "nano-banana-2") return "gemini-3.1-flash-image";
+        if (normalized === "nano-banana-pro") return "gemini-3-pro-image";
         return model;
     }
 
@@ -391,12 +397,11 @@ export class ImageService {
             params.model === "gpt-image-2"
             || params.model === "gpt-image-2-c"
             || isGptImage25Request;
-        const isGptImage2AnyfastOnly =
-            params.model === "gpt-image-2-c" || isGptImage25Request;
-        const isGptImage2AnyfastRequest =
-            (params.model === "gpt-image-2" && params.providerHint === "anyfast")
-            || isGptImage2AnyfastOnly;
-        if (!isAdmin && isAnyfastProRequest) {
+        // 仅 GPT Image 2-C 锁 AnyFast；2 / 2.5 可走 Ace（2.5 Ace 上游为 :official）
+        const isGptImage2AnyfastOnly = params.model === "gpt-image-2-c";
+        // 显式指定渠道（测试选项）：只打该渠道，不做跨通道兜底
+        const channelLocked = params.providerHint === "ace" || params.providerHint === "anyfast";
+        if (!isAdmin && isAnyfastProRequest && params.providerHint === "anyfast") {
             const deniedError = Object.assign(new Error("普通用户暂不支持使用 AnyFast Nano Pro"), {
                 status: 403,
                 code: "ANYFAST_PRO_FORBIDDEN",
@@ -412,29 +417,26 @@ export class ImageService {
             });
             throw deniedError;
         }
-        const isGptImage2AceDirect = params.model === "gpt-image-2" && params.providerHint === "ace";
-        const isGptImage2AnyfastDirect = isGptImage2AnyfastRequest;
-        const requestedAnyfastDirect =
-            params.providerHint === "anyfast" ||
-            params.model === "gemini-3.1-flash-image" ||
-            params.model === "gemini-3-pro-image" ||
-            isGptImage2AnyfastDirect;
-        const requestedAceDirect = params.providerHint === "ace"
-            && params.model !== "gpt-image-2"
-            && params.model !== "gpt-image-2-c"
-            && !isGptImage25Request;
 
-        // 路由策略（普通用户/管理员统一）：
-        // - 用户显式选了 ace/anyfast：按所选为主路由，另一家为兜底
-        // - 未显式选择：沿用系统默认主路由，并固定另一家为兜底
-        const primary: "ace" | "anyfast" = requestedAceDirect
-            ? "ace"
-            : requestedAnyfastDirect
-                ? "anyfast"
-                : (isGptImage2AceDirect || isGptImage2Request)
-                    ? "ace"
-                    : this.nanoPrimaryProvider;
-        const fallback: "ace" | "anyfast" = primary === "ace" ? "anyfast" : "ace";
+        // 路由策略：
+        // - 产品选项（无 providerHint）：Ace 优先，AnyFast 兜底
+        // - 测试选项（显式 ace/anyfast）：锁定该渠道
+        // - gemini-* / gpt-image-2-c：本身绑定 AnyFast
+        let primary: "ace" | "anyfast";
+        if (channelLocked) {
+            primary = params.providerHint as "ace" | "anyfast";
+        } else if (
+            isGptImage2AnyfastOnly
+            || params.model === "gemini-3.1-flash-image"
+            || params.model === "gemini-3-pro-image"
+        ) {
+            primary = "anyfast";
+        } else {
+            primary = this.nanoPrimaryProvider === "anyfast" ? "anyfast" : "ace";
+        }
+        const fallback: "ace" | "anyfast" | null = channelLocked
+            ? null
+            : (primary === "ace" ? "anyfast" : "ace");
         const refCount =
             (params.imageUrls && params.imageUrls.length > 0)
                 ? params.imageUrls.length
@@ -449,8 +451,7 @@ export class ImageService {
             is_admin: isAdmin,
             primary_provider: primary,
             fallback_provider: fallback,
-            direct_anyfast: requestedAnyfastDirect,
-            direct_ace: requestedAceDirect,
+            channel_locked: channelLocked,
             prompt: params.prompt,
             model: params.model,
             quality: params.quality,
@@ -538,10 +539,8 @@ export class ImageService {
                     }
                 }
 
-                const canFallbackToAnyfast = isAdmin && !isGptImage2Request;
-                const canFallback = canFallbackToAnyfast
+                const canFallback = fallback === "anyfast"
                     && this.shouldFallback(lastError)
-                    && fallback === "anyfast"
                     && !this.isAnyfastCircuitOpen();
                 if (!canFallback) throw lastError;
                 switchReason = lastError instanceof ProviderError ? lastError.code : "ACE_FAILED";
@@ -585,7 +584,7 @@ export class ImageService {
                 }
             }
 
-            // 兼容 future: anyfast 作为主，ace 作为备
+            // primary = anyfast
             try {
                 const first = await tryProvider(primary, 1);
                 this.markAnyfastSuccess();
@@ -621,7 +620,12 @@ export class ImageService {
                     provider: primary,
                     message: this.getErrorMessage(primaryError),
                 });
-                if (!this.shouldFallback(primaryError) || fallback === primary || isGptImage2Request) {
+                if (
+                    !fallback
+                    || fallback === primary
+                    || !this.shouldFallback(primaryError)
+                    || isGptImage2AnyfastOnly
+                ) {
                     throw primaryError;
                 }
                 switchReason = primaryError instanceof ProviderError ? primaryError.code : "PRIMARY_FAILED";

@@ -25,6 +25,8 @@ export type SkillListItem = {
     adapted?: boolean;
   } | null;
   has_adapted?: boolean;
+  /** Agent 是否可选：C 不可选；B 须有适配版 */
+  agent_selectable?: boolean;
 };
 
 /** 从 Dream/Video 节点带到 Agent 的生成参数（Skill 优先复用，勿重复追问） */
@@ -67,6 +69,19 @@ export function skillNeedsAgent(s: Pick<SkillListItem, 'requires_agent' | 'compa
   if (Number(s.compat_flags?.asset_count) > 0) return true;
   const paths = Array.isArray(s.compat_flags?.entry_paths) ? (s.compat_flags!.entry_paths as unknown[]) : [];
   return paths.some((p) => /(^|\/)(references|assets)\//i.test(String(p)));
+}
+
+/** Agent 下拉是否可选 */
+export function skillAgentSelectable(
+  s: Pick<SkillListItem, 'compat_grade' | 'has_adapted' | 'agent_selectable' | 'status'> | null | undefined
+): boolean {
+  if (!s || s.status === 'unsupported') return false;
+  if (typeof s.agent_selectable === 'boolean') return s.agent_selectable;
+  const g = String(s.compat_grade || '').toUpperCase();
+  if (g === 'C') return false;
+  if (g === 'B') return Boolean(s.has_adapted);
+  if (g === 'A') return true;
+  return Boolean(s.has_adapted);
 }
 
 export const listSkills = () => {
@@ -149,7 +164,9 @@ export async function downloadSkillPackage(id: number, asAdmin = false) {
   const blob = await resp.blob();
   const dispo = resp.headers.get('Content-Disposition') || '';
   const m = dispo.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
-  const fileName = m ? decodeURIComponent(m[1].replace(/"/g, '')) : `skill-${id}.zip`;
+  const fileName = m?.[1]
+    ? decodeURIComponent(m[1].replace(/"/g, ''))
+    : `skill-${id}.zip`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

@@ -156,6 +156,13 @@ export class AceGptImage2Adapter implements AiProvider {
         return key;
     }
 
+    /** Ace 上游模型名：GPT Image 2.5 走 :official 线路 */
+    private resolveUpstreamModel(model?: GenerateParams["model"]): string {
+        if (model === "gpt-image-2.5-sunburst") return "gpt-image-2.5-sunburst:official";
+        if (model === "gpt-image-2.5-flare") return "gpt-image-2.5-flare:official";
+        return "gpt-image-2";
+    }
+
     private normalizeQuality(raw?: string): "low" | "medium" | "high" {
         if (raw === "low" || raw === "high") return raw;
         return "medium";
@@ -311,8 +318,9 @@ export class AceGptImage2Adapter implements AiProvider {
             ? Math.max(0, Math.min(100, Number(params.outputCompression)))
             : undefined;
 
+        const upstreamModel = this.resolveUpstreamModel(params.model);
         const body: Record<string, unknown> = {
-            model: "gpt-image-2",
+            model: upstreamModel,
             prompt: this.enrichPromptWithComputedSize(params.prompt || "生成图片", size),
             size,
         };
@@ -337,6 +345,8 @@ export class AceGptImage2Adapter implements AiProvider {
 
         console.log("[AceGptImage2Adapter] request_summary", {
             endpoint,
+            model: upstreamModel,
+            input_model: params.model,
             prompt_length: String(body.prompt || "").length,
             size,
             n: body.n || 1,

@@ -2,8 +2,10 @@ import request from '@/utils/request.ts';
 
 export interface OptimizeParams {
     prompt: string;
-    apiType?: 'dream' | 'nano';
+    apiType?: 'dream' | 'nano' | string;
     style?: string;
+    /** 画布参考图/视频别名，如 图1、视频1 */
+    imageAliases?: string[];
 }
 
 export interface PromptTemplate {

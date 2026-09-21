@@ -1,5 +1,13 @@
 import { nextTick } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useAgentAuthorizedRun } from '@/composables/useAgentAuthorizedRun';
+import {
+  assignStripAnchors,
+  getHeadlessImageJob,
+  listHeadlessImageJobs,
+  registerHeadlessImageJob,
+  runHeadlessImageJob,
+} from '@/composables/headlessImageJobs';
 
 export type WorkflowToolCall = {
   id?: string;
@@ -21,12 +29,15 @@ export type ToolExecutorDeps = {
   NODE_DIMENSIONS: Record<string, { width: number; height: number }>;
   HORIZONTAL_PADDING: number;
   saveState: () => void;
-  persistWorkflow: () => void | Promise<void>;
-  fitView: (opts?: any) => Promise<void> | void;
+  persistWorkflow: () => void | Promise<unknown>;
+  fitView: (opts?: any) => void | Promise<unknown>;
   setViewport: (v: any) => void;
   getViewport: () => any;
   listSkills?: () => Promise<unknown>;
   loadSkill?: (skillId: number) => Promise<unknown>;
+  /** false=画布隐藏 Prompt/Dream 等编排节点，只露出图（Agent 管线默认） */
+  getShowEngineNodes?: () => boolean;
+  getTemplateId?: () => number | null | undefined;
 };
 
 function msgOf(cmd: WorkflowToolCall): string {
@@ -53,6 +64,8 @@ function defaultHandles(sourceType: string, targetType: string): { sourceHandle:
  * 画布工具执行器：兼容旧 gemini intent，并支持 Agent tool_call
  */
 export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
+  const authRun = useAgentAuthorizedRun();
+
   const execute = async (raw: WorkflowToolCall | Record<string, unknown>): Promise<string> => {
     const cmd = normalize(raw);
     const name = cmd.name || cmd.intent || '';
@@ -151,12 +164,14 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
     };
   };
 
-  const afterLayout = async (prevZoom: number) => {
+  const afterLayout = async (prevZoom: number, opts?: { skipFitView?: boolean }) => {
     deps.saveState();
     void deps.persistWorkflow();
     await nextTick();
-    await deps.fitView({ padding: 0.08 });
-    deps.setViewport({ ...(deps.getViewport() as any), zoom: prevZoom });
+    if (!opts?.skipFitView) {
+      await deps.fitView({ padding: 0.08 });
+      deps.setViewport({ ...(deps.getViewport() as any), zoom: prevZoom });
+    }
   };
 
   const patchNodeData = (nodeId: string, patch: Record<string, unknown>) => {
@@ -301,9 +316,95 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
   const createImagePipeline = async (cmd: WorkflowToolCall) => {
     const promptText = promptOf(cmd);
     if (!promptText) return JSON.stringify({ error: 'promptText required' });
+
+    const refIds = Array.isArray(cmd.arguments?.referenceNodeIds)
+      ? (cmd.arguments!.referenceNodeIds as unknown[]).map(String)
+      : [];
+
+    // 仅批量分镜等「显式只要出图」场景走 headless；其它正常建 Prompt+Dream
+    const imagesOnly =
+      cmd.arguments?.presentation === 'images_only' ||
+      cmd.arguments?.uiMode === 'images_only' ||
+      cmd.arguments?.batchImagesOnly === true ||
+      cmd.arguments?.batch === true;
+
+    if (imagesOnly) {
+      const pendingJobs = listHeadlessImageJobs().filter((j) => j.status === 'pending');
+      const panelIndex =
+        cmd.arguments?.panelIndex != null && Number.isFinite(Number(cmd.arguments.panelIndex))
+          ? Math.max(1, Number(cmd.arguments.panelIndex))
+          : pendingJobs.length + 1;
+      const sourceDream =
+        (typeof cmd.arguments?.sourceDreamNodeId === 'string' && cmd.arguments.sourceDreamNodeId) ||
+        (typeof cmd.arguments?.dreamNodeId === 'string' && cmd.arguments.dreamNodeId) ||
+        (typeof cmd.arguments?.sourceNodeId === 'string' && cmd.arguments.sourceNodeId) ||
+        undefined;
+      const job = registerHeadlessImageJob({
+        promptText,
+        model: typeof cmd.arguments?.model === 'string' ? cmd.arguments.model : undefined,
+        aspectRatio: typeof cmd.arguments?.aspectRatio === 'string' ? cmd.arguments.aspectRatio : undefined,
+        resolution: typeof cmd.arguments?.resolution === 'string' ? cmd.arguments.resolution : undefined,
+        quality: typeof cmd.arguments?.quality === 'string' ? cmd.arguments.quality : undefined,
+        numImages:
+          cmd.arguments?.numImages != null && Number.isFinite(Number(cmd.arguments.numImages))
+            ? Number(cmd.arguments.numImages)
+            : 1,
+        referenceNodeIds: refIds,
+        panelIndex,
+        sourceDreamNodeId: sourceDream || undefined,
+        skillId:
+          cmd.arguments?.skillId != null && Number.isFinite(Number(cmd.arguments.skillId))
+            ? Number(cmd.arguments.skillId)
+            : undefined,
+      });
+      assignStripAnchors([...pendingJobs, job], {
+        getNodes: deps.getNodes,
+        getEdges: deps.getEdges,
+        addNodes: deps.addNodes,
+        addEdges: deps.addEdges,
+        NODE_DIMENSIONS: deps.NODE_DIMENSIONS,
+        getViewport: deps.getViewport,
+        saveState: deps.saveState,
+        persistWorkflow: deps.persistWorkflow,
+      });
+
+      const autoOk = authRun.canAutoExecute();
+      if (autoOk) {
+        void runHeadlessImageJob(job.id, {
+          getNodes: deps.getNodes,
+          getEdges: deps.getEdges,
+          addNodes: deps.addNodes,
+          addEdges: deps.addEdges,
+          NODE_DIMENSIONS: deps.NODE_DIMENSIONS,
+          getViewport: deps.getViewport,
+          saveState: deps.saveState,
+          persistWorkflow: deps.persistWorkflow,
+          getTemplateId: deps.getTemplateId,
+        });
+        ElMessage.success(msgOf(cmd) || `授权回合内：镜 ${job.panelIndex} 开始生成（只落图片）`);
+      } else {
+        authRun.addPendingJob(job.id);
+        ElMessage.info(
+          msgOf(cmd) ||
+            `已登记批量出图任务（镜 ${job.panelIndex}，不建编排节点），请 propose_generate 后点「确认并生成」`
+        );
+      }
+      return JSON.stringify({
+        ok: true,
+        jobId: job.id,
+        panelIndex: job.panelIndex,
+        presentation: 'images_only',
+        pendingConfirm: !autoOk,
+        autoExecuteOnce: autoOk,
+        referenceNodeIds: refIds,
+      });
+    }
+
+    // —— 默认：正常创建 Prompt + Dream ——
     const prevZoom: number = (deps.getViewport() as any)?.zoom ?? 0.8;
-    const promptId = `prompt_node_gemini_${Date.now()}`;
-    const dreamId = `dream_node_gemini_${Date.now()}`;
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const promptId = `prompt_node_gemini_${stamp}`;
+    const dreamId = `dream_node_gemini_${stamp}`;
     const promptPos = deps.calculateOptimalPosition('prompt');
     const dreamPreferred = {
       x: promptPos.x + (deps.NODE_DIMENSIONS.prompt?.width || 360) + deps.HORIZONTAL_PADDING,
@@ -331,10 +432,15 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
     if (cmd.arguments?.skillId != null && Number.isFinite(Number(cmd.arguments.skillId))) {
       dreamData.skillId = Number(cmd.arguments.skillId);
     }
+
+    const newNodeQuota = authRun.consumeNewGenNode();
+    if (!newNodeQuota.ok && newNodeQuota.reason) {
+      ElMessage.warning(newNodeQuota.reason);
+    }
     deps.addNodes({ id: promptId, type: 'prompt', position: promptPos, data: { text: promptText } });
     deps.addNodes({ id: dreamId, type: 'dream', position: dreamPos, data: dreamData });
     deps.addEdges({
-      id: `edge_${promptId}_to_${dreamId}_${Date.now()}`,
+      id: `edge_${promptId}_to_${dreamId}_${stamp}`,
       source: promptId,
       target: dreamId,
       sourceHandle: 'prompt-source',
@@ -342,14 +448,10 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
       type: 'default',
       animated: true,
     });
-
-    const refIds = Array.isArray(cmd.arguments?.referenceNodeIds)
-      ? (cmd.arguments!.referenceNodeIds as unknown[]).map(String)
-      : [];
     for (const rid of refIds) {
       if (!deps.getNodes().some((n) => n.id === rid)) continue;
       deps.addEdges({
-        id: `edge_${rid}_to_${dreamId}_${Date.now()}`,
+        id: `edge_${rid}_to_${dreamId}_${stamp}`,
         source: rid,
         target: dreamId,
         sourceHandle: 'image-source',
@@ -360,8 +462,14 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
     }
 
     await afterLayout(prevZoom);
-    ElMessage.success(msgOf(cmd) || '已自动创建并连接生图节点，请到生图节点手动点击执行生成。');
-    return JSON.stringify({ ok: true, promptId, dreamId, referenceNodeIds: refIds });
+    ElMessage.success(msgOf(cmd) || '已自动创建并连接生图节点；请 propose_generate，由用户确认后再生成。');
+    return JSON.stringify({
+      ok: true,
+      promptId,
+      dreamId,
+      referenceNodeIds: refIds,
+      presentation: 'full',
+    });
   };
 
   const createVideoPipeline = async (cmd: WorkflowToolCall) => {
@@ -392,6 +500,10 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
     if (cmd.arguments?.durationSeconds != null && Number.isFinite(Number(cmd.arguments.durationSeconds))) {
       videoData.durationSeconds = Number(cmd.arguments.durationSeconds);
       videoData.durationManual = Number(cmd.arguments.durationSeconds);
+    }
+    const newNodeQuota = authRun.consumeNewGenNode();
+    if (!newNodeQuota.ok && newNodeQuota.reason) {
+      ElMessage.warning(newNodeQuota.reason);
     }
     deps.addNodes({ id: promptId, type: 'prompt', position: promptPos, data: { text: promptText } });
     deps.addNodes({ id: videoId, type: 'video', position: videoPos, data: videoData });
@@ -442,7 +554,7 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
     }
 
     await afterLayout(prevZoom);
-    ElMessage.success(msgOf(cmd) || '已自动创建并连接视频节点，请到视频节点手动点击执行生成。');
+    ElMessage.success(msgOf(cmd) || '已自动创建并连接视频节点；请 propose_generate，由用户确认后再生成。');
     return JSON.stringify({ ok: true, promptId, videoId });
   };
 
@@ -483,16 +595,72 @@ export function createWorkflowToolExecutor(deps: ToolExecutorDeps) {
   };
 
   const proposeGenerate = async (cmd: WorkflowToolCall) => {
+    const jobId =
+      typeof cmd.arguments?.jobId === 'string'
+        ? cmd.arguments.jobId
+        : typeof cmd.arguments?.nodeId === 'string' && String(cmd.arguments.nodeId).startsWith('img_job_')
+          ? String(cmd.arguments.nodeId)
+          : '';
+
+    // headless job：不碰 Dream 节点
+    if (jobId) {
+      const job = getHeadlessImageJob(jobId);
+      if (!job) return JSON.stringify({ error: 'job not found', jobId });
+      const autoOk = authRun.canAutoExecute();
+      if (autoOk) {
+        void runHeadlessImageJob(jobId, {
+          getNodes: deps.getNodes,
+          getEdges: deps.getEdges,
+          addNodes: deps.addNodes,
+          addEdges: deps.addEdges,
+          NODE_DIMENSIONS: deps.NODE_DIMENSIONS,
+          getViewport: deps.getViewport,
+          saveState: deps.saveState,
+          persistWorkflow: deps.persistWorkflow,
+          getTemplateId: deps.getTemplateId,
+        });
+        ElMessage.success(msgOf(cmd) || `授权回合内：任务 ${jobId} 将开始生成`);
+      } else {
+        authRun.addPendingJob(jobId);
+        ElMessage.info(msgOf(cmd) || `已挂起出图任务（镜 ${job.panelIndex ?? '?'}），请点「确认并生成」`);
+      }
+      return JSON.stringify({
+        ok: true,
+        jobId,
+        panelIndex: job.panelIndex,
+        pendingConfirm: !autoOk,
+        autoExecuteOnce: autoOk,
+        presentation: 'images_only',
+      });
+    }
+
     const nodeId = typeof cmd.arguments?.nodeId === 'string' ? cmd.arguments.nodeId : '';
-    if (!nodeId) return JSON.stringify({ error: 'nodeId required' });
+    if (!nodeId) return JSON.stringify({ error: 'nodeId or jobId required' });
     const n = deps.getNodes().find((x) => x.id === nodeId);
     if (!n || (n.type !== 'dream' && n.type !== 'video')) {
       return JSON.stringify({ error: 'dream/video node not found' });
     }
-    patchNodeData(nodeId, { proposeGenerate: true, proposeMessage: msgOf(cmd) });
+
+    const autoOk = authRun.canAutoExecute();
+    patchNodeData(nodeId, {
+      proposeGenerate: true,
+      proposeMessage: msgOf(cmd),
+      ...(autoOk ? { autoExecuteOnce: true } : { autoExecuteOnce: false }),
+    });
+    authRun.addPendingPropose(nodeId);
     deps.saveState();
-    ElMessage.info(msgOf(cmd) || `请确认后在节点 ${nodeId} 上点击执行生成`);
-    return JSON.stringify({ ok: true, nodeId, pendingConfirm: true });
+    void deps.persistWorkflow();
+    if (autoOk) {
+      ElMessage.success(msgOf(cmd) || `授权回合内：节点 ${nodeId} 将自动开始生成`);
+    } else {
+      ElMessage.info(msgOf(cmd) || `已挂起节点 ${nodeId}，请在聊天中点击「确认并生成」`);
+    }
+    return JSON.stringify({
+      ok: true,
+      nodeId,
+      pendingConfirm: !autoOk,
+      autoExecuteOnce: autoOk,
+    });
   };
 
   /** 兼容旧入口：只处理 create_* intent */

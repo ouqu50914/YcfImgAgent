@@ -9,6 +9,10 @@ import { getFileContent } from "../services/cos.service";
 import { isCosEnabled, upload as cosUpload, pathToKey } from "../services/cos.service";
 import { detectImageFormat } from "../utils/image-format";
 import { ProviderError } from "./provider-error";
+import {
+    injectStoryboardPanelIndex,
+    looksLikeStoryboardBatchPrompt,
+} from "../utils/storyboard-panel-prompt";
 
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
 const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
@@ -219,9 +223,13 @@ export class AnyfastNanoAdapter implements AiProvider {
         const model = this.resolveModel(params.model);
         const key = this.getApiKey(apiKey);
 
-        const requestOnce = async (): Promise<string> => {
+        const requestOnce = async (panelIndex = 0): Promise<string> => {
             const startedAt = Date.now();
-            const parts: Array<Record<string, unknown>> = [{ text: params.prompt || "生成图片" }];
+            let promptText = params.prompt || "生成图片";
+            if (count > 1 && looksLikeStoryboardBatchPrompt(promptText)) {
+                promptText = injectStoryboardPanelIndex(promptText, panelIndex, count);
+            }
+            const parts: Array<Record<string, unknown>> = [{ text: promptText }];
             const refs = params.imageUrls && params.imageUrls.length > 0
                 ? params.imageUrls
                 : params.imageUrl
@@ -354,7 +362,9 @@ export class AnyfastNanoAdapter implements AiProvider {
             }
         };
 
-        const tasks = Array(count).fill(0).map(async () => requestOnce());
+        const tasks = Array(count)
+            .fill(0)
+            .map(async (_, i) => requestOnce(i));
         const result = await Promise.all(tasks);
         return {
             original_id: `anyfast_${Date.now()}`,

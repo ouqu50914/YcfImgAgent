@@ -1,6 +1,10 @@
 import axios from "axios";
 import { mcpStatusForAgent } from "../mcp/mcp-registry";
 import {
+    controlledScriptsStatusForAgent,
+    runControlledScriptInProcess,
+} from "../skills/controlled-script-registry";
+import {
     AGENT_MAX_TOOL_ROUNDS,
     SKILL_ASSET_INJECT_MAX_CHARS,
     WORKFLOW_AGENT_SYSTEM_PROMPT,
@@ -33,8 +37,8 @@ export interface ControlModelProvider {
 }
 
 function getProviderName(): "gemini" | "gpt6" {
-    const p = (process.env.WORKFLOW_AGENT_PROVIDER || "gemini").trim().toLowerCase();
-    return p === "gpt6" ? "gpt6" : "gemini";
+    const p = (process.env.WORKFLOW_AGENT_PROVIDER || "gpt6").trim().toLowerCase();
+    return p === "gemini" ? "gemini" : "gpt6";
 }
 
 export class GeminiControlProvider implements ControlModelProvider {
@@ -82,13 +86,19 @@ export class GeminiControlProvider implements ControlModelProvider {
 
 export class Gpt6ControlProvider implements ControlModelProvider {
     async chatWithTools(messages: AgentChatMessage[], tools: typeof WORKFLOW_TOOLS_OPENAI): Promise<ControlModelResult> {
-        const API_KEY = process.env.WORKFLOW_AGENT_GPT6_API_KEY || process.env.API_KEY || process.env.GEMINI_CHAT_API_KEY;
-        const API_BASE = (process.env.WORKFLOW_AGENT_GPT6_API_BASE || process.env.API_BASE || "https://api.acedata.cloud/v1").replace(
-            /\/$/,
-            ""
-        );
+        const API_KEY =
+            process.env.WORKFLOW_AGENT_GPT6_API_KEY ||
+            process.env.API_KEY ||
+            process.env.ACE_API_KEY ||
+            process.env.GEMINI_CHAT_API_KEY;
+        const API_BASE = (
+            process.env.WORKFLOW_AGENT_GPT6_API_BASE ||
+            process.env.API_BASE ||
+            process.env.QC_API_BASE ||
+            "https://api.acedata.cloud/v1"
+        ).replace(/\/$/, "");
         const model = (process.env.WORKFLOW_AGENT_GPT6_MODEL || "gpt-6-astra").trim();
-        if (!API_KEY) throw new Error("未配置 WORKFLOW_AGENT_GPT6_API_KEY（或 API_KEY）");
+        if (!API_KEY) throw new Error("未配置 WORKFLOW_AGENT_GPT6_API_KEY（或 ACE_API_KEY / API_KEY）");
 
         const payload: Record<string, unknown> = {
             model,
@@ -197,6 +207,7 @@ export class WorkflowAgentService {
             for (const id of params.skillIds.slice(0, 5)) {
                 try {
                     const row = await this.skillService.getForUser(params.userId, id);
+                    this.skillService.assertAgentSelectable(row);
                     const assets = await this.skillService.listAssets(params.userId, id);
                     const assetHint = assets.length
                         ? `\n附件（按需 load_skill_asset）：\n${assets.map((a) => `- ${a.path}`).join("\n")}`
@@ -209,8 +220,8 @@ export class WorkflowAgentService {
                                 : "") +
                             assetHint
                     );
-                } catch {
-                    /* skip inaccessible */
+                } catch (e: any) {
+                    parts.push(`### Skill id=${id}（未注入）\n${e?.message || "不可用"}`);
                 }
             }
             selected = parts.join("\n\n");
@@ -280,6 +291,26 @@ export class WorkflowAgentService {
         }
         if (name === "mcp_status") {
             return JSON.stringify(mcpStatusForAgent());
+        }
+        if (name === "controlled_scripts_status") {
+            return JSON.stringify(controlledScriptsStatusForAgent());
+        }
+        if (name === "run_controlled_script") {
+            try {
+                const scriptId = String(args.scriptId || "");
+                const input =
+                    args.input && typeof args.input === "object" && !Array.isArray(args.input)
+                        ? (args.input as Record<string, unknown>)
+                        : {};
+                const out = await runControlledScriptInProcess(scriptId, input);
+                console.info(
+                    `[ControlledScript] user=${userId} script=${scriptId} ok=1 ms=${out.durationMs}`
+                );
+                return JSON.stringify(out);
+            } catch (e: any) {
+                console.warn(`[ControlledScript] user=${userId} error=${e?.message || e}`);
+                return JSON.stringify({ ok: false, error: e?.message || String(e) });
+            }
         }
         return null;
     }

@@ -1,5 +1,9 @@
 <template>
-    <div class="prompt-node" :style="{ width: promptWidth + 'px' }">
+    <div
+        class="prompt-node"
+        :class="{ 'has-optimize-panel': showOptimizePanel }"
+        :style="{ width: promptWidth + 'px' }"
+    >
         <div class="node-content">
             <div v-if="editor" class="prompt-toolbar nodrag nopan">
                 <button
@@ -71,12 +75,60 @@
             <div class="prompt-actions nodrag nopan">
                 <el-button
                     size="small"
+                    class="optimize-prompt-btn"
+                    :loading="optimizeLoading"
+                    :disabled="!text.trim() || optimizeLoading"
+                    @click="openOptimizePanel"
+                >
+                    智能优化
+                </el-button>
+                <el-button
+                    size="small"
                     type="primary"
                     class="save-prompt-btn"
                     :disabled="!text.trim()"
                     @click="showSavePromptDialog = true"
                 >
                     保存提示词
+                </el-button>
+            </div>
+        </div>
+
+        <!-- 智能优化结果：挂在节点旁的浮层，非 modal，不挡画布操作 -->
+        <div
+            v-if="showOptimizePanel"
+            class="optimize-side-panel nodrag nopan"
+            @mousedown.stop
+            @wheel.stop
+            @pointerdown.stop
+        >
+            <div class="optimize-side-header">
+                <span class="optimize-side-title">智能优化</span>
+                <button type="button" class="optimize-side-close" title="关闭" @click="closeOptimizePanel">
+                    ×
+                </button>
+            </div>
+            <div v-loading="optimizeLoading" class="optimize-side-body">
+                <div v-if="optimizeAliasHint" class="optimize-alias-hint">{{ optimizeAliasHint }}</div>
+                <el-input
+                    v-model="optimizedDraft"
+                    type="textarea"
+                    :autosize="{ minRows: 8, maxRows: 16 }"
+                    placeholder="优化结果将显示在这里…"
+                    class="optimize-textarea"
+                />
+            </div>
+            <div class="optimize-side-footer">
+                <el-button size="small" :loading="optimizeLoading" :disabled="!text.trim()" @click="runOptimize">
+                    重新生成
+                </el-button>
+                <el-button
+                    size="small"
+                    type="primary"
+                    :disabled="!optimizedDraft.trim() || optimizeLoading"
+                    @click="confirmUseOptimized"
+                >
+                    确认使用
                 </el-button>
             </div>
         </div>
@@ -146,7 +198,7 @@
 import { ref, watch, computed, onUnmounted, inject, nextTick } from 'vue';
 import { Handle, Position, type NodeProps, useVueFlow } from '@vue-flow/core';
 import { ElMessage } from 'element-plus';
-import { getPromptTemplates, createPromptTemplate, type PromptTemplate } from '@/api/prompt';
+import { getPromptTemplates, createPromptTemplate, optimizePrompt, type PromptTemplate } from '@/api/prompt';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
 import type { JSONContent } from '@tiptap/core';
 import { Extension, getTextBetween } from '@tiptap/core';
@@ -184,7 +236,7 @@ const promptWidth = ref(360);
 const uiTick = ref(0);
 const isComposing = ref(false);
 
-const { getEdges, findNode, updateNodeData } = useVueFlow();
+const { getEdges, findNode, updateNodeData, updateNode } = useVueFlow();
 
 const promptTemplates = ref<PromptTemplate[]>([]);
 const showPromptSuggestions = ref(false);
@@ -200,6 +252,39 @@ const selectedAliasIndex = ref(0);
 const showSavePromptDialog = ref(false);
 const savePromptName = ref('');
 const savePromptDescription = ref('');
+
+const showOptimizePanel = ref(false);
+const optimizeLoading = ref(false);
+const optimizedDraft = ref('');
+const optimizeAliasHint = ref('');
+
+/** 浮层打开时抬高本节点，避免被其他节点盖住 */
+const OPTIMIZE_PANEL_NODE_Z = 10000;
+let previousNodeZIndex: number | undefined;
+
+const setOptimizePanelElevate = (on: boolean) => {
+    try {
+        if (on) {
+            const node = findNode(props.id);
+            previousNodeZIndex = typeof node?.zIndex === 'number' ? node.zIndex : undefined;
+            updateNode(props.id, { zIndex: OPTIMIZE_PANEL_NODE_Z });
+            return;
+        }
+        if (typeof previousNodeZIndex === 'number') {
+            updateNode(props.id, { zIndex: previousNodeZIndex });
+        } else {
+            // 恢复默认：清掉抬高层级，交回 Vue Flow 选中态逻辑
+            updateNode(props.id, { zIndex: 0 });
+        }
+        previousNodeZIndex = undefined;
+    } catch (e) {
+        console.warn('[PromptNode] 提升优化浮层层级失败', e);
+    }
+};
+
+watch(showOptimizePanel, (open) => {
+    setOptimizePanelElevate(!!open);
+});
 
 function plainToDoc(plain: string): JSONContent {
     const lines = plain.split('\n');
@@ -704,9 +789,98 @@ const handleSavePrompt = async () => {
     }
 };
 
+const collectOptimizeAliases = (): string[] => {
+    const fromRelated = getRelatedResourceAliases().map((x) => x.alias);
+    // 文中已写的 图N / @图N / 视频N 等也纳入，避免模型改写
+    const fromText = Array.from(
+        String(text.value || '').matchAll(/(?:@)?((?:图|视频|音频)\d+)/g)
+    )
+        .map((m) => m[1])
+        .filter((s): s is string => Boolean(s));
+    return Array.from(new Set([...fromRelated, ...fromText].filter(Boolean)));
+};
+
+const openOptimizePanel = async () => {
+    if (!text.value.trim()) {
+        ElMessage.warning('请先填写提示词');
+        return;
+    }
+    const ok = await runOptimize();
+    if (ok) {
+        showOptimizePanel.value = true;
+    }
+};
+
+const closeOptimizePanel = () => {
+    showOptimizePanel.value = false;
+    optimizeLoading.value = false;
+};
+
+const runOptimize = async (): Promise<boolean> => {
+    const prompt = text.value.trim();
+    if (!prompt) {
+        ElMessage.warning('请先填写提示词');
+        return false;
+    }
+    const aliases = collectOptimizeAliases();
+    optimizeAliasHint.value = aliases.length
+        ? `将保留/使用参考别名：${aliases.join('、')}`
+        : '当前未检测到参考图别名（如 图1）；优化时不会编造图名';
+    optimizeLoading.value = true;
+    try {
+        const res: any = await optimizePrompt({
+            prompt,
+            imageAliases: aliases,
+        });
+        const data = res?.data?.data ?? res?.data ?? res ?? {};
+        const optimized =
+            (typeof data?.optimized === 'string' && data.optimized) ||
+            (typeof res?.optimized === 'string' && res.optimized) ||
+            '';
+        if (!optimized) {
+            throw new Error('未返回优化结果');
+        }
+        optimizedDraft.value = optimized.trim();
+        return true;
+    } catch (e: any) {
+        console.error('[PromptNode] 智能优化失败', e);
+        if (!e?.response) {
+            ElMessage.error(e?.message || '智能优化失败，请稍后重试');
+        }
+        return false;
+    } finally {
+        optimizeLoading.value = false;
+    }
+};
+
+const confirmUseOptimized = () => {
+    const next = optimizedDraft.value.trim();
+    if (!next) {
+        ElMessage.warning('优化结果为空');
+        return;
+    }
+    const doc = plainToDoc(next);
+    if (editor.value) {
+        syncingExternal = true;
+        try {
+            editor.value.commands.setContent(doc);
+            text.value = editor.value.getText({ blockSeparator: BLOCK_SEP });
+        } finally {
+            syncingExternal = false;
+        }
+        syncNodeData();
+    } else {
+        text.value = next;
+        updateNodeData(props.id, { text: next, promptDoc: doc });
+    }
+    schedulePromptPersist();
+    showOptimizePanel.value = false;
+    ElMessage.success('已替换为优化后的提示词');
+};
+
 const handleClickOutside = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
-    if (!target.closest('.prompt-node')) {
+    if (!target.closest('.prompt-node') && !target.closest('.optimize-side-panel')) {
         showPromptSuggestions.value = false;
         showAliasSuggestions.value = false;
     }
@@ -754,6 +928,9 @@ if (typeof document !== 'undefined') {
 onUnmounted(() => {
     if (promptPersistTimer) clearTimeout(promptPersistTimer);
     document.removeEventListener('click', handleClickOutside);
+    if (showOptimizePanel.value) {
+        setOptimizePanelElevate(false);
+    }
 });
 </script>
 
@@ -766,6 +943,7 @@ onUnmounted(() => {
     box-shadow: none;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     position: relative;
+    overflow: visible;
 }
 
 .nodrag {
@@ -971,17 +1149,96 @@ onUnmounted(() => {
 
 .prompt-actions {
     display: flex;
-    justify-content: flex-end;
-    width: fit-content;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
     max-width: 100%;
     margin-top: 10px;
-    margin-left: auto;
+}
+
+.optimize-prompt-btn {
+    font-size: 12px;
+    padding: 4px 12px;
+    height: auto;
 }
 
 .save-prompt-btn {
     font-size: 12px;
     padding: 4px 12px;
     height: auto;
+    margin-left: auto;
+}
+
+.optimize-side-panel {
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 0;
+    width: 360px;
+    z-index: 50;
+    background: #25262b;
+    border: 1px solid #3a3c44;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    padding: 10px 12px 12px;
+    pointer-events: auto;
+}
+
+.prompt-node.has-optimize-panel {
+    /* 配合 Vue Flow 节点 zIndex，确保浮层叠在相邻节点之上 */
+    isolation: isolate;
+}
+
+.optimize-side-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.optimize-side-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e8e8e8;
+}
+
+.optimize-side-close {
+    border: none;
+    background: transparent;
+    color: #9a9a9a;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.optimize-side-close:hover {
+    color: #e0e0e0;
+}
+
+.optimize-side-body {
+    min-height: 160px;
+}
+
+.optimize-alias-hint {
+    font-size: 12px;
+    color: #909399;
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.optimize-textarea :deep(textarea) {
+    font-size: 13px;
+    line-height: 1.5;
+    background: #1a1b1f;
+    color: #e0e0e0;
+}
+
+.optimize-side-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 10px;
 }
 
 .centered-save-prompt-dialog :deep(.el-dialog) {

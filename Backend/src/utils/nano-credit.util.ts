@@ -23,7 +23,8 @@ export function resolveNanoProvider(
     if (providerHint === 'ace' || providerHint === 'anyfast') return providerHint;
     if (model?.startsWith('gemini-')) return 'anyfast';
     if (model === 'gpt-image-2-c') return 'anyfast';
-    if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
+    // GPT 2 / 2.5 与 Nano 产品线默认按 Ace 计费（Ace 优先）
+    if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'ace';
     if (model === 'gpt-image-2') return 'ace';
     if (model?.startsWith('nano-banana-')) return 'ace';
     return 'ace';
@@ -75,10 +76,15 @@ export function buildCreditUsageApiType(
 ): string {
     if (apiType !== 'nano') return apiType;
     const normalized = normalizeAnyfastGeminiModel(model);
-    if (normalized === 'gpt-image-2.5-sunburst') return 'img2.5';
-    if (normalized === 'gpt-image-2.5-flare') return 'img2.5-fast';
+    if (normalized === 'gpt-image-2.5-sunburst') {
+        return providerHint === 'anyfast' ? 'img2.5-af' : 'img2.5';
+    }
+    if (normalized === 'gpt-image-2.5-flare') {
+        return providerHint === 'anyfast' ? 'img2.5f-af' : 'img2.5-fast';
+    }
     if (normalized === 'gpt-image-2-c') return 'gpt-image-2-c';
     if (normalized === 'gpt-image-2' && providerHint === 'anyfast') return 'gpt-image-2-af';
+    if (normalized === 'gpt-image-2') return 'gpt-image-2';
     if (normalized === 'gemini-3-pro-image') return 'gemini-3-pro';
     if (normalized === 'gemini-3.1-flash-image') return 'gemini-3.1-fl';
     if (normalized?.startsWith('nano-banana-')) return 'nano-ace';
@@ -91,8 +97,11 @@ export function getCreditUsageApiTypeLabel(apiType: string): string {
         dream: 'Dream(文生图)',
         nano: 'Nano(通用)',
         midjourney: 'Midjourney',
-        'img2.5': 'GPT Image 2.5 pro(AnyFast)',
-        'img2.5-fast': 'GPT Image 2.5-Fast(AnyFast)',
+        'gpt-image-2': 'GPT Image 2(Ace)',
+        'img2.5': 'GPT2.5 pro(Ace)',
+        'img2.5-fast': 'GPT2.5(Ace)',
+        'img2.5-af': 'GPT2.5 pro(AnyFast)',
+        'img2.5f-af': 'GPT2.5(AnyFast)',
         'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
         'gpt-image-2-af': 'GPT Image 2(AnyFast)',
         'gemini-3-pro': 'NanoBanana Pro(AnyFast)',

@@ -35,6 +35,8 @@ RUN yarn install --production --frozen-lockfile
 # 复制构建产物
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src ./src
+# 系统 Skill（启动时 seed 到库；缺此目录则管理后台 Skill 为空）
+COPY --from=builder /app/skills ./skills
 
 # 创建上传目录
 RUN mkdir -p uploads temp

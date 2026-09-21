@@ -105,8 +105,17 @@ export function assessSkillCompat(input: {
     }
     const uniqForeign = [...new Set(foreign)];
 
-    const artnTools = WORKFLOW_TOOL_NAMES.filter((t) => body.includes(t));
+    const artnTools: string[] = WORKFLOW_TOOL_NAMES.filter((t) => body.includes(t));
     const exportedBy = String(fm["exported-by"] || fm.exported_by || "").trim() || undefined;
+    const artnMeta = extractArtnCompat(fm);
+    if (artnMeta?.tools?.length) {
+        const known = new Set<string>(WORKFLOW_TOOL_NAMES as unknown as string[]);
+        for (const t of artnMeta.tools) {
+            if (known.has(t) && !artnTools.includes(t)) {
+                artnTools.push(t);
+            }
+        }
+    }
 
     const gaps: CompatGap[] = [];
 
@@ -213,4 +222,151 @@ export function assessSkillCompat(input: {
         },
         assessed_at: new Date().toISOString(),
     };
+}
+
+/** 外源模型 → ARTN 建议映射（规则补丁用） */
+export const FOREIGN_MODEL_MAP: Record<string, { artn: string; note: string }> = {
+    hilo: { artn: "dream 或 gpt-image-2:anyfast", note: "通用生图" },
+    veo: { artn: "kling / seedance（最接近视频能力）", note: "未接入 Veo" },
+    veo3: { artn: "kling / seedance", note: "未接入 Veo3" },
+    wan: { artn: "kling / seedance", note: "未接入 Wan" },
+    runway: { artn: "kling / seedance / pixverse", note: "未接入 Runway" },
+    luma: { artn: "kling / seedance", note: "未接入 Luma" },
+    sora: { artn: "kling / seedance", note: "未接入 Sora" },
+    hailuo: { artn: "kling / seedance", note: "未接入海螺" },
+    minimax: { artn: "按任务选 dream / kling / seedance", note: "平台名，非单一模型" },
+};
+
+export type ArtnCompatMeta = {
+    requires_agent?: boolean;
+    tools?: string[];
+    model_map?: Record<string, string>;
+    layout?: string;
+};
+
+/** 读取 frontmatter.artn 兼容契约（若有） */
+export function extractArtnCompat(frontmatter?: Record<string, unknown> | null): ArtnCompatMeta | null {
+    if (!frontmatter || typeof frontmatter !== "object") return null;
+    const raw = frontmatter.artn;
+    if (!raw || typeof raw !== "object") return null;
+    const o = raw as Record<string, unknown>;
+    const tools = Array.isArray(o.tools) ? o.tools.map(String) : undefined;
+    const model_map =
+        o.model_map && typeof o.model_map === "object"
+            ? Object.fromEntries(
+                  Object.entries(o.model_map as Record<string, unknown>).map(([k, v]) => [k, String(v)])
+              )
+            : undefined;
+    return {
+        requires_agent: o.requires_agent === true || o.requires_agent === "true",
+        ...(tools ? { tools } : {}),
+        ...(model_map ? { model_map } : {}),
+        ...(typeof o.layout === "string" && o.layout ? { layout: o.layout } : {}),
+    };
+}
+
+/**
+ * Agent 是否可选：
+ * - C：不可选（仅存档）
+ * - B：须已有适配版
+ * - A：可选
+ * - unsupported status 由列表侧另行过滤
+ */
+export function isAgentSelectable(grade: CompatGrade | string | null | undefined, hasAdapted: boolean): boolean {
+    const g = String(grade || "").toUpperCase();
+    if (g === "C") return false;
+    if (g === "B") return Boolean(hasAdapted);
+    if (g === "A") return true;
+    // 未知评级：有适配版才放行更稳妥
+    return Boolean(hasAdapted);
+}
+
+/** 缺口驱动的规则补丁正文（不依赖 LLM；可作适配底稿或 LLM 失败回退） */
+export function buildRuleBasedAdaptedBody(input: {
+    name: string;
+    description: string;
+    body_md: string;
+    frontmatter?: Record<string, unknown> | null;
+    report: CompatReport;
+}): string {
+    const artn = extractArtnCompat(input.frontmatter);
+    const foreign = input.report.signals.mentions_foreign_models || [];
+    const mapLines = foreign.map((m) => {
+        const hit = FOREIGN_MODEL_MAP[m.toLowerCase()];
+        return hit ? `- ${m} → ${hit.artn}（${hit.note}）` : `- ${m} → 选用最接近的已接入模型，并 ask_user 确认`;
+    });
+    const missing = input.report.signals.missing_reference_paths || [];
+    const title =
+        String(input.frontmatter?.title || input.frontmatter?.display_name || "").trim() || input.name;
+
+    const parts: string[] = [
+        "---",
+        `name: ${input.name}`,
+        `title: ${title}`,
+        `description: ${JSON.stringify(input.description).slice(1, -1)}`,
+        "requires_agent: true",
+        "artn:",
+        "  adapted: true",
+        "  adapt_source: rule_patch",
+        "  tools:",
+        "    - get_workflow_snapshot",
+        "    - ask_user",
+        "    - configure_node",
+        "    - create_image_pipeline",
+        "    - create_video_pipeline",
+        "    - propose_generate",
+        "    - list_skill_assets",
+        "    - load_skill_asset",
+        "---",
+        "",
+        `# ${title}（ARTN 适配版）`,
+        "",
+        "> 本说明由规则补丁生成：不执行 scripts、不接任意 MCP；生图/视频须 propose_generate 挂起，由用户点「确认并生成」后才扣费；禁止连环重试。",
+        "",
+        "## 执行流程（必须遵守）",
+        "1. `get_workflow_snapshot` 了解画布与已选节点",
+        "2. 缺角色参考图 / 风格 / 剧情等关键信息时 `ask_user`；疑问句只回答不要直接生成",
+        "3. 需要模板时 `list_skill_assets` + `load_skill_asset`（缺失文件则跳过并说明）",
+        "4. 优先 `configure_node` 更新已有 Dream/Video；必要时 `create_image_pipeline` / `create_video_pipeline`",
+        "5. `propose_generate` 挂起待确认——禁止未授权就声称已生成，禁止自检失败连环重试",
+        "",
+    ];
+
+    if (mapLines.length) {
+        parts.push("## 模型映射", ...mapLines, "");
+    }
+    if (artn?.model_map && Object.keys(artn.model_map).length) {
+        parts.push(
+            "## Skill 自带 model_map",
+            ...Object.entries(artn.model_map).map(([k, v]) => `- ${k} → ${v}`),
+            ""
+        );
+    }
+    if (artn?.layout) {
+        parts.push(`## 版式约束`, `- layout: ${artn.layout}`, "");
+    }
+    if (input.report.signals.has_hub_gui) {
+        parts.push(
+            "## Hub GUI",
+            "- 原包含 scripts/*.js 界面，ARTN **忽略**；用对话 + 画布节点完成同等目标。",
+            ""
+        );
+    }
+    if (missing.length) {
+        parts.push(
+            "## 缺失附件（跳过）",
+            ...missing.slice(0, 12).map((p) => `- ${p}`),
+            ""
+        );
+    }
+    const blockers = input.report.gaps.filter((g) => g.severity === "blocker");
+    if (blockers.length) {
+        parts.push("## 不可适配项", ...blockers.map((g) => `- [${g.code}] ${g.message}`), "");
+    }
+
+    const clipped = String(input.body_md || "").trim();
+    const bodyClip = clipped.length > 6000 ? clipped.slice(0, 6000) + "\n…" : clipped;
+    parts.push("## 原 Skill 要点（供参考，流程以上方 ARTN 步骤为准）", "", bodyClip);
+
+    return parts.join("\n");
 }

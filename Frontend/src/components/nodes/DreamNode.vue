@@ -141,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, inject, type Ref } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, inject, nextTick, type Ref } from 'vue';
 import { Handle, Position, useVueFlow, type NodeProps } from '@vue-flow/core';
 import { Picture, InfoFilled, CircleCheck } from '@element-plus/icons-vue';
 import { generateImage, getImageGenerateResultByGenerationKey } from '../../api/image';
@@ -154,6 +154,7 @@ import { notifyMediaGeneration } from '@/utils/browser-notification';
 import { translateErrorText } from '@/utils/error-toast';
 import { summarizeConnectedImages, type ImageNodeLikeData } from '@/utils/media-ready';
 import { createImageGenerationKey } from '@/utils/generation-key';
+import { useAgentAuthorizedRun } from '@/composables/useAgentAuthorizedRun';
 // 声明 emits 以消除 Vue Flow 的警告
 defineEmits<{
     updateNodeInternals: [];
@@ -162,6 +163,8 @@ defineEmits<{
 // 定义 Vue Flow 节点所需的 props
 const props = defineProps<NodeProps>();
 
+const authRun = useAgentAuthorizedRun();
+let pendingAuthConsume = false;
 type WorkflowPersistenceStore = {
     saveImmediately: () => void;
     markDirty?: () => void;
@@ -177,13 +180,20 @@ const userStore = useUserStore();
 const creditTracker = inject<CreditTrackerStore | null>('creditTracker', null);
 const workflowTemplateId = inject<Ref<number | null> | null>('workflowTemplateId', null);
 const isSuperAdmin = computed(() => userStore.userInfo?.role === 1);
+/** 渠道测试选项仅对超管账号 ycf 开放 */
+const isYcfTestAdmin = computed(
+    () => isSuperAdmin.value && String(userStore.userInfo?.username || '').toLowerCase() === 'ycf'
+);
 const ANYFAST_PRO_MODEL = 'anyfast:gemini-3-pro-image';
 const proposeGenerateHint = computed(() => {
     const d = props.data as any;
+    if (d?.autoExecuteOnce && authRun.canAutoExecute()) {
+        return '授权回合内，正在自动执行生成…';
+    }
     if (!d?.proposeGenerate) return '';
     return typeof d.proposeMessage === 'string' && d.proposeMessage
         ? d.proposeMessage
-        : 'Agent 建议在此节点确认后执行生成（不会自动扣费）';
+        : 'Agent 已编排完成，请在聊天中点击「确认并生成」';
 });
 const clearProposeHint = () => {
     const node = findNode(props.id);
@@ -191,32 +201,111 @@ const clearProposeHint = () => {
         const next = { ...(node.data || {}) };
         delete next.proposeGenerate;
         delete next.proposeMessage;
+        delete next.autoExecuteOnce;
         node.data = next;
     }
+    authRun.removePendingPropose(String(props.id));
 };
 
-const DEFAULT_ALLOWED_NANO_MODEL = 'anyfast:gemini-3.1-flash-image';
+/** 产品线简化选项：无渠道区分，后端 Ace 优先 + AnyFast 兜底 */
+const PRODUCT_GPT_25 = 'gpt-2.5';           // flare
+const PRODUCT_GPT_25_PRO = 'gpt-2.5-pro';   // sunburst
+const PRODUCT_GPT_20 = 'gpt-2.0';
+const PRODUCT_NANO_2 = 'nano-2';
+const PRODUCT_NANO_PRO = 'nano-pro';
+const DEFAULT_ALLOWED_NANO_MODEL = PRODUCT_NANO_2;
 const GPT_IMAGE2_ACE_MODEL = 'gpt-image-2:ace';
 const GPT_IMAGE2_ANYFAST_MODEL = 'gpt-image-2:anyfast';
 const GPT_IMAGE2_ANYFAST_C_MODEL = 'gpt-image-2-c:anyfast';
-const GPT_IMAGE25_SUNBURST_MODEL = 'gpt-image-2.5-sunburst:anyfast';
-const GPT_IMAGE25_FLARE_MODEL = 'gpt-image-2.5-flare:anyfast';
-const ALL_MODEL_OPTIONS = [
-    // （low:10/张，medium:14/张，high:18/张）
-    { label: 'GPT Image 2(ace)', value: GPT_IMAGE2_ACE_MODEL },
-    { label: 'GPT Image 2(anyfast)', value: GPT_IMAGE2_ANYFAST_MODEL },
-    { label: 'GPT Image 2.5 pro(anyfast)', value: GPT_IMAGE25_SUNBURST_MODEL },
-    { label: 'GPT Image 2.5-Fast(anyfast)', value: GPT_IMAGE25_FLARE_MODEL },
-    { label: 'NanoBanana2(ace)（6/张）', value: 'nano:nano-banana-2' },
-    { label: 'NanoBanana Pro(ace)（6/张）', value: 'nano:nano-banana-pro' },
-    { label: 'NanoBanana2(anyfast)（2K:11/张，4K:15/张）', value: 'anyfast:gemini-3.1-flash-image' },
-    { label: 'NanoBanana Pro(anyfast)（2K:15/张，4K:20/张）', value: ANYFAST_PRO_MODEL },
-    { label: 'Midjourney', value: 'midjourney' },
+const GPT_IMAGE25_SUNBURST_ANYFAST = 'gpt-image-2.5-sunburst:anyfast';
+const GPT_IMAGE25_FLARE_ANYFAST = 'gpt-image-2.5-flare:anyfast';
+const GPT_IMAGE25_SUNBURST_ACE = 'gpt-image-2.5-sunburst:ace';
+const GPT_IMAGE25_FLARE_ACE = 'gpt-image-2.5-flare:ace';
+
+const PRODUCT_MODEL_OPTIONS = [
+    { label: 'GPT2.5（6/张）', value: PRODUCT_GPT_25 },
+    { label: 'GPT2.5 pro（6/张）', value: PRODUCT_GPT_25_PRO },
+    { label: 'GPT 2.0（6/张）', value: PRODUCT_GPT_20 },
+    { label: 'Nano2（6/张）', value: PRODUCT_NANO_2 },
+    { label: 'Nano Pro（6/张）', value: PRODUCT_NANO_PRO },
 ] as const;
+
+/** ycf 超管可见：原渠道细分 + Ace GPT 2.5 official */
+const TEST_MODEL_OPTIONS = [
+    { label: '[测] GPT Image 2(ace)', value: GPT_IMAGE2_ACE_MODEL },
+    { label: '[测] GPT Image 2(anyfast)', value: GPT_IMAGE2_ANYFAST_MODEL },
+    { label: '[测] GPT Image 2-C(anyfast)', value: GPT_IMAGE2_ANYFAST_C_MODEL },
+    { label: '[测] GPT2.5(ace official)', value: GPT_IMAGE25_FLARE_ACE },
+    { label: '[测] GPT2.5 pro(ace official)', value: GPT_IMAGE25_SUNBURST_ACE },
+    { label: '[测] GPT2.5(anyfast)', value: GPT_IMAGE25_FLARE_ANYFAST },
+    { label: '[测] GPT2.5 pro(anyfast)', value: GPT_IMAGE25_SUNBURST_ANYFAST },
+    { label: '[测] NanoBanana2(ace)', value: 'nano:nano-banana-2' },
+    { label: '[测] NanoBanana Pro(ace)', value: 'nano:nano-banana-pro' },
+    { label: '[测] NanoBanana2(anyfast)', value: 'anyfast:gemini-3.1-flash-image' },
+    { label: '[测] NanoBanana Pro(anyfast)', value: ANYFAST_PRO_MODEL },
+    { label: '[测] Midjourney', value: 'midjourney' },
+] as const;
+
+const ALL_MODEL_OPTIONS = [...PRODUCT_MODEL_OPTIONS, ...TEST_MODEL_OPTIONS] as const;
 const availableModelOptions = computed(() => {
-    if (isSuperAdmin.value) return ALL_MODEL_OPTIONS;
-    return ALL_MODEL_OPTIONS.filter(option => option.value !== ANYFAST_PRO_MODEL);
+    if (isYcfTestAdmin.value) return ALL_MODEL_OPTIONS;
+    return [...PRODUCT_MODEL_OPTIONS];
 });
+
+/** 将历史节点/短名映射到当前下拉 value */
+function mapLegacyToSelectedModel(apiType?: string, model?: string, providerHint?: string, selectedModel?: string): string {
+    if (selectedModel && ALL_MODEL_OPTIONS.some((o) => o.value === selectedModel)) {
+        return selectedModel;
+    }
+    if (apiType === 'midjourney' || model === 'midjourney' || selectedModel === 'midjourney') {
+        return isYcfTestAdmin.value ? 'midjourney' : PRODUCT_NANO_2;
+    }
+    const m = model || '';
+    const ph = providerHint || '';
+    if (m === 'gpt-image-2.5-sunburst' || selectedModel === GPT_IMAGE25_SUNBURST_ANYFAST || selectedModel === GPT_IMAGE25_SUNBURST_ACE) {
+        if (ph === 'anyfast' || selectedModel === GPT_IMAGE25_SUNBURST_ANYFAST) {
+            return isYcfTestAdmin.value ? GPT_IMAGE25_SUNBURST_ANYFAST : PRODUCT_GPT_25_PRO;
+        }
+        if (ph === 'ace' || selectedModel === GPT_IMAGE25_SUNBURST_ACE) {
+            return isYcfTestAdmin.value ? GPT_IMAGE25_SUNBURST_ACE : PRODUCT_GPT_25_PRO;
+        }
+        return PRODUCT_GPT_25_PRO;
+    }
+    if (m === 'gpt-image-2.5-flare' || selectedModel === GPT_IMAGE25_FLARE_ANYFAST || selectedModel === GPT_IMAGE25_FLARE_ACE) {
+        if (ph === 'anyfast' || selectedModel === GPT_IMAGE25_FLARE_ANYFAST) {
+            return isYcfTestAdmin.value ? GPT_IMAGE25_FLARE_ANYFAST : PRODUCT_GPT_25;
+        }
+        if (ph === 'ace' || selectedModel === GPT_IMAGE25_FLARE_ACE) {
+            return isYcfTestAdmin.value ? GPT_IMAGE25_FLARE_ACE : PRODUCT_GPT_25;
+        }
+        return PRODUCT_GPT_25;
+    }
+    if (m === 'gpt-image-2-c') {
+        return isYcfTestAdmin.value ? GPT_IMAGE2_ANYFAST_C_MODEL : PRODUCT_GPT_20;
+    }
+    if (m === 'gpt-image-2') {
+        if (ph === 'anyfast') return isYcfTestAdmin.value ? GPT_IMAGE2_ANYFAST_MODEL : PRODUCT_GPT_20;
+        if (ph === 'ace') return isYcfTestAdmin.value ? GPT_IMAGE2_ACE_MODEL : PRODUCT_GPT_20;
+        return PRODUCT_GPT_20;
+    }
+    if (m === 'gemini-3-pro-image' || m === 'gemini-3-pro-image-preview') {
+        return isYcfTestAdmin.value ? ANYFAST_PRO_MODEL : PRODUCT_NANO_PRO;
+    }
+    if (m === 'gemini-3.1-flash-image' || m === 'gemini-3.1-flash-image-preview') {
+        return isYcfTestAdmin.value ? 'anyfast:gemini-3.1-flash-image' : PRODUCT_NANO_2;
+    }
+    if (m === 'nano-banana-pro') {
+        return ph === 'ace' && isYcfTestAdmin.value ? 'nano:nano-banana-pro' : PRODUCT_NANO_PRO;
+    }
+    if (m === 'nano-banana-2') {
+        return ph === 'ace' && isYcfTestAdmin.value ? 'nano:nano-banana-2' : PRODUCT_NANO_2;
+    }
+    if (selectedModel === PRODUCT_GPT_25 || selectedModel === PRODUCT_GPT_25_PRO
+        || selectedModel === PRODUCT_GPT_20 || selectedModel === PRODUCT_NANO_2 || selectedModel === PRODUCT_NANO_PRO) {
+        return selectedModel;
+    }
+    return DEFAULT_ALLOWED_NANO_MODEL;
+}
 
 const extractTextFromPromptDoc = (node: unknown): string => {
     if (!node || typeof node !== 'object') return '';
@@ -304,28 +393,14 @@ const executeButtonText = computed(() => {
     return `${base} (消耗 ${executeCost.value} 积分)`;
 });
 
-// 统一的模型选择：dream 或 nano 子模型（nano-banana-2 / nano-banana-pro）
+// 统一的模型选择：产品线简化值 或 测试渠道细分值
 const initialSelectedModel = (() => {
-    if (props.data?.apiType === 'midjourney') {
-        return 'midjourney';
-    }
-    if (props.data?.apiType === 'nano') {
-        const m = (props.data as any).model as string | undefined;
-        if (m === 'gpt-image-2.5-sunburst') return GPT_IMAGE25_SUNBURST_MODEL;
-        if (m === 'gpt-image-2.5-flare') return GPT_IMAGE25_FLARE_MODEL;
-        if (m === 'gpt-image-2-c') return GPT_IMAGE2_ANYFAST_C_MODEL;
-        if (m === 'gpt-image-2') {
-            return (props.data as any)?.providerHint === 'anyfast' ? GPT_IMAGE2_ANYFAST_MODEL : GPT_IMAGE2_ACE_MODEL;
-        }
-        if (m === 'gemini-3-pro-image' || m === 'gemini-3-pro-image-preview') return 'anyfast:gemini-3-pro-image';
-        if (m === 'gemini-3.1-flash-image' || m === 'gemini-3.1-flash-image-preview') return 'anyfast:gemini-3.1-flash-image';
-        if (m === 'nano-banana-pro') return 'nano:nano-banana-pro';
-        if (m === 'nano-banana-2') return 'nano:nano-banana-2';
-        // 默认走 AnyFast（若用户未显式选择）
-        return 'anyfast:gemini-3.1-flash-image';
-    }
-    // Seedream 已从选项中移除，历史 dream / 未指定节点回退到默认可用模型
-    return DEFAULT_ALLOWED_NANO_MODEL;
+    return mapLegacyToSelectedModel(
+        props.data?.apiType,
+        (props.data as any)?.model,
+        (props.data as any)?.providerHint,
+        (props.data as any)?.selectedModel
+    );
 })();
 // 从节点数据初始化本地状态，保证从历史/模板加载时能恢复
 const selectedModel = ref<string>(initialSelectedModel);
@@ -333,9 +408,13 @@ const quality = ref<string>((props.data as any)?.quality || '2K');
 const aspectRatio = ref<string>((props.data as any)?.aspectRatio || '1:1'); // 使用比例字符串格式
 const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number' ? (props.data as any).numImages : 1);
 
+const isProductModel = (v: string) =>
+    v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v === PRODUCT_NANO_2 || v === PRODUCT_NANO_PRO;
+
 // 计算属性：apiType 由 selectedModel 推导
 const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
     if (selectedModel.value === 'midjourney') return 'midjourney';
+    if (isProductModel(selectedModel.value)) return 'nano';
     return selectedModel.value.startsWith('gpt-image-2')
         || selectedModel.value.startsWith('nano:')
         || selectedModel.value.startsWith('anyfast:')
@@ -354,33 +433,44 @@ type NanoModelName =
     | 'gpt-image-2.5-sunburst'
     | 'gpt-image-2.5-flare';
 const nanoModel = computed<NanoModelName | undefined>(() => {
-    if (selectedModel.value.startsWith('gpt-image-2')) {
-        return selectedModel.value.split(':')[0] as NanoModelName;
+    const v = selectedModel.value;
+    if (v === PRODUCT_GPT_25) return 'gpt-image-2.5-flare';
+    if (v === PRODUCT_GPT_25_PRO) return 'gpt-image-2.5-sunburst';
+    if (v === PRODUCT_GPT_20) return 'gpt-image-2';
+    if (v === PRODUCT_NANO_2) return 'nano-banana-2';
+    if (v === PRODUCT_NANO_PRO) return 'nano-banana-pro';
+    if (v.startsWith('gpt-image-2')) {
+        return v.split(':')[0] as NanoModelName;
     }
-    if (!selectedModel.value.startsWith('nano:') && !selectedModel.value.startsWith('anyfast:')) return undefined;
-    const parts = selectedModel.value.split(':');
+    if (!v.startsWith('nano:') && !v.startsWith('anyfast:')) return undefined;
+    const parts = v.split(':');
     const raw = parts[1];
-    // 兼容旧 preview 模型名
     if (raw === 'gemini-3-pro-image-preview') return 'gemini-3-pro-image';
     if (raw === 'gemini-3.1-flash-image-preview') return 'gemini-3.1-flash-image';
     return raw as NanoModelName;
 });
 
+/** 产品线不传 providerHint（Ace 优先+兜底）；测试选项锁定渠道 */
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
-    if (selectedModel.value === GPT_IMAGE2_ACE_MODEL) return 'ace';
+    const v = selectedModel.value;
+    if (isProductModel(v)) return undefined;
+    if (v === GPT_IMAGE2_ACE_MODEL || v === GPT_IMAGE25_SUNBURST_ACE || v === GPT_IMAGE25_FLARE_ACE) return 'ace';
     if (
-        selectedModel.value === GPT_IMAGE2_ANYFAST_MODEL
-        || selectedModel.value === GPT_IMAGE2_ANYFAST_C_MODEL
-        || selectedModel.value === GPT_IMAGE25_SUNBURST_MODEL
-        || selectedModel.value === GPT_IMAGE25_FLARE_MODEL
+        v === GPT_IMAGE2_ANYFAST_MODEL
+        || v === GPT_IMAGE2_ANYFAST_C_MODEL
+        || v === GPT_IMAGE25_SUNBURST_ANYFAST
+        || v === GPT_IMAGE25_FLARE_ANYFAST
     ) return 'anyfast';
-    if (selectedModel.value.startsWith('anyfast:')) return 'anyfast';
-    if (selectedModel.value.startsWith('nano:')) return 'ace';
+    if (v.startsWith('anyfast:')) return 'anyfast';
+    if (v.startsWith('nano:')) return 'ace';
     return undefined;
 });
 
 const isGemini3ProModel = computed(() => selectedModel.value === ANYFAST_PRO_MODEL);
-const isGptImage2Model = computed(() => selectedModel.value.startsWith('gpt-image-2'));
+const isGptImage2Model = computed(() => {
+    const v = selectedModel.value;
+    return v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v.startsWith('gpt-image-2');
+});
 
 // toast 去重，避免频繁提示
 const lastToastKey = ref<string>('');
@@ -391,12 +481,12 @@ const toastOnce = (key: string, message: string) => {
 };
 
 watch(
-    [isSuperAdmin, selectedModel],
-    ([admin, model]) => {
-        if (admin) return;
-        if (model === ANYFAST_PRO_MODEL) {
+    [isYcfTestAdmin, selectedModel],
+    ([ycfAdmin, model]) => {
+        if (ycfAdmin) return;
+        if (!PRODUCT_MODEL_OPTIONS.some((o) => o.value === model)) {
             selectedModel.value = DEFAULT_ALLOWED_NANO_MODEL;
-            toastOnce('anyfast-pro-forbidden', '普通用户不支持 NanoBanana Pro(anyfast)，已自动切换到 NanoBanana2(anyfast)');
+            toastOnce('test-model-forbidden', '当前账号仅可使用产品模型，已自动切换到 Nano2');
         }
     },
     { immediate: true }
@@ -479,8 +569,8 @@ const calculateGptImage2Size = (aspectRatioValue: string, qualityValue: string):
 
 // 监听模型切换，重置不兼容的选项，并同步到节点数据
 watch(selectedModel, (newModel) => {
-    const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:');
-    const isGptImage2 = newModel.startsWith('gpt-image-2');
+    const isNano = newModel.startsWith('nano:') || newModel.startsWith('anyfast:') || isProductModel(newModel);
+    const isGptImage2 = isGptImage2Model.value || newModel.startsWith('gpt-image-2');
     const isMidjourney = newModel === 'midjourney';
     if (isGptImage2) {
         if (!quality.value || !['low', 'medium', 'high'].includes(quality.value)) {
@@ -504,11 +594,13 @@ watch(selectedModel, (newModel) => {
     // 同步 apiType / model 到节点数据，方便自动保存与恢复
     const api: 'dream' | 'nano' | 'midjourney' = isMidjourney ? 'midjourney' : (isNano || isGptImage2 ? 'nano' : 'dream');
     (props.data as any).apiType = api;
-    (props.data as any).model = isGptImage2
-        ? newModel.split(':')[0]
-        : (isNano ? newModel.split(':')[1] : (isMidjourney ? 'midjourney' : undefined));
-    (props.data as any).providerHint = (isNano || isGptImage2) ? providerHint.value : undefined;
-    // 保留选择器 value（dream / gpt-image-2:anyfast 等）供 Agent 回写对照
+    (props.data as any).model = nanoModel.value || (isMidjourney ? 'midjourney' : undefined);
+    if (providerHint.value) {
+        (props.data as any).providerHint = providerHint.value;
+    } else {
+        delete (props.data as any).providerHint;
+    }
+    // 保留选择器 value（gpt-2.5 / gpt-image-2:ace 等）供 Agent 回写对照
     (props.data as any).selectedModel = newModel;
 }, { immediate: true });
 
@@ -517,13 +609,15 @@ watch(
     () => (props.data as any)?.selectedModel || (props.data as any)?.model,
     (m) => {
         if (typeof m !== 'string' || !m) return;
-        // model 字段可能是短名；优先 selectedModel
         const cand = (props.data as any)?.selectedModel || m;
         if (typeof cand === 'string' && cand && cand !== selectedModel.value) {
-            // 短名 gpt-image-2 → 尽量映射到当前下拉值
-            if (cand === 'gpt-image-2' || cand === 'gpt-image-2-c') return;
-            if (ALL_MODEL_OPTIONS.some((o) => o.value === cand)) selectedModel.value = cand;
-            else if (cand === 'dream' || cand === 'midjourney') selectedModel.value = cand;
+            const mapped = mapLegacyToSelectedModel(
+                (props.data as any)?.apiType,
+                (props.data as any)?.model,
+                (props.data as any)?.providerHint,
+                cand
+            );
+            if (mapped !== selectedModel.value) selectedModel.value = mapped;
         }
     }
 );
@@ -902,7 +996,18 @@ const handleGenerate = async () => {
         if (!finalPrompt) {
             ElMessage.warning('请先连接一个提示词节点');
             loading.value = false;
+            pendingAuthConsume = false;
             return;
+        }
+
+        if (pendingAuthConsume) {
+            pendingAuthConsume = false;
+            const consumed = authRun.consumeGenerate(numImages.value || 1);
+            if (!consumed.ok) {
+                ElMessage.warning(consumed.reason || '授权额度不足');
+                loading.value = false;
+                return;
+            }
         }
 
         console.log(`🔗 使用连接的数据:`, {
@@ -990,7 +1095,7 @@ const handleGenerate = async () => {
             }
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
-            console.log(`[前端] Nano/AnyFast 模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+            console.log(`[前端] 生图模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace优先/anyfast兜底'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
             if (isGptImage2Model.value && processedImageUrls.length > 0) {
                 console.log('[前端] GPT Image 2 图生图：已携带参考图数量', processedImageUrls.length);
             }
@@ -1200,6 +1305,28 @@ const handleGenerate = async () => {
     }
 };
 
+/** 授权回合内：autoExecuteOnce 才自动执行，并扣减额度 */
+watch(
+    () => Boolean((props.data as any)?.autoExecuteOnce),
+    async (want) => {
+        if (!want) return;
+        const node = findNode(props.id);
+        if (node?.data) {
+            const next = { ...(node.data as any) };
+            delete next.autoExecuteOnce;
+            node.data = next;
+        }
+        if (!authRun.canAutoExecute()) {
+            return;
+        }
+        await nextTick();
+        await new Promise((r) => setTimeout(r, 120));
+        if (loading.value) return;
+        pendingAuthConsume = true;
+        await handleGenerate();
+    }
+);
+
 
 // 为每张生成的图片创建新的 ImageNode 节点
 const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
@@ -1209,18 +1336,27 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
     }
 
     const nodeWidth = currentNode.value.dimensions?.width || 480;
-    const startX = currentNode.value.position.x + nodeWidth + 80;
-    const startY = currentNode.value.position.y;
+    const nodeDataRaw = (currentNode.value.data || {}) as Record<string, unknown>;
+    const outputAnchor =
+        nodeDataRaw.outputAnchor &&
+        typeof (nodeDataRaw.outputAnchor as any).x === 'number' &&
+        typeof (nodeDataRaw.outputAnchor as any).y === 'number'
+            ? (nodeDataRaw.outputAnchor as { x: number; y: number })
+            : null;
+    const startX = outputAnchor?.x ?? currentNode.value.position.x + nodeWidth + 80;
+    const startY = outputAnchor?.y ?? currentNode.value.position.y;
+    const isEngine = nodeDataRaw.uiRole === 'engine' || nodeDataRaw.presentation === 'outputs_only';
+    const panelIndex = Number(nodeDataRaw.panelIndex);
     
-    // 根据图片数量动态调整节点尺寸和间距
+    // 根据图片数量动态调整节点尺寸和间距；分镜条用更紧凑横向/纵向间距
     const isMultipleImages = fullUrls.length > 1;
-    const nodeSpacing = isMultipleImages ? 180 : 280; // 多图时缩小间距
+    const nodeSpacing = isEngine ? 220 : isMultipleImages ? 180 : 280;
 
     fullUrls.forEach((fullUrl, index) => {
         const nodeId = `image_node_${Date.now()}_${index}`;
         const edgeId = `edge_${Date.now()}_${index}`;
 
-        // 计算新节点位置（垂直排列）
+        // 计算新节点位置（垂直排列；有 outputAnchor 时从分镜条落点起）
         const newNodePosition = {
             x: startX,
             y: startY + index * nodeSpacing
@@ -1237,8 +1373,12 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
             fromNodeId: props.id, // 记录来源生图节点，方便在 ImageNode 中自动补连线
         };
         
-        if (isMultipleImages) {
+        if (isMultipleImages || isEngine) {
             nodeData.isCompact = true; // 标记为紧凑模式
+        }
+        if (Number.isFinite(panelIndex) && panelIndex >= 1) {
+            nodeData.panelIndex = panelIndex;
+            nodeData.panelLabel = `镜 ${panelIndex}`;
         }
 
         // 创建图片节点
@@ -1249,13 +1389,14 @@ const createImageNodes = (fullUrls: string[], originalUrls: string[]) => {
             data: nodeData
         });
 
-        // 创建从当前节点到图片节点的连接
+        // 创建从当前节点到图片节点的连接（编排收纳时隐藏连线，避免从画布外拉线）
         addEdges({
             id: edgeId,
             source: props.id,
             target: nodeId,
             sourceHandle: 'source',
-            targetHandle: 'target'
+            targetHandle: 'target',
+            hidden: isEngine,
         });
     });
 
@@ -1271,9 +1412,18 @@ const createPlaceholderImageNodes = (count: number, generationKey: string) => {
     }
 
     const nodeWidth = currentNode.value.dimensions?.width || 480;
-    const startX = currentNode.value.position.x + nodeWidth + 80;
-    const startY = currentNode.value.position.y;
-    const nodeSpacing = count > 1 ? 180 : 280;
+    const nodeDataRaw = (currentNode.value.data || {}) as Record<string, unknown>;
+    const outputAnchor =
+        nodeDataRaw.outputAnchor &&
+        typeof (nodeDataRaw.outputAnchor as any).x === 'number' &&
+        typeof (nodeDataRaw.outputAnchor as any).y === 'number'
+            ? (nodeDataRaw.outputAnchor as { x: number; y: number })
+            : null;
+    const startX = outputAnchor?.x ?? currentNode.value.position.x + nodeWidth + 80;
+    const startY = outputAnchor?.y ?? currentNode.value.position.y;
+    const isEngine = nodeDataRaw.uiRole === 'engine' || nodeDataRaw.presentation === 'outputs_only';
+    const panelIndex = Number(nodeDataRaw.panelIndex);
+    const nodeSpacing = isEngine ? 220 : count > 1 ? 180 : 280;
 
     const ids: string[] = [];
 
@@ -1298,6 +1448,10 @@ const createPlaceholderImageNodes = (count: number, generationKey: string) => {
                 fromNodeId: props.id, // 记录来源生图节点
                 generationKey,
                 index: i,
+                isCompact: isEngine || count > 1,
+                ...(Number.isFinite(panelIndex) && panelIndex >= 1
+                    ? { panelIndex, panelLabel: `镜 ${panelIndex}` }
+                    : {}),
             },
         });
 
@@ -1307,6 +1461,7 @@ const createPlaceholderImageNodes = (count: number, generationKey: string) => {
             target: nodeId,
             sourceHandle: 'source',
             targetHandle: 'target',
+            hidden: isEngine,
         });
     }
 

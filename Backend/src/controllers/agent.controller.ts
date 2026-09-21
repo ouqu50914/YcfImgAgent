@@ -191,6 +191,5 @@ async function runUntilClientOrDone(
     }
 
     writeSse(res, { type: "done", text: "已达工具轮次上限。" });
-    res.write(`data: ${JSON.stringify({ type: "state", messages: msgs, round })}\n\n`);
     res.end();
 }

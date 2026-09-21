@@ -10,6 +10,7 @@
             <div class="meta-left">
                 <el-icon class="meta-icon"><Picture /></el-icon>
                 <span class="meta-name">{{ displayAlias }}</span>
+                <span v-if="panelLabelText" class="meta-panel">{{ panelLabelText }}</span>
             </div>
             <span v-if="dimensionText" class="meta-size">{{ dimensionText }}</span>
         </div>
@@ -297,6 +298,12 @@ const syncLoadingState = () => {
 };
 
 const displayAlias = computed(() => imageAlias.value || '图片');
+const panelLabelText = computed(() => {
+    const raw = (props.data as any)?.panelLabel || (props.data as any)?.panelIndex;
+    if (raw == null || raw === '') return '';
+    if (typeof raw === 'number' && Number.isFinite(raw)) return `镜 ${raw}`;
+    return String(raw);
+});
 
 const isError = computed(() => {
     const status = (props.data as any)?.status;
@@ -677,6 +684,15 @@ const handleDownloadOriginal = async () => {
     white-space: nowrap;
     font-weight: 500;
     color: #e0e0e0;
+}
+
+.meta-panel {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: #8ab4ff;
+    padding: 0 4px;
+    border: 1px solid rgba(138, 180, 255, 0.35);
+    border-radius: 3px;
 }
 
 .meta-size {

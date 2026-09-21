@@ -13,6 +13,10 @@ import https from "https";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
 import { detectImageFormat } from "../utils/image-format";
 import { ProviderError } from "./provider-error";
+import {
+    injectStoryboardPanelIndex,
+    looksLikeStoryboardBatchPrompt,
+} from "../utils/storyboard-panel-prompt";
 
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
 const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
@@ -651,9 +655,25 @@ export class NanoAdapter implements AiProvider {
         const hasImage = !!params.imageUrl || (params.imageUrls && params.imageUrls.length > 0);
 
         if (count > 1) {
-            const tasks = Array(Math.min(count, 4)).fill(0).map(() =>
-                this.generateImage({ ...params, num_images: 1, numImages: 1 } as any, "", "")
-            );
+            const batch = Math.min(count, 4);
+            const basePrompt = String(params.prompt || "生成图片");
+            const storyboard = looksLikeStoryboardBatchPrompt(basePrompt);
+            const tasks = Array(batch)
+                .fill(0)
+                .map((_, i) =>
+                    this.generateImage(
+                        {
+                            ...params,
+                            num_images: 1,
+                            numImages: 1,
+                            prompt: storyboard
+                                ? injectStoryboardPanelIndex(basePrompt, i, batch)
+                                : basePrompt,
+                        } as any,
+                        "",
+                        ""
+                    )
+                );
             const results = await Promise.all(tasks);
             const allUrls: string[] = [];
             for (const r of results) {

@@ -5,7 +5,7 @@ import { AppDataSource } from "../data-source";
 import { SkillDefinition, SkillStatus, SkillVisibility } from "../entities/SkillDefinition";
 import { isCosEnabled, pathToKey, upload as cosUpload, getFileContent } from "./cos.service";
 import { adaptSkillWithLlm } from "../skills/skill-adapt.service";
-import { assessSkillCompat, type CompatReport } from "../skills/skill-compat";
+import { assessSkillCompat, isAgentSelectable, type CompatReport } from "../skills/skill-compat";
 import { detectExecutableScripts, detectHasScripts, parseSkillMarkdown, resolveSkillDisplayName } from "../skills/parse-skill-md";
 import {
     SKILL_BODY_INJECT_MAX_CHARS,
@@ -33,6 +33,8 @@ export type SkillListItem = {
     compat_grade?: string | null;
     compat_report?: CompatReport | null;
     has_adapted?: boolean;
+    /** Agent 下拉是否可选：C 不可选；B 须有适配版 */
+    agent_selectable?: boolean;
 };
 
 /** 判断 Skill 是否需要控制模型编排（而非仅拼 prompt） */
@@ -180,6 +182,10 @@ function toListItem(row: SkillDefinition, viewerId: number): SkillListItem {
         compat_grade: row.compat_grade || report.grade,
         compat_report: report,
         has_adapted: Boolean(row.adapted_body_md && String(row.adapted_body_md).trim()),
+        agent_selectable: isAgentSelectable(
+            row.compat_grade || report.grade,
+            Boolean(row.adapted_body_md && String(row.adapted_body_md).trim())
+        ),
     };
 }
 
@@ -201,7 +207,9 @@ export class SkillService {
         buffer: Buffer;
     }): Promise<SkillDefinition> {
         this.assertEnabled();
-        const { userId, mode, fileName, buffer } = params;
+        // mode=admin_global 仍先落 private，须超管手动设为 global（产品约定）
+        const { userId, fileName, buffer } = params;
+        void params.mode;
         const extracted = extractSkillFromBuffer(fileName, buffer);
         const parsed = parseSkillMarkdown(extracted.md);
         const hasScripts = detectHasScripts(extracted.paths);
@@ -272,7 +280,60 @@ export class SkillService {
         });
         saved.compat_grade = report.grade;
         saved.compat_report_json = report as unknown as Record<string, unknown>;
-        return this.repo().save(saved);
+        saved.compat_flags = {
+            ...(saved.compat_flags || {}),
+            agent_selectable: isAgentSelectable(report.grade, false),
+            auto_adapt: report.grade === "B" || report.grade === "C",
+        };
+        await this.repo().save(saved);
+
+        // B：自动规则+LLM 适配（失败回退规则）；C：仅规则底稿，仍不可进 Agent
+        if (report.grade === "B" || report.grade === "C") {
+            try {
+                const { adapted_body_md, report: adaptedReport } = await adaptSkillWithLlm(
+                    {
+                        name: saved.name,
+                        description: saved.description,
+                        body_md: saved.body_md,
+                        frontmatter: saved.frontmatter_json ?? null,
+                        entry_paths: extracted.paths,
+                        asset_paths: assetPaths,
+                        staticReport: report,
+                    },
+                    { preferRuleOnFailure: true, ruleOnly: report.grade === "C" }
+                );
+                saved.adapted_body_md = adapted_body_md;
+                saved.compat_grade = adaptedReport.grade;
+                saved.compat_report_json = adaptedReport as unknown as Record<string, unknown>;
+                saved.adapted_at = new Date();
+                saved.compat_flags = {
+                    ...(saved.compat_flags || {}),
+                    agent_selectable: isAgentSelectable(
+                        adaptedReport.grade,
+                        Boolean(adapted_body_md?.trim())
+                    ),
+                    auto_adapted: true,
+                };
+                await this.repo().save(saved);
+            } catch (e) {
+                console.warn("[Skill] auto-adapt failed", saved.id, (e as Error)?.message || e);
+                saved.compat_flags = {
+                    ...(saved.compat_flags || {}),
+                    auto_adapt_error: String((e as Error)?.message || e).slice(0, 200),
+                    agent_selectable: false,
+                };
+                await this.repo().save(saved);
+            }
+        } else {
+            // A：可选
+            saved.compat_flags = {
+                ...(saved.compat_flags || {}),
+                agent_selectable: true,
+            };
+            await this.repo().save(saved);
+        }
+
+        return saved;
     }
 
     /** Agent / 节点注入用正文：优先适配版 */
@@ -330,19 +391,26 @@ export class SkillService {
             : [];
         const assetPaths = Array.isArray(row.assets_json) ? row.assets_json.map(String) : [];
         const staticReport = await this.ensureCompatReport(row);
-        const { adapted_body_md, report } = await adaptSkillWithLlm({
-            name: row.name,
-            description: row.description,
-            body_md: row.body_md,
-            frontmatter: row.frontmatter_json ?? null,
-            entry_paths: entryPaths,
-            asset_paths: assetPaths,
-            staticReport,
-        });
+        const { adapted_body_md, report } = await adaptSkillWithLlm(
+            {
+                name: row.name,
+                description: row.description,
+                body_md: row.body_md,
+                frontmatter: row.frontmatter_json ?? null,
+                entry_paths: entryPaths,
+                asset_paths: assetPaths,
+                staticReport,
+            },
+            { preferRuleOnFailure: true }
+        );
         row.adapted_body_md = adapted_body_md;
         row.compat_grade = report.grade;
         row.compat_report_json = report as unknown as Record<string, unknown>;
         row.adapted_at = new Date();
+        row.compat_flags = {
+            ...(row.compat_flags || {}),
+            agent_selectable: isAgentSelectable(report.grade, Boolean(adapted_body_md?.trim())),
+        };
         await this.repo().save(row);
         return {
             report,
@@ -603,14 +671,40 @@ export class SkillService {
         return { buffer, fileName: `${row.name}${ext}` };
     }
 
-    async summarizeForAgent(userId: number): Promise<{ id: number; name: string; description: string }[]> {
+    async summarizeForAgent(userId: number): Promise<{ id: number; name: string; description: string; grade?: string }[]> {
         const list = await this.listForUser(userId);
         return list
             .filter(
                 (s) =>
                     s.status === "active" &&
-                    (s.visibility === "global" || s.visibility === "private" || s.visibility === "draft")
+                    (s.visibility === "global" || s.visibility === "private" || s.visibility === "draft") &&
+                    s.agent_selectable !== false &&
+                    isAgentSelectable(s.compat_grade, Boolean(s.has_adapted))
             )
-            .map((s) => ({ id: s.id, name: s.name, description: s.description }));
+            .map((s) => {
+                const item: { id: number; name: string; description: string; grade?: string } = {
+                    id: s.id,
+                    name: s.name,
+                    description: s.description,
+                };
+                if (s.compat_grade) item.grade = s.compat_grade;
+                return item;
+            });
+    }
+
+    /** Agent 选用校验：C 或未适配 B 拒绝注入 */
+    assertAgentSelectable(row: SkillDefinition): void {
+        const hasAdapted = Boolean(row.adapted_body_md && String(row.adapted_body_md).trim());
+        if (row.status === "unsupported") {
+            throw new Error(`Skill ${row.name} 状态为 unsupported，无法用于 Agent`);
+        }
+        if (!isAgentSelectable(row.compat_grade, hasAdapted)) {
+            const g = row.compat_grade || "?";
+            throw new Error(
+                g === "C"
+                    ? `Skill「${row.name}」为 C 级（难适配），不可选用；请存档或人工精简后重新适配`
+                    : `Skill「${row.name}」为 ${g} 级且尚未适配，请先生成适配版后再用于 Agent`
+            );
+        }
     }
 }

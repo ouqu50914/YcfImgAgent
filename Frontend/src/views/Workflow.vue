@@ -368,13 +368,6 @@
             :execute-tool="executeWorkflowTool"
             @gemini-command="executeGeminiCommand"
         />
-
-        <el-drawer v-model="mySkillsVisible" title="Skill 库" size="480px" append-to-body>
-            <MySkillsPanel />
-        </el-drawer>
-        <el-button class="my-skills-fab" type="primary" size="small" @click="mySkillsVisible = true">
-            Skill
-        </el-button>
     </div>
 </template>
 
@@ -401,8 +394,14 @@ import html2canvas from 'html2canvas';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ConnectionMenu from '@/components/ConnectionMenu.vue';
 import WorkflowChatPanel from '@/components/WorkflowChatPanel.vue';
-import MySkillsPanel from '@/components/MySkillsPanel.vue';
 import { createWorkflowToolExecutor } from '@/composables/useWorkflowToolExecutor';
+import {
+  registerAuthorizedRunExhaustedHandler,
+  registerAuthorizedRunNodePatcher,
+  registerAuthorizedRunJobRunner,
+  registerAuthorizedRunJobBatchPreparer,
+} from '@/composables/useAgentAuthorizedRun';
+import { prepareHeadlessBatch, runHeadlessImageJob } from '@/composables/headlessImageJobs';
 import { getSkill, listSkills } from '@/api/skill';
 import { useChatWindowBridge } from '@/composables/useChatWindowBridge';
 import { getUploadUrl } from '@/utils/image-loader';
@@ -425,6 +424,7 @@ import LayerSeparationNode from '@/components/nodes/LayerSeparationNode.vue';
 import VideoRefNode from '@/components/nodes/VideoRefNode.vue';
 import AudioRefNode from '@/components/nodes/AudioRefNode.vue';
 import VideoResultNode from '@/components/nodes/VideoResultNode.vue';
+import ImageCollectionNode from '@/components/nodes/ImageCollectionNode.vue';
 import ReviewNode from '@/components/nodes/ReviewNode.vue';
 
 // 注册节点类型
@@ -433,6 +433,7 @@ const nodeTypes = {
     upscale: markRaw(UpscaleNode),
     extend: markRaw(ExtendNode),
     image: markRaw(ImageNode),
+    imageCollection: markRaw(ImageCollectionNode),
     layer: markRaw(LayerNode),
     prompt: markRaw(PromptNode),
     video: markRaw(VideoNode),
@@ -1267,8 +1268,6 @@ watch(
     { deep: true, immediate: true },
 );
 
-const mySkillsVisible = ref(false);
-
 // 占位：工具执行器在 calculateOptimalPosition 定义后初始化
 let executeGeminiCommand: (cmd: any) => Promise<void> = async () => {};
 let executeWorkflowTool: (call: {
@@ -1329,6 +1328,7 @@ const ensureWorkflowCover = async (workflowData: { nodes: any[]; edges: any[]; c
 // 节点尺寸映射（根据实际节点大小）
 const NODE_DIMENSIONS: Record<string, { width: number; height: number }> = {
 'image': { width: 240, height: 300 },
+'imageCollection': { width: 520, height: 420 },
 'prompt': { width: 360, height: 460 },
 'dream': { width: 400, height: 500 },
     'upscale': { width: 280, height: 350 },
@@ -1396,6 +1396,10 @@ const calculateOptimalPosition = (
         };
 
         for (const node of existingNodes) {
+            // Agent 编排收纳节点在画布外，不参与可见区域碰撞
+            if ((node.data as any)?.uiRole === 'engine' || (node.data as any)?.presentation === 'outputs_only') {
+                continue;
+            }
             const nodeDim = NODE_DIMENSIONS[node.type || 'dream'] || { width: 300, height: 400 };
             const nodeRect = {
                 left: node.position.x,
@@ -1454,6 +1458,59 @@ const calculateOptimalPosition = (
     return { x: gridStartX, y: gridStartY };
 };
 
+/** 兼容旧工作流里收纳到画布外的编排节点：加载时一律拉回可见区（不再提供开关） */
+const isCanvasEngineNode = (n: { data?: Record<string, unknown> } | null | undefined) =>
+    n?.data?.uiRole === 'engine' || n?.data?.presentation === 'outputs_only';
+
+const applyEngineVisibility = () => {
+    const ns = getNodes.value;
+    const engines = ns.filter((n) => isCanvasEngineNode(n));
+    if (!engines.length) return;
+    const engineIds = new Set(engines.map((n) => n.id));
+
+    setNodes(
+        ns.map((n) => {
+            if (!engineIds.has(n.id)) return n;
+            const data = (n.data || {}) as Record<string, unknown>;
+            const bay = (data.engineBayPos as { x: number; y: number } | undefined) || {
+                x: -2400,
+                y: (Number(data.panelIndex) || 1) * 48,
+            };
+            const anchor = data.outputAnchor as { x: number; y: number } | undefined;
+            const stagePos = anchor
+                ? {
+                      x: anchor.x - (NODE_DIMENSIONS.prompt?.width || 360) - 100,
+                      y: anchor.y,
+                  }
+                : { x: 80, y: 80 + (Number(data.panelIndex) || 1) * 120 };
+            const isPrompt = n.type === 'prompt';
+            const visiblePos = isPrompt
+                ? stagePos
+                : { x: stagePos.x + 24, y: stagePos.y };
+            // 若仍停在 bay 附近，则拉回舞台；已在可见区的不动
+            const nearBay =
+                Math.abs(n.position.x - bay.x) < 80 && Math.abs(n.position.y - bay.y) < 80;
+            return {
+                ...n,
+                hidden: false,
+                position: nearBay ? visiblePos : n.position,
+            };
+        })
+    );
+    setEdges(
+        getEdges.value.map((e) => {
+            if (!engineIds.has(e.source) && !engineIds.has(e.target)) return e;
+            return { ...e, hidden: false };
+        })
+    );
+};
+
+const setWorkflowGraphFromData = (workflowData: { nodes: any[]; edges: any[] }) => {
+    setNodes(workflowData.nodes);
+    setEdges(workflowData.edges);
+    nextTick(() => applyEngineVisibility());
+};
+
 const toolExecutor = createWorkflowToolExecutor({
     getNodes: () => getNodes.value,
     getEdges: () => getEdges.value,
@@ -1467,6 +1524,8 @@ const toolExecutor = createWorkflowToolExecutor({
     fitView,
     setViewport,
     getViewport: () => viewport.value,
+    getShowEngineNodes: () => true,
+    getTemplateId: () => currentTemplateId.value,
     listSkills: async () => {
         const res: any = await listSkills();
         return res?.data?.skills || [];
@@ -1482,6 +1541,41 @@ executeGeminiCommand = async (cmd: any) => {
 };
 executeWorkflowTool = async (call) => toolExecutor.execute(call);
 provide('executeWorkflowTool', executeWorkflowTool);
+
+registerAuthorizedRunNodePatcher((nodeId, patch) => {
+    const n = getNodes.value.find((x) => x.id === nodeId);
+    if (!n) return;
+    n.data = { ...(n.data || {}), ...patch };
+});
+registerAuthorizedRunJobBatchPreparer((jobIds) =>
+    prepareHeadlessBatch(jobIds, {
+        getNodes: () => getNodes.value,
+        getEdges: () => getEdges.value,
+        addNodes: (n) => addNodes(n),
+        addEdges: (e) => addEdges(e),
+        NODE_DIMENSIONS,
+        getViewport: () => viewport.value,
+        saveState,
+        persistWorkflow,
+        getTemplateId: () => currentTemplateId.value,
+    })
+);
+registerAuthorizedRunJobRunner((jobId) =>
+    runHeadlessImageJob(jobId, {
+        getNodes: () => getNodes.value,
+        getEdges: () => getEdges.value,
+        addNodes: (n) => addNodes(n),
+        addEdges: (e) => addEdges(e),
+        NODE_DIMENSIONS,
+        getViewport: () => viewport.value,
+        saveState,
+        persistWorkflow,
+        getTemplateId: () => currentTemplateId.value,
+    })
+);
+registerAuthorizedRunExhaustedHandler((reason) => {
+    ElMessage.warning(reason);
+});
 
 onChatBridgeMessage((msg) => {
     if (msg.type === 'gemini-command') {
@@ -2995,8 +3089,7 @@ const handleLoadTemplate = async (template: WorkflowTemplate) => {
         const workflowData = res.data.workflow_data;
 
         if (workflowData.nodes && workflowData.edges) {
-            setNodes(workflowData.nodes);
-            setEdges(workflowData.edges);
+            setWorkflowGraphFromData(workflowData);
             restoreImageAliasStateFromWorkflow(workflowData);
             ElMessage.success('模板加载成功');
             showLoadDialog.value = false;
@@ -3048,8 +3141,7 @@ const handleLoadHistory = async (history: WorkflowHistory) => {
         const templateIdFromHistory = res.data?.template_id as number | undefined;
 
         if (workflowData.nodes && workflowData.edges) {
-            setNodes(workflowData.nodes);
-            setEdges(workflowData.edges);
+            setWorkflowGraphFromData(workflowData);
             restoreImageAliasStateFromWorkflow(workflowData);
             if (templateIdFromHistory != null) {
                 currentTemplateId.value = templateIdFromHistory;
@@ -3395,8 +3487,7 @@ onMounted(async () => {
                     sourceTemplateIdForTemp.value = null;
                 }
                 if (workflowData?.nodes && workflowData?.edges) {
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                    setWorkflowGraphFromData(workflowData);
                     restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     ElMessage.success('已打开项目副本，编辑将保存到您的账号');
@@ -3421,8 +3512,7 @@ onMounted(async () => {
                 const workflowData = res.data?.workflow_data;
                 const templateIdFromHistory = res.data?.template_id as number | undefined;
                 if (workflowData?.nodes && workflowData?.edges) {
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                    setWorkflowGraphFromData(workflowData);
                     restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     setLastHistoryId(historyId);
@@ -3497,8 +3587,7 @@ onMounted(async () => {
                 }
 
                 if (workflowData?.nodes && workflowData?.edges) {
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                    setWorkflowGraphFromData(workflowData);
                     restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     ElMessage.success('模板加载成功');
@@ -3525,8 +3614,7 @@ onMounted(async () => {
                 const templateIdFromHistory = res.data?.template_id as number | undefined;
                 if (workflowData?.nodes && workflowData?.edges) {
                     currentHistoryId.value = lastId;
-                    setNodes(workflowData.nodes);
-                    setEdges(workflowData.edges);
+                    setWorkflowGraphFromData(workflowData);
                     restoreImageAliasStateFromWorkflow(workflowData);
                     clearUndoRedoAndPending();
                     if (templateIdFromHistory != null) {
@@ -3683,6 +3771,10 @@ onMounted(async () => {
 
 // 组件卸载时清理定时器和事件监听
 onUnmounted(() => {
+    registerAuthorizedRunNodePatcher(null);
+    registerAuthorizedRunJobRunner(null);
+    registerAuthorizedRunJobBatchPreparer(null);
+    registerAuthorizedRunExhaustedHandler(null);
     if (autoSaveTimer) {
         clearInterval(autoSaveTimer);
     }
@@ -3811,6 +3903,11 @@ onUnmounted(() => {
 /* 外层（vue-flow 节点壳）与内层（各节点根容器）圆角统一为 5px */
 .canvas-wrapper :deep(.vue-flow__node) {
     border-radius: 5px;
+}
+
+/* 提示词智能优化浮层挂在节点右侧，需避免被节点壳裁切 */
+.canvas-wrapper :deep(.vue-flow__node-prompt) {
+    overflow: visible;
 }
 
 .canvas-wrapper :deep(.vue-flow__node.selected) {
@@ -3963,10 +4060,4 @@ onUnmounted(() => {
     color: #e0e0e0;
 }
 
-.my-skills-fab {
-    position: fixed;
-    left: 24px;
-    bottom: 24px;
-    z-index: 40;
-}
 </style>
