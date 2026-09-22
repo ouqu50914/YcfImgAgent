@@ -207,7 +207,7 @@ const clearProposeHint = () => {
     authRun.removePendingPropose(String(props.id));
 };
 
-/** 产品线简化选项：无渠道区分，后端 Ace 优先 + AnyFast 兜底 */
+/** 产品线简化选项：无渠道区分，后端 AnyFast 优先 + Ace 兜底 */
 const PRODUCT_GPT_25 = 'gpt-2.5';           // flare
 const PRODUCT_GPT_25_PRO = 'gpt-2.5-pro';   // sunburst
 const PRODUCT_GPT_20 = 'gpt-2.0';
@@ -223,11 +223,11 @@ const GPT_IMAGE25_SUNBURST_ACE = 'gpt-image-2.5-sunburst:ace';
 const GPT_IMAGE25_FLARE_ACE = 'gpt-image-2.5-flare:ace';
 
 const PRODUCT_MODEL_OPTIONS = [
-    { label: 'GPT2.5（6/张）', value: PRODUCT_GPT_25 },
-    { label: 'GPT2.5 pro（6/张）', value: PRODUCT_GPT_25_PRO },
-    { label: 'GPT 2.0（6/张）', value: PRODUCT_GPT_20 },
-    { label: 'Nano2（6/张）', value: PRODUCT_NANO_2 },
-    { label: 'Nano Pro（6/张）', value: PRODUCT_NANO_PRO },
+    { label: 'GPT2.5（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_25 },
+    { label: 'GPT2.5 pro（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_25_PRO },
+    { label: 'GPT 2.0（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_20 },
+    { label: 'Nano2（2K:11/张，4K:15/张）', value: PRODUCT_NANO_2 },
+    { label: 'Nano Pro（2K:15/张，4K:20/张）', value: PRODUCT_NANO_PRO },
 ] as const;
 
 /** ycf 超管可见：原渠道细分 + Ace GPT 2.5 official */
@@ -450,7 +450,7 @@ const nanoModel = computed<NanoModelName | undefined>(() => {
     return raw as NanoModelName;
 });
 
-/** 产品线不传 providerHint（Ace 优先+兜底）；测试选项锁定渠道 */
+/** 产品线不传 providerHint（AnyFast 优先 + Ace 兜底）；测试选项锁定渠道 */
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
     const v = selectedModel.value;
     if (isProductModel(v)) return undefined;
@@ -1095,7 +1095,7 @@ const handleGenerate = async () => {
             }
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
-            console.log(`[前端] 生图模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'ace优先/anyfast兜底'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+            console.log(`[前端] 生图模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'anyfast优先/ace兜底'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
             if (isGptImage2Model.value && processedImageUrls.length > 0) {
                 console.log('[前端] GPT Image 2 图生图：已携带参考图数量', processedImageUrls.length);
             }

@@ -99,8 +99,9 @@ ssh "${SSH_OPTS[@]}" "$DEPLOY_SSH" "bash -s" <<EOF
 set -euo pipefail
 cd '$DEPLOY_PATH'
 mkdir -p data/qc_uploads Backend/uploads Backend/temp
-# 清掉可能卡住的旧构建日志
-nohup bash -c '$DEPLOY_COMPOSE up -d --build' >'$REMOTE_LOG' 2>&1 &
+# 清掉可能卡住的旧构建日志；用 compose 退出码判断成败（不要 grep 日志里的 ERROR:，Dockerfile RUN 文案会误伤）
+rm -f /tmp/ycf-deploy-build.exit
+nohup bash -c '$DEPLOY_COMPOSE up -d --build; echo \$? > /tmp/ycf-deploy-build.exit' >'$REMOTE_LOG' 2>&1 &
 echo \$! > /tmp/ycf-deploy-build.pid
 echo "[deploy] 远端构建 PID=\$(cat /tmp/ycf-deploy-build.pid)，日志: $REMOTE_LOG"
 EOF
@@ -119,8 +120,8 @@ while kill -0 "\$pid" 2>/dev/null; do sleep 2; done
 sleep 2
 kill "\$tail_pid" 2>/dev/null || true
 wait "\$tail_pid" 2>/dev/null || true
-# 检查退出码：compose 失败时日志会有 ERROR / failed to solve
-if grep -qE 'ERROR:|failed to solve|exit code: [1-9]|##\[error\]' "\$logfile"; then
+exit_code=\$(cat /tmp/ycf-deploy-build.exit 2>/dev/null || echo 1)
+if [[ "\$exit_code" != "0" ]]; then
   echo '[deploy] 构建失败，请检查日志末尾'
   tail -n 60 "\$logfile" || true
   exit 1
@@ -129,7 +130,7 @@ echo '[deploy] 容器状态：'
 docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep -E 'ycf_|NAMES' || docker ps
 EOF
 
-if ! ssh "${SSH_OPTS[@]}" "$DEPLOY_SSH" "grep -qE 'ERROR:|failed to solve|exit code: [1-9]' '$REMOTE_LOG'" 2>/dev/null; then
+if ssh "${SSH_OPTS[@]}" "$DEPLOY_SSH" 'test "$(cat /tmp/ycf-deploy-build.exit 2>/dev/null)" = "0"'; then
   echo "[deploy] 完成 ✓"
   echo "[deploy] 建议检查：ssh $DEPLOY_SSH 'docker logs ycf_qc_web --tail 30'"
 else

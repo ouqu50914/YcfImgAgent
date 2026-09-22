@@ -23,11 +23,11 @@ export function resolveNanoProvider(
     if (providerHint === 'ace' || providerHint === 'anyfast') return providerHint;
     if (model?.startsWith('gemini-')) return 'anyfast';
     if (model === 'gpt-image-2-c') return 'anyfast';
-    // GPT 2 / 2.5 与 Nano 产品线默认按 Ace 计费（Ace 优先）
-    if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'ace';
-    if (model === 'gpt-image-2') return 'ace';
-    if (model?.startsWith('nano-banana-')) return 'ace';
-    return 'ace';
+    // 产品线默认 AnyFast 优先，按 AnyFast 计费
+    if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
+    if (model === 'gpt-image-2') return 'anyfast';
+    if (model?.startsWith('nano-banana-')) return 'anyfast';
+    return 'anyfast';
 }
 
 export function isGptImage2Model(model?: string): boolean {
@@ -57,7 +57,7 @@ export function calcNanoGenerateCredits(options: {
             const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
             return perImage * count;
         }
-        const perImage = isAnyfastGeminiProModel(model)
+        const perImage = isAnyfastGeminiProModel(model) || model === 'nano-banana-pro'
             ? (quality === '4K' ? 20 : 15)
             : (quality === '4K' ? 15 : 11);
         return perImage * count;
@@ -77,16 +77,21 @@ export function buildCreditUsageApiType(
     if (apiType !== 'nano') return apiType;
     const normalized = normalizeAnyfastGeminiModel(model);
     if (normalized === 'gpt-image-2.5-sunburst') {
-        return providerHint === 'anyfast' ? 'img2.5-af' : 'img2.5';
+        return providerHint === 'ace' ? 'img2.5' : 'img2.5-af';
     }
     if (normalized === 'gpt-image-2.5-flare') {
-        return providerHint === 'anyfast' ? 'img2.5f-af' : 'img2.5-fast';
+        return providerHint === 'ace' ? 'img2.5-fast' : 'img2.5f-af';
     }
     if (normalized === 'gpt-image-2-c') return 'gpt-image-2-c';
-    if (normalized === 'gpt-image-2' && providerHint === 'anyfast') return 'gpt-image-2-af';
-    if (normalized === 'gpt-image-2') return 'gpt-image-2';
-    if (normalized === 'gemini-3-pro-image') return 'gemini-3-pro';
-    if (normalized === 'gemini-3.1-flash-image') return 'gemini-3.1-fl';
+    if (normalized === 'gpt-image-2') {
+        return providerHint === 'ace' ? 'gpt-image-2' : 'gpt-image-2-af';
+    }
+    if (normalized === 'gemini-3-pro-image' || (normalized === 'nano-banana-pro' && providerHint !== 'ace')) {
+        return 'gemini-3-pro';
+    }
+    if (normalized === 'gemini-3.1-flash-image' || (normalized === 'nano-banana-2' && providerHint !== 'ace')) {
+        return 'gemini-3.1-fl';
+    }
     if (normalized?.startsWith('nano-banana-')) return 'nano-ace';
     return 'nano';
 }

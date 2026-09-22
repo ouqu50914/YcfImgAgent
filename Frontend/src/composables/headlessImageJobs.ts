@@ -122,7 +122,7 @@ function resolveNanoModel(model: string): string | undefined {
 }
 
 function resolveProviderHint(model: string): 'ace' | 'anyfast' | undefined {
-  // 产品线：不锁渠道，后端 Ace 优先 + AnyFast 兜底
+  // 产品线：不锁渠道，后端 AnyFast 优先 + Ace 兜底
   if (
     model === 'gpt-2.5'
     || model === 'gpt-2.5-pro'

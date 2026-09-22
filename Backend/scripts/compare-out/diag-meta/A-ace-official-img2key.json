@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "label": "A-ace-official-img2key",
+  "hypothesis": "baseline_official",
+  "latency_ms": 38670,
+  "http_ms": 33418,
+  "endpoint": "https://api.acedata.cloud/openai/images/generations",
+  "key": "ACE_IMG2_API_KEY",
+  "key_tag": "len=32,tail=f4af",
+  "request_model": "gpt-image-2.5-flare:official",
+  "request_quality": "high",
+  "request_size": "1776x1776",
+  "body_hash": "e27773834dd5b9dc",
+  "via": "url",
+  "url_host": "cdn.acedata2.cloud",
+  "file": "/Users/mengtianmen/work/git/YcfImgAgent/Backend/scripts/compare-out/A-ace-official-img2key.png",
+  "bytes": 4385684,
+  "width": 1776,
+  "height": 1776,
+  "format": "png",
+  "response_model": "gpt-image-2.5-flare:official",
+  "cost": {
+    "amount": 0.7515081272084806,
+    "currency": "credit"
+  },
+  "elapsed": 32.985,
+  "usage": {
+    "input_tokens": 58,
+    "input_tokens_details": {
+      "image_tokens": 0,
+      "text_tokens": 58
+    },
+    "output_tokens": 2969,
+    "output_tokens_details": {
+      "image_tokens": 2969,
+      "text_tokens": 0
+    },
+    "total_tokens": 3027
+  },
+  "input_tokens": 58,
+  "output_tokens": 2969,
+  "total_tokens": 3027,
+  "output_tokens_details": {
+    "image_tokens": 2969,
+    "text_tokens": 0
+  },
+  "quality_echo_match": "not_echoed",
+  "size_echo_match": "not_echoed",
+  "verdict": {
+    "resolution_ok": true,
+    "quality_echo": "not_echoed",
+    "size_echo": "not_echoed",
+    "likely": "line_or_sampling"
+  },
+  "response_id": "d22a4787-7aea-4142-8194-0b371ea44cd6"
+}

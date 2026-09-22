@@ -12,10 +12,10 @@ function resolveNanoProvider(model?: string, providerHint?: NanoProviderHint): N
   if (providerHint === 'ace' || providerHint === 'anyfast') return providerHint;
   if (model?.startsWith('gemini-')) return 'anyfast';
   if (model === 'gpt-image-2-c') return 'anyfast';
-  if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'ace';
-  if (model === 'gpt-image-2') return 'ace';
-  if (model?.startsWith('nano-banana-')) return 'ace';
-  return 'ace';
+  if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
+  if (model === 'gpt-image-2') return 'anyfast';
+  if (model?.startsWith('nano-banana-')) return 'anyfast';
+  return 'anyfast';
 }
 
 function isGptImage2Model(model?: string): boolean {
@@ -50,7 +50,7 @@ function calcNanoGenerateCredits(options: {
       return perImage * count;
     }
     const perImage =
-      model === 'gemini-3-pro-image'
+      model === 'gemini-3-pro-image' || model === 'nano-banana-pro'
         ? quality === '4K'
           ? 20
           : 15

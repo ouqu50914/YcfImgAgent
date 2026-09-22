@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "label": "D-anyfast-gptimg2key",
+  "hypothesis": "other_gateway",
+  "latency_ms": 40024,
+  "http_ms": 40010,
+  "endpoint": "https://fw2afus.ent.acc.kurtisasia.com/v1/images/generations",
+  "key": "GPT_IMG2_API_KEY",
+  "key_tag": "len=51,tail=eRrX",
+  "request_model": "gpt-image-2.5-flare",
+  "request_quality": "high",
+  "request_size": "1776x1776",
+  "body_hash": "e27773834dd5b9dc",
+  "via": "b64_json",
+  "file": "/Users/mengtianmen/work/git/YcfImgAgent/Backend/scripts/compare-out/D-anyfast-gptimg2key.png",
+  "bytes": 4200843,
+  "width": 1776,
+  "height": 1776,
+  "format": "png",
+  "response_quality": "high",
+  "response_size": "1776x1776",
+  "response_output_format": "png",
+  "response_background": "opaque",
+  "usage": {
+    "input_tokens_details": {
+      "text_tokens": 58,
+      "image_tokens": 0,
+      "cached_tokens": 0
+    },
+    "output_tokens_details": {
+      "text_tokens": 0,
+      "image_tokens": 2969
+    },
+    "input_tokens": 58,
+    "output_tokens": 2969,
+    "total_tokens": 3027
+  },
+  "input_tokens": 58,
+  "output_tokens": 2969,
+  "total_tokens": 3027,
+  "output_tokens_details": {
+    "text_tokens": 0,
+    "image_tokens": 2969
+  },
+  "quality_echo_match": "ok",
+  "size_echo_match": "ok",
+  "verdict": {
+    "resolution_ok": true,
+    "quality_echo": "ok",
+    "size_echo": "ok",
+    "likely": "line_or_sampling"
+  }
+}

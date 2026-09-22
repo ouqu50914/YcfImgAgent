@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "label": "B-ace-reverse-img2key",
+  "hypothesis": "same_key_other_line",
+  "latency_ms": 280,
+  "endpoint": "https://api.acedata.cloud/openai/images/generations",
+  "key": "ACE_IMG2_API_KEY",
+  "key_tag": "len=32,tail=f4af",
+  "request_model": "gpt-image-2.5-flare:reverse",
+  "status": 400,
+  "code": "ERR_BAD_REQUEST",
+  "error": "model is not supported",
+  "response_data": {
+    "error": {
+      "code": "bad_request",
+      "message": "model is not supported"
+    },
+    "success": false
+  },
+  "networkish": false
+}

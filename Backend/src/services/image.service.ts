@@ -38,8 +38,8 @@ export class ImageService {
     private static nanoPolicyRequestSeq = 0;
     private static imageSyncInFlight = new Set<number>();
 
-    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "ace") as "ace" | "anyfast";
-    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "anyfast") as "ace" | "anyfast";
+    private readonly nanoPrimaryProvider = (process.env.NANO_PRIMARY_PROVIDER || "anyfast") as "ace" | "anyfast";
+    private readonly nanoFallbackProvider = (process.env.NANO_FALLBACK_PROVIDER || "ace") as "ace" | "anyfast";
     private readonly nanoAceMaxAttemptsPerRequest = Math.max(1, Number(process.env.NANO_ACE_MAX_ATTEMPTS_PER_REQUEST || "1"));
     private readonly nanoFallbackOnTransientOnly = process.env.NANO_FALLBACK_ON_TRANSIENT_ONLY === "true";
     private readonly anyfastCircuitFailureThreshold = Math.max(1, Number(process.env.NANO_ANYFAST_CIRCUIT_FAILURE_THRESHOLD || "3"));
@@ -256,7 +256,7 @@ export class ImageService {
             await this.imageRepo.save(imageRecord);
 
             try {
-                // 2) 调用适配器生成图片（nano 走 Ace 优先 + AnyFast 回退策略）
+                // 2) 调用适配器生成图片（nano 走 AnyFast 优先 + Ace 回退策略）
                 const providerResult = await this.generateByPolicy(apiType, params, config.api_key, config.api_url, userId);
                 const apiResult = providerResult.apiResult;
                 const finalProvider = typeof providerResult.policyTrace?.final_provider === "string"
@@ -419,7 +419,7 @@ export class ImageService {
         }
 
         // 路由策略：
-        // - 产品选项（无 providerHint）：Ace 优先，AnyFast 兜底
+        // - 产品选项（无 providerHint）：AnyFast 优先，Ace 兜底
         // - 测试选项（显式 ace/anyfast）：锁定该渠道
         // - gemini-* / gpt-image-2-c：本身绑定 AnyFast
         let primary: "ace" | "anyfast";
