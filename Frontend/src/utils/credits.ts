@@ -13,6 +13,8 @@ function resolveNanoProvider(model?: string, providerHint?: NanoProviderHint): N
   if (model?.startsWith('gemini-')) return 'anyfast';
   if (model === 'gpt-image-2-c') return 'anyfast';
   if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
+  // GPT2.6 产品线优先 Ace official，计费口径与 2.5 保持一致（10/14/18）
+  if (model === 'gpt-image-2.6-sunburst' || model === 'gpt-image-2.6-flare') return 'anyfast';
   if (model === 'gpt-image-2') return 'anyfast';
   if (model?.startsWith('nano-banana-')) return 'anyfast';
   return 'anyfast';
@@ -22,7 +24,9 @@ function isGptImage2Model(model?: string): boolean {
   return model === 'gpt-image-2'
     || model === 'gpt-image-2-c'
     || model === 'gpt-image-2.5-sunburst'
-    || model === 'gpt-image-2.5-flare';
+    || model === 'gpt-image-2.5-flare'
+    || model === 'gpt-image-2.6-sunburst'
+    || model === 'gpt-image-2.6-flare';
 }
 
 function normalizeAnyfastGeminiModel(model?: string): string | undefined {
@@ -42,6 +46,13 @@ function calcNanoGenerateCredits(options: {
   const quality = options.quality === '4K' ? '4K' : '2K';
   const model = normalizeAnyfastGeminiModel(options.model);
   const provider = resolveNanoProvider(model, options.providerHint);
+
+  // GPT2.6 无论走 Ace official 还是 AnyFast，统一按 10/14/18 计费（与选项文案一致）
+  if (model === 'gpt-image-2.6-sunburst' || model === 'gpt-image-2.6-flare') {
+    const q = options.quality === 'high' ? 'high' : options.quality === 'low' ? 'low' : 'medium';
+    const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
+    return perImage * count;
+  }
 
   if (provider === 'anyfast') {
     if (isGptImage2Model(model)) {

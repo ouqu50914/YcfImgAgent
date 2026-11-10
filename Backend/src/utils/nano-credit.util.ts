@@ -25,6 +25,8 @@ export function resolveNanoProvider(
     if (model === 'gpt-image-2-c') return 'anyfast';
     // 产品线默认 AnyFast 优先，按 AnyFast 计费
     if (model === 'gpt-image-2.5-sunburst' || model === 'gpt-image-2.5-flare') return 'anyfast';
+    // GPT2.6 产品线优先 Ace official，但计费口径与 2.5 一致（10/14/18）
+    if (model === 'gpt-image-2.6-sunburst' || model === 'gpt-image-2.6-flare') return 'anyfast';
     if (model === 'gpt-image-2') return 'anyfast';
     if (model?.startsWith('nano-banana-')) return 'anyfast';
     return 'anyfast';
@@ -34,7 +36,18 @@ export function isGptImage2Model(model?: string): boolean {
     return model === 'gpt-image-2'
         || model === 'gpt-image-2-c'
         || model === 'gpt-image-2.5-sunburst'
-        || model === 'gpt-image-2.5-flare';
+        || model === 'gpt-image-2.5-flare'
+        || model === 'gpt-image-2.6-sunburst'
+        || model === 'gpt-image-2.6-flare';
+}
+
+/**
+ * GPT2.6 系列：flare = GPT2.6，sunburst = GPT2.6 pro。
+ * 两者在 AnyFast 侧均未配置渠道，统一只打 Ace official，不走跨通道兜底。
+ * 恢复兜底时只需改 image.service.ts 的 fallback 判断，此处保持两个模型同步。
+ */
+export function isGptImage26Model(model?: string): boolean {
+    return model === 'gpt-image-2.6-sunburst' || model === 'gpt-image-2.6-flare';
 }
 
 /**
@@ -50,6 +63,13 @@ export function calcNanoGenerateCredits(options: {
     const quality = options.quality === '4K' ? '4K' : '2K';
     const model = normalizeAnyfastGeminiModel(options.model);
     const provider = resolveNanoProvider(model, options.providerHint);
+
+    // GPT2.6 无论走 Ace official 还是 AnyFast，统一按 10/14/18 计费（与选项文案一致）
+    if (model === 'gpt-image-2.6-sunburst' || model === 'gpt-image-2.6-flare') {
+        const q = options.quality === 'high' ? 'high' : options.quality === 'low' ? 'low' : 'medium';
+        const perImage = q === 'high' ? 18 : q === 'low' ? 10 : 14;
+        return perImage * count;
+    }
 
     if (provider === 'anyfast') {
         if (isGptImage2Model(model)) {
@@ -82,6 +102,12 @@ export function buildCreditUsageApiType(
     if (normalized === 'gpt-image-2.5-flare') {
         return providerHint === 'ace' ? 'img2.5-fast' : 'img2.5f-af';
     }
+    if (normalized === 'gpt-image-2.6-sunburst') {
+        return providerHint === 'ace' ? 'img2.6' : 'img2.6-af';
+    }
+    if (normalized === 'gpt-image-2.6-flare') {
+        return providerHint === 'ace' ? 'img2.6-fast' : 'img2.6f-af';
+    }
     if (normalized === 'gpt-image-2-c') return 'gpt-image-2-c';
     if (normalized === 'gpt-image-2') {
         return providerHint === 'ace' ? 'gpt-image-2' : 'gpt-image-2-af';
@@ -107,6 +133,10 @@ export function getCreditUsageApiTypeLabel(apiType: string): string {
         'img2.5-fast': 'GPT2.5(Ace)',
         'img2.5-af': 'GPT2.5 pro(AnyFast)',
         'img2.5f-af': 'GPT2.5(AnyFast)',
+        'img2.6': 'GPT2.6 pro(Ace official)',
+        'img2.6-fast': 'GPT2.6(Ace official)',
+        'img2.6-af': 'GPT2.6 pro(AnyFast)',
+        'img2.6f-af': 'GPT2.6(AnyFast)',
         'gpt-image-2-c': 'GPT Image 2-C(AnyFast)',
         'gpt-image-2-af': 'GPT Image 2(AnyFast)',
         'gemini-3-pro': 'NanoBanana Pro(AnyFast)',

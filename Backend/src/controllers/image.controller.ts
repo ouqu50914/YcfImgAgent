@@ -25,6 +25,10 @@ export const generateImage = async (req: Request, res: Response) => {
             model: rawModel,
             providerHint,
             aspectRatio,
+            size,
+            outputFormat,
+            frameCount,
+            frameDurationMs,
             generationKey,
             templateId,
             mode,
@@ -70,6 +74,10 @@ export const generateImage = async (req: Request, res: Response) => {
             model, // 传递 Nano 子模型参数
             providerHint, // 传递供应商提示（超级管理员可直连 AnyFast）
             aspectRatio, // 传递比例参数（Nano 使用）
+            size, // GPT Image 2 尺寸；GIF 时省略/auto 由后端归一到 512x512 预设
+            outputFormat, // GPT Image 2 输出格式（含 2.6 的 gif）
+            frameCount, // GPT Image 2.6 GIF 帧数
+            frameDurationMs, // GPT Image 2.6 GIF 每帧毫秒数
             generationKey, // 用于刷新/历史恢复后查询最终态
             mode,
             timeout,

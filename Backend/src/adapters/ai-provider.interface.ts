@@ -24,11 +24,17 @@ export interface GenerateParams {
         | 'gpt-image-2'
         | 'gpt-image-2-c'
         | 'gpt-image-2.5-sunburst'
-        | 'gpt-image-2.5-flare'; // 模型选择
+        | 'gpt-image-2.5-flare'
+        | 'gpt-image-2.6-sunburst'
+        | 'gpt-image-2.6-flare'; // 模型选择
     aspectRatio?: string; // 比例字符串，如 "1:1", "16:9"（Nano 使用，Seedream 用于计算尺寸）
     providerHint?: 'ace' | 'anyfast'; // 可选的供应商提示
     size?: string; // GPT Image 2 尺寸，格式如 "1536x1024"
-    outputFormat?: 'png' | 'webp' | 'jpeg'; // GPT Image 2 输出格式
+    outputFormat?: 'png' | 'webp' | 'jpeg' | 'gif'; // GPT Image 2 输出格式（gif 仅 2.6 系列）
+    /** GPT Image 2.6 GIF 动图：帧数 2–16（默认 9），仅 outputFormat='gif' 时生效 */
+    frameCount?: number;
+    /** 每帧毫秒数，20–655350、按 10ms 取整，默认 200 */
+    frameDurationMs?: number;
     moderation?: 'auto' | 'low'; // GPT Image 2 审核级别
     outputCompression?: number; // GPT Image 2 压缩级别（仅 jpeg/webp 生效）
     mode?: 'fast' | 'relax' | 'turbo'; // Midjourney 生成模式

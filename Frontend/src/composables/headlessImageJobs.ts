@@ -95,7 +95,9 @@ function parseAliasNum(alias: unknown): number | null {
 function resolveApiType(model: string): 'dream' | 'nano' | 'midjourney' {
   if (model === 'midjourney') return 'midjourney';
   if (
-    model === 'gpt-2.5'
+    model === 'gpt-2.6'
+    || model === 'gpt-2.6-pro'
+    || model === 'gpt-2.5'
     || model === 'gpt-2.5-pro'
     || model === 'gpt-2.0'
     || model === 'nano-2'
@@ -110,6 +112,8 @@ function resolveApiType(model: string): 'dream' | 'nano' | 'midjourney' {
 }
 
 function resolveNanoModel(model: string): string | undefined {
+  if (model === 'gpt-2.6') return 'gpt-image-2.6-flare';
+  if (model === 'gpt-2.6-pro') return 'gpt-image-2.6-sunburst';
   if (model === 'gpt-2.5') return 'gpt-image-2.5-flare';
   if (model === 'gpt-2.5-pro') return 'gpt-image-2.5-sunburst';
   if (model === 'gpt-2.0') return 'gpt-image-2';
@@ -122,9 +126,11 @@ function resolveNanoModel(model: string): string | undefined {
 }
 
 function resolveProviderHint(model: string): 'ace' | 'anyfast' | undefined {
-  // 产品线：不锁渠道，后端 AnyFast 优先 + Ace 兜底
+  // 产品线：不锁渠道；其余模型后端 AnyFast 优先 + Ace 兜底，GPT2.6 / 2.6 pro 固定 Ace official 且不兜底
   if (
-    model === 'gpt-2.5'
+    model === 'gpt-2.6'
+    || model === 'gpt-2.6-pro'
+    || model === 'gpt-2.5'
     || model === 'gpt-2.5-pro'
     || model === 'gpt-2.0'
     || model === 'nano-2'
@@ -516,7 +522,7 @@ function buildRequestParams(job: HeadlessImageJob, model: string, refs: { urls: 
   const apiType = resolveApiType(model);
   const aspectRatio = job.aspectRatio || '1:1';
   let quality = job.quality || job.resolution || (apiType === 'nano' ? '2K' : '2K');
-  const isGpt = model === 'gpt-2.5' || model === 'gpt-2.5-pro' || model === 'gpt-2.0' || model.startsWith('gpt-image-2');
+  const isGpt = model === 'gpt-2.6' || model === 'gpt-2.6-pro' || model === 'gpt-2.5' || model === 'gpt-2.5-pro' || model === 'gpt-2.0' || model.startsWith('gpt-image-2');
   const isGemini3Pro = model === 'anyfast:gemini-3-pro-image';
 
   const processed = refs.urls.map((u) => getUploadUrl(u));

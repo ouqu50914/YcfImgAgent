@@ -4,7 +4,8 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { AiProvider, AiResponse, GenerateParams } from "./ai-provider.interface";
-import { detectImageFormat } from "../utils/image-format";
+import { detectImageFormat, buildGpt26GifParams } from "../utils/image-format";
+import { isGptImage26Model } from "../utils/nano-credit.util";
 import { isCosEnabled, upload as cosUpload, pathToKey } from "../services/cos.service";
 import { getFileContent } from "../services/cos.service";
 import { ProviderError } from "./provider-error";
@@ -14,7 +15,7 @@ const GPT_IMAGE2_DEFAULT_BASE_URL = "https://www.anyfast.ai";
 const GPT_IMAGE2_REQUEST_TIMEOUT_MS = Number(process.env.GPT_IMG2_REQUEST_TIMEOUT_MS || "600000");
 const GPT_IMAGE2_MAX_EDIT_REFS = 16;
 
-type UpstreamModel = "gpt-image-2" | "gpt-image-2-c" | "gpt-image-2.5-sunburst" | "gpt-image-2.5-flare";
+type UpstreamModel = "gpt-image-2" | "gpt-image-2-c" | "gpt-image-2.5-sunburst" | "gpt-image-2.5-flare" | "gpt-image-2.6-sunburst" | "gpt-image-2.6-flare";
 type RequestMode = "generate" | "edit";
 
 export class AnyfastGptImage2Adapter implements AiProvider {
@@ -91,6 +92,8 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         if (model === "gpt-image-2-c") return "gpt-image-2-c";
         if (model === "gpt-image-2.5-sunburst") return "gpt-image-2.5-sunburst";
         if (model === "gpt-image-2.5-flare") return "gpt-image-2.5-flare";
+        if (model === "gpt-image-2.6-sunburst") return "gpt-image-2.6-sunburst";
+        if (model === "gpt-image-2.6-flare") return "gpt-image-2.6-flare";
         return "gpt-image-2";
     }
 
@@ -119,13 +122,13 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         return "medium";
     }
 
-    private normalizeOutputFormat(raw?: string): "png" | "webp" | "jpeg" {
-        if (raw === "webp" || raw === "jpeg") return raw;
+    private normalizeOutputFormat(raw?: string): "png" | "webp" | "jpeg" | "gif" {
+        if (raw === "webp" || raw === "jpeg" || raw === "gif") return raw;
         return "png";
     }
 
-    private normalizeEditOutputFormat(raw?: string): "png" | "jpeg" {
-        if (raw === "jpeg") return "jpeg";
+    private normalizeEditOutputFormat(raw?: string): "png" | "jpeg" | "gif" {
+        if (raw === "jpeg" || raw === "gif") return raw;
         return "png";
     }
 
@@ -322,7 +325,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         count: number,
         size: string,
         quality: "low" | "medium" | "high",
-        outputFormat: "png" | "webp" | "jpeg",
+        outputFormat: "png" | "webp" | "jpeg" | "gif",
         moderation: "auto" | "low",
         outputCompression?: number
     ): Record<string, unknown> {
@@ -335,6 +338,10 @@ export class AnyfastGptImage2Adapter implements AiProvider {
             output_format: outputFormat,
             moderation,
         };
+        if (outputFormat === "gif") {
+            // n 是 GIF 文件数；帧参数单独传。size 与外层保持同一归一化结果
+            Object.assign(body, buildGpt26GifParams({ ...params, size: params.size ?? size }));
+        }
         if ((outputFormat === "jpeg" || outputFormat === "webp") && outputCompression != null) {
             body.output_compression = outputCompression;
         }
@@ -347,7 +354,7 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         upstreamModel: UpstreamModel,
         count: number,
         size: string,
-        outputFormat: "png" | "jpeg",
+        outputFormat: "png" | "jpeg" | "gif",
         outputCompression?: number
     ): Promise<{ form: FormData; summary: Record<string, unknown> }> {
         const limitedRefs = refs.slice(0, GPT_IMAGE2_MAX_EDIT_REFS);
@@ -378,6 +385,11 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         form.append("n", String(count));
         form.append("size", size);
         form.append("output_format", outputFormat);
+        if (outputFormat === "gif") {
+            const gif = buildGpt26GifParams(params);
+            form.append("frame_count", String(gif.frame_count));
+            form.append("frame_duration_ms", String(gif.frame_duration_ms));
+        }
         if (outputFormat === "jpeg" && outputCompression != null) {
             form.append("output_compression", String(outputCompression));
         }
@@ -654,7 +666,11 @@ export class AnyfastGptImage2Adapter implements AiProvider {
         const baseUrl = this.getBaseUrl();
         const count = this.resolveImageCount(params);
         const quality = this.normalizeQuality(params.quality);
-        const size = this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
+        // GIF 仅 GPT Image 2.6 系列支持：走独立尺寸体系（省略/auto → 512x512 预设，其它合法尺寸透传），
+        // 跳过静态图的 655360 像素下限与 4K 推导；静态图逻辑保持不变
+        const isGif = params.outputFormat === "gif" && isGptImage26Model(params.model);
+        const gifParams = isGif ? buildGpt26GifParams(params) : null;
+        const size = gifParams?.size ?? this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
         const outputCompression = Number.isFinite(params.outputCompression)
             ? Math.max(0, Math.min(100, Number(params.outputCompression)))
             : undefined;

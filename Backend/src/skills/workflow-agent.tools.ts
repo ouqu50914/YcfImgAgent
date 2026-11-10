@@ -176,7 +176,7 @@ export const WORKFLOW_TOOLS_OPENAI = [
                 type: "object",
                 properties: {
                     nodeId: { type: "string" },
-                    model: { type: "string", description: "如 gpt-2.5 / gpt-2.5-pro / gpt-2.0 / nano-2 / nano-pro；测试渠道如 gpt-image-2.5-flare:ace" },
+                    model: { type: "string", description: "如 gpt-2.6 / gpt-2.6-pro / gpt-2.5 / gpt-2.5-pro / gpt-2.0 / nano-2 / nano-pro；测试渠道如 gpt-image-2.6-flare:ace、gpt-image-2.6-sunburst:ace" },
                     aspectRatio: { type: "string", description: "如 16:9 / 9:16 / 1:1" },
                     resolution: { type: "string", description: "Dream 常用 1K/2K/4K；Video 常用 720p/1080p" },
                     quality: { type: "string", description: "与节点画质/分辨率对应，如 2K / medium" },

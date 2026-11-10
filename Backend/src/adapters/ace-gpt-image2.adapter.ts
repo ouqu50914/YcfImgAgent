@@ -3,7 +3,8 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { AiProvider, AiResponse, GenerateParams } from "./ai-provider.interface";
-import { detectImageFormat } from "../utils/image-format";
+import { detectImageFormat, buildGpt26GifParams } from "../utils/image-format";
+import { isGptImage26Model } from "../utils/nano-credit.util";
 import { isCosEnabled, upload as cosUpload, pathToKey, getFileContent } from "../services/cos.service";
 import { ProviderError } from "./provider-error";
 
@@ -156,10 +157,12 @@ export class AceGptImage2Adapter implements AiProvider {
         return key;
     }
 
-    /** Ace 上游模型名：GPT Image 2.5 走 :official 线路 */
+    /** Ace 上游模型名：GPT Image 2.5 / 2.6 走 :official 官方通道 */
     private resolveUpstreamModel(model?: GenerateParams["model"]): string {
         if (model === "gpt-image-2.5-sunburst") return "gpt-image-2.5-sunburst:official";
         if (model === "gpt-image-2.5-flare") return "gpt-image-2.5-flare:official";
+        if (model === "gpt-image-2.6-sunburst") return "gpt-image-2.6-sunburst:official";
+        if (model === "gpt-image-2.6-flare") return "gpt-image-2.6-flare:official";
         return "gpt-image-2";
     }
 
@@ -168,8 +171,8 @@ export class AceGptImage2Adapter implements AiProvider {
         return "medium";
     }
 
-    private normalizeOutputFormat(raw?: string): "png" | "webp" | "jpeg" {
-        if (raw === "webp" || raw === "jpeg") return raw;
+    private normalizeOutputFormat(raw?: string): "png" | "webp" | "jpeg" | "gif" {
+        if (raw === "webp" || raw === "jpeg" || raw === "gif") return raw;
         return "png";
     }
 
@@ -311,8 +314,12 @@ export class AceGptImage2Adapter implements AiProvider {
         const endpoint = `${baseUrl}/${hasRefImage ? "edits" : "generations"}`;
         const count = Math.max(1, Math.min(params.num_images || (params as any).numImages || 1, 4));
         const quality = this.normalizeQuality(params.quality);
-        const size = this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
-        const outputFormat = this.normalizeOutputFormat(params.outputFormat);
+        // GIF 仅 GPT Image 2.6 系列支持：走独立尺寸体系（省略/auto → 512x512 预设，其它合法尺寸透传），
+        // 跳过静态图的 655360 像素下限与 4K 推导；静态图逻辑保持不变
+        const isGif = params.outputFormat === "gif" && isGptImage26Model(params.model);
+        const gifParams = isGif ? buildGpt26GifParams(params) : null;
+        const outputFormat = isGif ? "gif" : this.normalizeOutputFormat(params.outputFormat);
+        const size = gifParams?.size ?? this.validateAndNormalizeSize(params.size, params.aspectRatio, quality);
         const moderation = this.normalizeModeration(params.moderation);
         const outputCompression = Number.isFinite(params.outputCompression)
             ? Math.max(0, Math.min(100, Number(params.outputCompression)))
@@ -327,8 +334,12 @@ export class AceGptImage2Adapter implements AiProvider {
 
         if (count > 1) body.n = count;
         if (params.quality) body.quality = quality;
-        if (params.outputFormat) body.output_format = outputFormat;
+        if (params.outputFormat || isGif) body.output_format = outputFormat;
         if (params.moderation) body.moderation = moderation;
+        if (gifParams) {
+            // n 是返回的 GIF 文件数而非动画帧数；帧参数由 frame_count / frame_duration_ms 单独给出
+            Object.assign(body, gifParams);
+        }
         if ((outputFormat === "jpeg" || outputFormat === "webp") && outputCompression != null) {
             body.output_compression = outputCompression;
         }
@@ -350,6 +361,9 @@ export class AceGptImage2Adapter implements AiProvider {
             prompt_length: String(body.prompt || "").length,
             size,
             n: body.n || 1,
+            output_format: body.output_format || "png",
+            frame_count: body.frame_count,
+            frame_duration_ms: body.frame_duration_ms,
             reference_image_count: refs.length,
             image_attached: typeof body.image === "string",
         });

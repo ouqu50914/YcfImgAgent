@@ -18,7 +18,7 @@ import { ProviderError } from "../adapters/provider-error";
 import { calculateNanoPolicyRates, isFallbackEligible } from "./nano-policy.util";
 import { detectImageFormat } from "../utils/image-format";
 import { isCosEnabled, upload as cosUpload, pathToKey } from "./cos.service";
-import { isAnyfastGeminiProModel, normalizeAnyfastGeminiModel } from "../utils/nano-credit.util";
+import { isAnyfastGeminiProModel, isGptImage26Model, normalizeAnyfastGeminiModel } from "../utils/nano-credit.util";
 
 const axiosClient = axios.create({ proxy: false });
 
@@ -393,11 +393,14 @@ export class ImageService {
         const isAnyfastProRequest = isAnyfastGeminiProModel(params.model);
         const isGptImage25Request =
             params.model === "gpt-image-2.5-sunburst" || params.model === "gpt-image-2.5-flare";
+        // flare(GPT2.6) / sunburst(GPT2.6 pro) 共用同一判定，避免只改一个漏掉另一个
+        const isGptImage26Request = isGptImage26Model(params.model);
         const isGptImage2Request =
             params.model === "gpt-image-2"
             || params.model === "gpt-image-2-c"
-            || isGptImage25Request;
-        // 仅 GPT Image 2-C 锁 AnyFast；2 / 2.5 可走 Ace（2.5 Ace 上游为 :official）
+            || isGptImage25Request
+            || isGptImage26Request;
+        // 仅 GPT Image 2-C 锁 AnyFast；2 / 2.5 / 2.6 可走 Ace（2.5、2.6 的 Ace 上游为 :official）
         const isGptImage2AnyfastOnly = params.model === "gpt-image-2-c";
         // 显式指定渠道（测试选项）：只打该渠道，不做跨通道兜底
         const channelLocked = params.providerHint === "ace" || params.providerHint === "anyfast";
@@ -420,11 +423,14 @@ export class ImageService {
 
         // 路由策略：
         // - 产品选项（无 providerHint）：AnyFast 优先，Ace 兜底
+        // - GPT2.6 / 2.6 pro 产品选项：固定 Ace 官方通道（上游 :official）；AnyFast 暂无 2.6 模型，暂停跨通道兜底
         // - 测试选项（显式 ace/anyfast）：锁定该渠道
         // - gemini-* / gpt-image-2-c：本身绑定 AnyFast
         let primary: "ace" | "anyfast";
         if (channelLocked) {
             primary = params.providerHint as "ace" | "anyfast";
+        } else if (isGptImage26Request) {
+            primary = "ace";
         } else if (
             isGptImage2AnyfastOnly
             || params.model === "gemini-3.1-flash-image"
@@ -434,7 +440,10 @@ export class ImageService {
         } else {
             primary = this.nanoPrimaryProvider === "anyfast" ? "anyfast" : "ace";
         }
-        const fallback: "ace" | "anyfast" | null = channelLocked
+        // 暂停 GPT2.6 / 2.6 pro 的 AnyFast 兜底：AnyFast 侧未配置 gpt-image-2.6-* 渠道，
+        // 回退必然返回 503 model_not_found，且会把 Ace 的真实错误（如安全策略 403）覆盖掉。
+        // 恢复方式：去掉下面 isGptImage26Request 分支即可。
+        const fallback: "ace" | "anyfast" | null = channelLocked || isGptImage26Request
             ? null
             : (primary === "ace" ? "anyfast" : "ace");
         const refCount =

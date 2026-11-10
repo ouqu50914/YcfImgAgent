@@ -25,10 +25,16 @@ export interface GenerateParams {
         | 'gpt-image-2'
         | 'gpt-image-2-c'
         | 'gpt-image-2.5-sunburst'
-        | 'gpt-image-2.5-flare';
+        | 'gpt-image-2.5-flare'
+        | 'gpt-image-2.6-sunburst'
+        | 'gpt-image-2.6-flare';
     providerHint?: 'ace' | 'anyfast';
     size?: string;
-    outputFormat?: 'png' | 'webp' | 'jpeg';
+    outputFormat?: 'png' | 'webp' | 'jpeg' | 'gif';
+    /** GPT Image 2.6 GIF 动图：帧数 2–16（默认 9），仅 outputFormat='gif' 时生效 */
+    frameCount?: number;
+    /** 每帧毫秒数，20–655350、按 10ms 取整，默认 200 */
+    frameDurationMs?: number;
     moderation?: 'auto' | 'low';
     outputCompression?: number;
     mode?: 'fast' | 'relax' | 'turbo';

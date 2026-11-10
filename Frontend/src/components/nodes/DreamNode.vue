@@ -65,6 +65,44 @@
                     </el-select>
                 </div>
 
+                <!-- GPT Image 2.6 / 2.6 pro 专用：图片类型与 GIF 尺寸/帧数 -->
+                <div class="param-item" v-if="isGptImage26Selected">
+                    <div class="param-label">图片类型</div>
+                    <el-select v-model="imageFormat" placeholder="图片类型" size="small" class="param-select nodrag nopan">
+                        <el-option
+                            v-for="f in GPT26_IMAGE_FORMATS"
+                            :key="f.value"
+                            :label="f.label"
+                            :value="f.value"
+                        />
+                    </el-select>
+                </div>
+                <div class="param-item" v-if="isGifSelected">
+                    <div class="param-label">GIF 尺寸</div>
+                    <el-select v-model="gifSize" placeholder="GIF 尺寸" size="small" class="param-select nodrag nopan" filterable allow-create default-first-option>
+                        <el-option
+                            v-for="s in GPT26_GIF_SIZE_OPTIONS"
+                            :key="s.value"
+                            :label="s.label"
+                            :value="s.value"
+                        />
+                    </el-select>
+                </div>
+                <div class="param-item" v-if="isGifSelected">
+                    <div class="param-label">帧数</div>
+                    <el-select v-model="frameCount" placeholder="帧数" size="small" class="param-select nodrag nopan">
+                        <el-option
+                            v-for="n in GPT26_FRAME_OPTIONS"
+                            :key="n"
+                            :label="`${n} 帧`"
+                            :value="n"
+                        />
+                    </el-select>
+                </div>
+                <div v-if="isGifSelected" class="gif-hint nodrag nopan">
+                    {{ gifHint }}
+                </div>
+
                 <div v-if="proposeGenerateHint" class="propose-hint nodrag nopan">
                     {{ proposeGenerateHint }}
                     <el-button size="small" text type="primary" @click="clearProposeHint">知道了</el-button>
@@ -207,7 +245,9 @@ const clearProposeHint = () => {
     authRun.removePendingPropose(String(props.id));
 };
 
-/** 产品线简化选项：无渠道区分，后端 AnyFast 优先 + Ace 兜底 */
+/** 产品线简化选项：无渠道区分；GPT2.6 / 2.6 pro 固定 Ace official（已暂停 AnyFast 兜底），其余 AnyFast 优先 + Ace 兜底 */
+const PRODUCT_GPT_26 = 'gpt-2.6';           // flare:official
+const PRODUCT_GPT_26_PRO = 'gpt-2.6-pro';   // sunburst:official
 const PRODUCT_GPT_25 = 'gpt-2.5';           // flare
 const PRODUCT_GPT_25_PRO = 'gpt-2.5-pro';   // sunburst
 const PRODUCT_GPT_20 = 'gpt-2.0';
@@ -221,8 +261,14 @@ const GPT_IMAGE25_SUNBURST_ANYFAST = 'gpt-image-2.5-sunburst:anyfast';
 const GPT_IMAGE25_FLARE_ANYFAST = 'gpt-image-2.5-flare:anyfast';
 const GPT_IMAGE25_SUNBURST_ACE = 'gpt-image-2.5-sunburst:ace';
 const GPT_IMAGE25_FLARE_ACE = 'gpt-image-2.5-flare:ace';
+const GPT_IMAGE26_SUNBURST_ACE = 'gpt-image-2.6-sunburst:ace';
+const GPT_IMAGE26_FLARE_ACE = 'gpt-image-2.6-flare:ace';
+const GPT_IMAGE26_SUNBURST_ANYFAST = 'gpt-image-2.6-sunburst:anyfast';
+const GPT_IMAGE26_FLARE_ANYFAST = 'gpt-image-2.6-flare:anyfast';
 
 const PRODUCT_MODEL_OPTIONS = [
+    { label: 'GPT2.6（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_26 },
+    { label: 'GPT2.6 pro（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_26_PRO },
     { label: 'GPT2.5（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_25 },
     { label: 'GPT2.5 pro（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_25_PRO },
     { label: 'GPT 2.0（low:10/张，medium:14/张，high:18/张）', value: PRODUCT_GPT_20 },
@@ -230,8 +276,12 @@ const PRODUCT_MODEL_OPTIONS = [
     { label: 'Nano Pro（2K:15/张，4K:20/张）', value: PRODUCT_NANO_PRO },
 ] as const;
 
-/** ycf 超管可见：原渠道细分 + Ace GPT 2.5 official */
+/** ycf 超管可见：原渠道细分 + Ace GPT 2.5 / 2.6 official */
 const TEST_MODEL_OPTIONS = [
+    { label: '[测] GPT2.6(ace official)', value: GPT_IMAGE26_FLARE_ACE },
+    { label: '[测] GPT2.6 pro(ace official)', value: GPT_IMAGE26_SUNBURST_ACE },
+    { label: '[测] GPT2.6(anyfast)', value: GPT_IMAGE26_FLARE_ANYFAST },
+    { label: '[测] GPT2.6 pro(anyfast)', value: GPT_IMAGE26_SUNBURST_ANYFAST },
     { label: '[测] GPT Image 2(ace)', value: GPT_IMAGE2_ACE_MODEL },
     { label: '[测] GPT Image 2(anyfast)', value: GPT_IMAGE2_ANYFAST_MODEL },
     { label: '[测] GPT Image 2-C(anyfast)', value: GPT_IMAGE2_ANYFAST_C_MODEL },
@@ -262,6 +312,24 @@ function mapLegacyToSelectedModel(apiType?: string, model?: string, providerHint
     }
     const m = model || '';
     const ph = providerHint || '';
+    if (m === 'gpt-image-2.6-sunburst' || selectedModel === GPT_IMAGE26_SUNBURST_ANYFAST || selectedModel === GPT_IMAGE26_SUNBURST_ACE) {
+        if (ph === 'anyfast' || selectedModel === GPT_IMAGE26_SUNBURST_ANYFAST) {
+            return isYcfTestAdmin.value ? GPT_IMAGE26_SUNBURST_ANYFAST : PRODUCT_GPT_26_PRO;
+        }
+        if (ph === 'ace' || selectedModel === GPT_IMAGE26_SUNBURST_ACE) {
+            return isYcfTestAdmin.value ? GPT_IMAGE26_SUNBURST_ACE : PRODUCT_GPT_26_PRO;
+        }
+        return PRODUCT_GPT_26_PRO;
+    }
+    if (m === 'gpt-image-2.6-flare' || selectedModel === GPT_IMAGE26_FLARE_ANYFAST || selectedModel === GPT_IMAGE26_FLARE_ACE) {
+        if (ph === 'anyfast' || selectedModel === GPT_IMAGE26_FLARE_ANYFAST) {
+            return isYcfTestAdmin.value ? GPT_IMAGE26_FLARE_ANYFAST : PRODUCT_GPT_26;
+        }
+        if (ph === 'ace' || selectedModel === GPT_IMAGE26_FLARE_ACE) {
+            return isYcfTestAdmin.value ? GPT_IMAGE26_FLARE_ACE : PRODUCT_GPT_26;
+        }
+        return PRODUCT_GPT_26;
+    }
     if (m === 'gpt-image-2.5-sunburst' || selectedModel === GPT_IMAGE25_SUNBURST_ANYFAST || selectedModel === GPT_IMAGE25_SUNBURST_ACE) {
         if (ph === 'anyfast' || selectedModel === GPT_IMAGE25_SUNBURST_ANYFAST) {
             return isYcfTestAdmin.value ? GPT_IMAGE25_SUNBURST_ANYFAST : PRODUCT_GPT_25_PRO;
@@ -300,7 +368,8 @@ function mapLegacyToSelectedModel(apiType?: string, model?: string, providerHint
     if (m === 'nano-banana-2') {
         return ph === 'ace' && isYcfTestAdmin.value ? 'nano:nano-banana-2' : PRODUCT_NANO_2;
     }
-    if (selectedModel === PRODUCT_GPT_25 || selectedModel === PRODUCT_GPT_25_PRO
+    if (selectedModel === PRODUCT_GPT_26 || selectedModel === PRODUCT_GPT_26_PRO
+        || selectedModel === PRODUCT_GPT_25 || selectedModel === PRODUCT_GPT_25_PRO
         || selectedModel === PRODUCT_GPT_20 || selectedModel === PRODUCT_NANO_2 || selectedModel === PRODUCT_NANO_PRO) {
         return selectedModel;
     }
@@ -408,8 +477,53 @@ const quality = ref<string>((props.data as any)?.quality || '2K');
 const aspectRatio = ref<string>((props.data as any)?.aspectRatio || '1:1'); // 使用比例字符串格式
 const numImages = ref<number>(typeof (props.data as any)?.numImages === 'number' ? (props.data as any).numImages : 1);
 
+// GPT Image 2.6 / 2.6 pro 专用：图片类型与 GIF 动图参数
+const GPT26_IMAGE_FORMATS = [
+    { label: 'PNG', value: 'png' },
+    { label: 'JPEG', value: 'jpeg' },
+    { label: 'WebP', value: 'webp' },
+    { label: 'GIF 动图', value: 'gif' },
+] as const;
+const GPT26_FRAME_OPTIONS = Array.from({ length: 15 }, (_, i) => i + 2); // 2–16，文档允许范围
+// 文档：GIF 的 size 省略或为 auto 时使用 512x512 预设，并非固定值；1024x1024 + 2 帧已验证可用
+const GPT26_GIF_SIZE_OPTIONS = [
+    { label: '自动（512×512 预设）', value: 'auto' },
+    { label: '512×512（推荐）', value: '512x512' },
+    { label: '1024×1024（验证 2 帧）', value: '1024x1024' },
+] as const;
+const savedImageFormat = (props.data as any)?.imageFormat;
+const imageFormat = ref<'png' | 'webp' | 'jpeg' | 'gif'>(
+    ['png', 'webp', 'jpeg', 'gif'].includes(savedImageFormat) ? savedImageFormat : 'png'
+);
+const savedFrameCount = Number((props.data as any)?.frameCount);
+const frameCount = ref<number>(
+    Number.isFinite(savedFrameCount) && savedFrameCount > 0
+        ? Math.min(16, Math.max(2, Math.round(savedFrameCount)))
+        : 9
+);
+const isGptImage26Selected = computed(() => {
+    const v = selectedModel.value;
+    return v === PRODUCT_GPT_26 || v === PRODUCT_GPT_26_PRO
+        || v === GPT_IMAGE26_FLARE_ACE || v === GPT_IMAGE26_SUNBURST_ACE
+        || v === GPT_IMAGE26_FLARE_ANYFAST || v === GPT_IMAGE26_SUNBURST_ANYFAST;
+});
+const isGifSelected = computed(() => isGptImage26Selected.value && imageFormat.value === 'gif');
+const savedGifSize = String((props.data as any)?.gifSize ?? '');
+// 允许预设项与用户自定义的 WIDTHxHEIGHT，非法值回退 auto
+const gifSize = ref<string>(
+    savedGifSize === 'auto' || /^\d{2,5}[x×]\d{2,5}$/.test(savedGifSize) ? savedGifSize : 'auto'
+);
+const gifHint = computed(() => {
+    const sizeLabel = gifSize.value === 'auto' ? '512×512 预设' : gifSize.value.replace('x', '×');
+    const budgetTip = gifSize.value === '1024x1024' && frameCount.value > 2
+        ? '。注意：1024×1024 仅验证过 2 帧组合，当前帧数可能触发像素预算拒绝'
+        : '';
+    return `GIF 尺寸 ${sizeLabel}；每帧 200ms，帧数 2–16。size 省略/auto 时用 512×512 预设，也可选或输入自定义 WIDTHxHEIGHT；不能套用静态 4K 规格，尺寸×帧数×数量共享像素预算，超限会回退预设。比例/分辨率不生效，按张计费${budgetTip}`;
+});
+
 const isProductModel = (v: string) =>
-    v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v === PRODUCT_NANO_2 || v === PRODUCT_NANO_PRO;
+    v === PRODUCT_GPT_26 || v === PRODUCT_GPT_26_PRO
+    || v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v === PRODUCT_NANO_2 || v === PRODUCT_NANO_PRO;
 
 // 计算属性：apiType 由 selectedModel 推导
 const apiType = computed<'dream' | 'nano' | 'midjourney'>(() => {
@@ -431,9 +545,13 @@ type NanoModelName =
     | 'gpt-image-2'
     | 'gpt-image-2-c'
     | 'gpt-image-2.5-sunburst'
-    | 'gpt-image-2.5-flare';
+    | 'gpt-image-2.5-flare'
+    | 'gpt-image-2.6-sunburst'
+    | 'gpt-image-2.6-flare';
 const nanoModel = computed<NanoModelName | undefined>(() => {
     const v = selectedModel.value;
+    if (v === PRODUCT_GPT_26) return 'gpt-image-2.6-flare';
+    if (v === PRODUCT_GPT_26_PRO) return 'gpt-image-2.6-sunburst';
     if (v === PRODUCT_GPT_25) return 'gpt-image-2.5-flare';
     if (v === PRODUCT_GPT_25_PRO) return 'gpt-image-2.5-sunburst';
     if (v === PRODUCT_GPT_20) return 'gpt-image-2';
@@ -450,16 +568,19 @@ const nanoModel = computed<NanoModelName | undefined>(() => {
     return raw as NanoModelName;
 });
 
-/** 产品线不传 providerHint（AnyFast 优先 + Ace 兜底）；测试选项锁定渠道 */
+/** 产品线不传 providerHint（GPT2.6 / 2.6 pro 固定 Ace official、不兜底；其余 AnyFast 优先 + Ace 兜底）；测试选项锁定渠道 */
 const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
     const v = selectedModel.value;
     if (isProductModel(v)) return undefined;
-    if (v === GPT_IMAGE2_ACE_MODEL || v === GPT_IMAGE25_SUNBURST_ACE || v === GPT_IMAGE25_FLARE_ACE) return 'ace';
+    if (v === GPT_IMAGE2_ACE_MODEL || v === GPT_IMAGE25_SUNBURST_ACE || v === GPT_IMAGE25_FLARE_ACE
+        || v === GPT_IMAGE26_SUNBURST_ACE || v === GPT_IMAGE26_FLARE_ACE) return 'ace';
     if (
         v === GPT_IMAGE2_ANYFAST_MODEL
         || v === GPT_IMAGE2_ANYFAST_C_MODEL
         || v === GPT_IMAGE25_SUNBURST_ANYFAST
         || v === GPT_IMAGE25_FLARE_ANYFAST
+        || v === GPT_IMAGE26_SUNBURST_ANYFAST
+        || v === GPT_IMAGE26_FLARE_ANYFAST
     ) return 'anyfast';
     if (v.startsWith('anyfast:')) return 'anyfast';
     if (v.startsWith('nano:')) return 'ace';
@@ -469,7 +590,8 @@ const providerHint = computed<'ace' | 'anyfast' | undefined>(() => {
 const isGemini3ProModel = computed(() => selectedModel.value === ANYFAST_PRO_MODEL);
 const isGptImage2Model = computed(() => {
     const v = selectedModel.value;
-    return v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v.startsWith('gpt-image-2');
+    return v === PRODUCT_GPT_26 || v === PRODUCT_GPT_26_PRO
+        || v === PRODUCT_GPT_25 || v === PRODUCT_GPT_25_PRO || v === PRODUCT_GPT_20 || v.startsWith('gpt-image-2');
 });
 
 // toast 去重，避免频繁提示
@@ -649,6 +771,15 @@ watch(aspectRatio, (val) => {
 });
 watch(numImages, (val) => {
     (props.data as any).numImages = val;
+});
+watch(imageFormat, (val) => {
+    (props.data as any).imageFormat = val;
+});
+watch(frameCount, (val) => {
+    (props.data as any).frameCount = val;
+});
+watch(gifSize, (val) => {
+    (props.data as any).gifSize = val;
 });
 
 const loading = ref(false);
@@ -1077,25 +1208,37 @@ const handleGenerate = async () => {
             // Nano Banana 2 / Nano Banana Pro (Ace Data Cloud)
             requestParams.aspectRatio = aspectRatio.value;
             if (isGemini3ProModel.value) quality.value = '4K';
-            if (isGptImage2Model.value) {
-                const normalizedQ = ['low', 'medium', 'high'].includes(quality.value) ? quality.value : 'medium';
-                const computedSize = calculateGptImage2Size(aspectRatio.value, normalizedQ);
-                requestParams.quality = normalizedQ;
-                requestParams.size = computedSize;
-                requestParams.outputFormat = 'png';
-                requestParams.moderation = 'auto';
-                console.log('[DreamNode][GPT-Image2] 请求参数', {
-                    model: nanoModel.value || 'gpt-image-2',
-                    quality: normalizedQ,
-                    aspectRatio: aspectRatio.value,
-                    size: computedSize,
-                });
-            } else if (quality.value) {
+    if (isGptImage2Model.value) {
+        const normalizedQ = ['low', 'medium', 'high'].includes(quality.value) ? quality.value : 'medium';
+        const computedSize = calculateGptImage2Size(aspectRatio.value, normalizedQ);
+        const gif = isGifSelected.value;
+        requestParams.quality = normalizedQ;
+        // GIF 走独立尺寸体系：auto 表示 size 省略/默认预设，由后端归一到 512x512
+        requestParams.size = gif ? gifSize.value : computedSize;
+        requestParams.outputFormat = gif ? 'gif' : (isGptImage26Selected.value ? imageFormat.value : 'png');
+        requestParams.moderation = 'auto';
+        if (gif) {
+            requestParams.frameCount = frameCount.value;
+            requestParams.frameDurationMs = 200;
+        }
+        console.log('[DreamNode][GPT-Image2] 请求参数', {
+            model: nanoModel.value || 'gpt-image-2',
+            quality: normalizedQ,
+            aspectRatio: aspectRatio.value,
+            size: requestParams.size,
+            outputFormat: requestParams.outputFormat,
+            gifSize: gif ? gifSize.value : undefined,
+            frameCount: gif ? frameCount.value : undefined,
+        });
+    } else if (quality.value) {
                 requestParams.quality = quality.value;
             }
             if (nanoModel.value) requestParams.model = nanoModel.value;
             if (providerHint.value) requestParams.providerHint = providerHint.value;
-            console.log(`[前端] 生图模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerHint.value || 'anyfast优先/ace兜底'}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
+            const isGpt26Product = selectedModel.value === PRODUCT_GPT_26 || selectedModel.value === PRODUCT_GPT_26_PRO;
+            const providerLabel = providerHint.value
+                || (isGpt26Product ? 'ace official（无兜底）' : 'anyfast优先/ace兜底');
+            console.log(`[前端] 生图模型=${nanoModel.value || 'nano-banana-2'}, 供应商=${providerLabel}, 比例=${aspectRatio.value}, 分辨率=${quality.value || '2K'}`);
             if (isGptImage2Model.value && processedImageUrls.length > 0) {
                 console.log('[前端] GPT Image 2 图生图：已携带参考图数量', processedImageUrls.length);
             }
@@ -1907,6 +2050,14 @@ const saveWorkflowImmediately = () => {
 
 .execute-btn {
     width: 100%;
+}
+
+.gif-hint {
+    font-size: 11px;
+    color: #9aa4b2;
+    line-height: 1.5;
+    margin-top: 4px;
+    padding: 0 2px;
 }
 
 .propose-hint {

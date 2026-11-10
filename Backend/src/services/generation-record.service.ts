@@ -79,6 +79,10 @@ export class GenerationRecordService {
             if (name === "gpt-image-2.5-flare" && provider === "ace") return "GPT2.5(Ace)";
             if (name === "gpt-image-2.5-sunburst") return "GPT2.5 pro(AnyFast)";
             if (name === "gpt-image-2.5-flare") return "GPT2.5(AnyFast)";
+            if (name === "gpt-image-2.6-sunburst" && provider === "ace") return "GPT2.6 pro(Ace official)";
+            if (name === "gpt-image-2.6-flare" && provider === "ace") return "GPT2.6(Ace official)";
+            if (name === "gpt-image-2.6-sunburst") return "GPT2.6 pro(AnyFast)";
+            if (name === "gpt-image-2.6-flare") return "GPT2.6(AnyFast)";
             if (name === "gpt-image-2" && provider === "anyfast") return "GPT Image 2(AnyFast)";
             if (name === "gpt-image-2" && provider === "ace") return "GPT Image 2(Ace)";
             if (name === "gemini-3-pro-image" || name === "gemini-3-pro-image-preview") return "NanoBanana Pro(AnyFast)";
@@ -90,6 +94,8 @@ export class GenerationRecordService {
             if (name === "gpt-image-2-c") return "GPT Image 2-C(AnyFast)";
             if (name === "gpt-image-2.5-sunburst") return "GPT2.5 pro";
             if (name === "gpt-image-2.5-flare") return "GPT2.5";
+            if (name === "gpt-image-2.6-sunburst") return "GPT2.6 pro";
+            if (name === "gpt-image-2.6-flare") return "GPT2.6";
             return name;
         }
         return apiType || "nano";
